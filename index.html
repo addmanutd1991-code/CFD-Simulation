@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AirFlow Studio — CFD Simulation</title>
+<link rel="stylesheet" href="css/style.css">
+<!-- three.js รวมมาในโปรเจกต์แล้ว จึงเปิดใช้งานแบบออฟไลน์ได้ ไม่ต้องพึ่ง CDN -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- ═══════════ Title bar ═══════════ -->
+<header id="titlebar">
+  <div class="logo">❄️ <b>AirFlow Studio</b> <span class="sub">CFD Simulation สำหรับงานเครื่องปรับอากาศ</span></div>
+  <div class="titlebar-right">
+    <span id="mode-badge" class="badge badge-indoor">INDOOR</span>
+    <button id="btn-save" class="tb-btn" title="บันทึกโปรเจกต์เป็นไฟล์ .json">💾 บันทึก</button>
+    <button id="btn-load" class="tb-btn" title="เปิดโปรเจกต์จากไฟล์ .json">📂 เปิด</button>
+    <input type="file" id="file-load" accept=".json" hidden>
+  </div>
+</header>
+
+<!-- ═══════════ Ribbon tabs ═══════════ -->
+<nav id="ribbon-tabs">
+  <button class="rtab active" data-tab="geometry">🧊 แบบจำลอง (Geometry)</button>
+  <button class="rtab" data-tab="setup">⚙️ เงื่อนไข (Setup)</button>
+  <button class="rtab" data-tab="solve">▶️ คำนวณ (Solve)</button>
+  <button class="rtab" data-tab="results">📊 ผลลัพธ์ (Results)</button>
+</nav>
+
+<div id="ribbon-panels">
+
+  <!-- ── Geometry ── -->
+  <div class="rpanel active" data-panel="geometry">
+    <div class="rgroup">
+      <div class="rgroup-title">โหมด</div>
+      <div class="rgroup-body">
+        <button id="btn-mode-indoor" class="big-btn mode-btn active" title="จำลองการกระจายลมเย็นภายในห้อง">🏠<span>ภายในห้อง<br>Indoor</span></button>
+        <button id="btn-mode-outdoor" class="big-btn mode-btn" title="จำลองลมร้อนจากคอยล์ร้อน / เช็ค Short-circuit">🌤️<span>ภายนอก<br>Outdoor</span></button>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title" id="room-group-title">ขนาดห้อง (เมตร)</div>
+      <div class="rgroup-body dims">
+        <label>กว้าง X <input type="number" id="room-w" min="1" max="30" step="0.1" value="5"></label>
+        <label>สูง Y <input type="number" id="room-h" min="2" max="15" step="0.1" value="2.7"></label>
+        <label>ลึก Z <input type="number" id="room-d" min="1" max="30" step="0.1" value="4"></label>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">เพิ่มอุปกรณ์</div>
+      <div class="rgroup-body">
+        <button class="big-btn" data-add="wall" title="แอร์ติดผนัง (Wall mounted split type)">🌬️<span>แอร์ติดผนัง<br>Wall Type</span></button>
+        <button class="big-btn" data-add="cassette" title="แอร์ฝังฝ้า 4 ทิศทาง (4-way cassette)">✳️<span>คาสเซ็ท 4 ทิศ<br>Cassette</span></button>
+        <button class="big-btn" data-add="floor" title="แอร์ตั้งพื้น (Floor standing)">🗄️<span>แอร์ตั้งพื้น<br>Floor Type</span></button>
+        <button class="big-btn" data-add="outdoor" title="คอยล์ร้อน / Condensing unit">🔥<span>คอยล์ร้อน<br>CDU</span></button>
+        <button class="big-btn" data-add="box" title="สิ่งกีดขวาง เช่น เฟอร์นิเจอร์ กำแพง">📦<span>สิ่งกีดขวาง<br>Obstacle</span></button>
+        <button class="big-btn" data-add="heat" title="แหล่งความร้อน เช่น คน คอมพิวเตอร์ เครื่องจักร">♨️<span>แหล่งความร้อน<br>Heat Source</span></button>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">จัดการวัตถุ</div>
+      <div class="rgroup-body">
+        <button id="btn-rotate" class="big-btn" title="หมุนวัตถุที่เลือก 90°">🔄<span>หมุน 90°</span></button>
+        <button id="btn-delete" class="big-btn" title="ลบวัตถุที่เลือก (Delete)">🗑️<span>ลบ</span></button>
+        <button id="btn-clear" class="big-btn" title="ลบวัตถุทั้งหมด">🧹<span>ล้างทั้งหมด</span></button>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">ตัวอย่างสำเร็จรูป (Presets)</div>
+      <div class="rgroup-body col">
+        <select id="preset-select">
+          <option value="bedroom">🛏️ ห้องนอน + แอร์ติดผนัง</option>
+          <option value="meeting">👥 ห้องประชุม + คาสเซ็ท 2 ตัว</option>
+          <option value="shop">🏪 ร้านค้า + แอร์ตั้งพื้น</option>
+          <option value="cdu-wall">🌤️ คอยล์ร้อน 2 ตัวชิดกำแพง (Short-circuit)</option>
+        </select>
+        <button id="btn-preset" class="tb-btn">โหลดตัวอย่าง</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Setup ── -->
+  <div class="rpanel" data-panel="setup">
+    <div class="rgroup">
+      <div class="rgroup-title">สภาวะแวดล้อม</div>
+      <div class="rgroup-body dims">
+        <label>อุณหภูมิเริ่มต้น (°C) <input type="number" id="ambient-t" min="-10" max="55" step="0.5" value="32"></label>
+      </div>
+    </div>
+    <div class="rgroup" id="wind-group" style="display:none">
+      <div class="rgroup-title">ลมธรรมชาติ (Outdoor)</div>
+      <div class="rgroup-body dims">
+        <label>ความเร็ว (m/s) <input type="number" id="wind-speed" min="0" max="12" step="0.1" value="0"></label>
+        <label>ทิศทาง (°) <input type="number" id="wind-dir" min="0" max="359" step="15" value="0"></label>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">เมช (Mesh)</div>
+      <div class="rgroup-body col">
+        <label>ความละเอียด
+          <select id="mesh-size">
+            <option value="0.25">หยาบ — เซลล์ 0.25 ม. (เร็ว)</option>
+            <option value="0.15" selected>ปานกลาง — เซลล์ 0.15 ม.</option>
+            <option value="0.10">ละเอียด — เซลล์ 0.10 ม. (ช้า)</option>
+          </select>
+        </label>
+        <div class="hint" id="mesh-info">เซลล์โดยประมาณ: –</div>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">คำแนะนำ</div>
+      <div class="rgroup-body col">
+        <div class="hint" style="max-width:420px">
+          Indoor: ผนังห้องเป็นผนังตัน (no-slip) · Outdoor: ขอบโดเมนเปิด อากาศไหลออกได้อิสระ
+          อุณหภูมิลมจ่ายและอัตราลมของแอร์แต่ละตัว ตั้งได้ที่แผงคุณสมบัติด้านขวาเมื่อเลือกวัตถุ
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Solve ── -->
+  <div class="rpanel" data-panel="solve">
+    <div class="rgroup">
+      <div class="rgroup-title">ควบคุมการคำนวณ</div>
+      <div class="rgroup-body">
+        <button id="btn-run" class="big-btn run" title="สร้างเมชและเริ่มคำนวณ">▶️<span>เริ่มคำนวณ<br>Run</span></button>
+        <button id="btn-pause" class="big-btn" title="พักการคำนวณชั่วคราว">⏸️<span>พัก<br>Pause</span></button>
+        <button id="btn-reset" class="big-btn" title="รีเซ็ตผลการคำนวณ">⟲<span>รีเซ็ต<br>Reset</span></button>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">ความเร็วการจำลอง</div>
+      <div class="rgroup-body col">
+        <select id="sim-speed">
+          <option value="10">ช้า (ประหยัด CPU)</option>
+          <option value="25" selected>ปกติ</option>
+          <option value="60">เร็ว (ใช้ CPU มาก)</option>
+        </select>
+        <div class="hint">งบเวลาคำนวณต่อรอบ (มิลลิวินาที)</div>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">สถานะ</div>
+      <div class="rgroup-body col">
+        <div class="readout">เวลาจำลอง: <b id="sim-time">0.0 s</b></div>
+        <div class="readout">จำนวนสเต็ป: <b id="sim-steps">0</b></div>
+        <div class="readout">สถานะ: <b id="sim-state">พร้อม</b></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Results ── -->
+  <div class="rpanel" data-panel="results">
+    <div class="rgroup">
+      <div class="rgroup-title">ตัวแปรที่แสดง</div>
+      <div class="rgroup-body col">
+        <select id="res-field">
+          <option value="T" selected>🌡️ อุณหภูมิ (°C)</option>
+          <option value="V">💨 ความเร็วลม (m/s)</option>
+        </select>
+        <label class="chk"><input type="checkbox" id="res-show-slice" checked> แสดงระนาบตัด (Contour)</label>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">ระนาบตัด (Slice)</div>
+      <div class="rgroup-body col">
+        <select id="res-axis">
+          <option value="Y" selected>แนวนอน (ตัดตามความสูง)</option>
+          <option value="X">แนวตั้ง — ตัดแกน X</option>
+          <option value="Z">แนวตั้ง — ตัดแกน Z</option>
+        </select>
+        <label>ตำแหน่ง <input type="range" id="res-pos" min="0" max="1" step="0.01" value="0.45" style="width:140px"></label>
+        <div class="hint" id="res-pos-label">y = 1.20 ม.</div>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">การแสดงผลลม</div>
+      <div class="rgroup-body col">
+        <label class="chk"><input type="checkbox" id="res-vectors" checked> เวกเตอร์ลมบนระนาบตัด</label>
+        <label class="chk"><input type="checkbox" id="res-particles" checked> อนุภาคลม (Streamline)</label>
+      </div>
+    </div>
+    <div class="rgroup">
+      <div class="rgroup-title">สเกลสี</div>
+      <div class="rgroup-body col">
+        <label class="chk"><input type="checkbox" id="res-auto" checked> ปรับสเกลอัตโนมัติ</label>
+        <div class="dims">
+          <label>ต่ำสุด <input type="number" id="res-min" step="0.5" value="12" disabled></label>
+          <label>สูงสุด <input type="number" id="res-max" step="0.5" value="35" disabled></label>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ Main area ═══════════ -->
+<main id="main">
+
+  <aside id="left-panel">
+    <div class="panel-title">🌲 โครงสร้างแบบจำลอง</div>
+    <ul id="model-tree"></ul>
+  </aside>
+
+  <div id="viewport-wrap">
+    <div id="viewport"></div>
+
+    <div id="view-btns">
+      <button id="btn-view-iso" title="มุมมอง 3 มิติ">ISO</button>
+      <button id="btn-view-top" title="มุมมองด้านบน">TOP</button>
+      <button id="btn-view-front" title="มุมมองด้านหน้า">FRONT</button>
+      <button id="btn-view-fit" title="ปรับให้พอดีจอ">⛶</button>
+    </div>
+
+    <div id="colorbar" class="hidden">
+      <div class="cb-title" id="cb-title">อุณหภูมิ (°C)</div>
+      <div class="cb-body">
+        <div class="cb-gradient"></div>
+        <div class="cb-labels">
+          <span id="cb-max">35</span>
+          <span id="cb-mid">24</span>
+          <span id="cb-min">12</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="stats-overlay" class="hidden">
+      <div class="panel-title">📈 สรุปผล</div>
+      <div id="stats-body"></div>
+    </div>
+  </div>
+
+  <aside id="right-panel">
+    <div class="panel-title">🔧 คุณสมบัติ (Properties)</div>
+    <div id="props-body"><div class="hint pad">คลิกเลือกวัตถุใน 3D หรือในโครงสร้างแบบจำลอง เพื่อแก้ไขคุณสมบัติ<br><br>💡 ลากวัตถุใน 3D เพื่อย้ายตำแหน่งได้เลย</div></div>
+  </aside>
+
+</main>
+
+<!-- ═══════════ Status bar ═══════════ -->
+<footer id="statusbar">
+  <span id="st-msg">พร้อมใช้งาน — เพิ่มอุปกรณ์จากแท็บ "แบบจำลอง" หรือโหลดตัวอย่างสำเร็จรูป</span>
+  <span class="st-right">
+    <span id="st-mesh">เมช: –</span>
+    <span id="st-fps">– fps</span>
+  </span>
+</footer>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
