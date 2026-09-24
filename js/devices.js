@@ -6,6 +6,10 @@
  * มุม yaw หมุนรอบแกน Y เป็นขั้นละ 90°
  */
 
+import {
+  VRV_HT, VRV_DEP, VRV_DEFAULTS, vrvModules, vrvWidth, vrvCatalogFlow, vrvHeatW,
+} from './catalog.js';
+
 const RHO = 1.2, CP = 1005;
 const BTU_TO_W = 0.29307;
 
@@ -108,6 +112,44 @@ export const TYPES = {
     },
   },
 
+  vrv: {
+    label: 'คอยล์ร้อน VRV 6A (Daikin RXQ-BY1S)', short: 'VRV', icon: '🏭', color: 0xe4e7ec, kind: 'cdu',
+    size: { x: VRV_DEP, y: VRV_HT, z: vrvWidth('RXQ20BY1S') },
+    defaults: { model: 'RXQ20BY1S', ...VRV_DEFAULTS, mountY: null },
+    // ลมเข้าด้านหลังและด้านข้างทั้งสอง ลมออกพัดลมด้านบน ตาม catalog
+    // พัดลมแต่ละตัวเป็นหน้าจ่ายลมของตัวเอง แบ่งลมตามปริมาณลมของโมดูลนั้น
+    regions(dev) {
+      const mods = vrvModules(dev.model);
+      const air = mods.reduce((a, m) => a + m.air, 0);
+      const hx = dev.size.x / 2, hy = dev.size.y / 2, hz = dev.size.z / 2;
+      const out = [];
+      for (const m of mods) {
+        for (const f of m.fans) {
+          const s = f.r * Math.sqrt(Math.PI) / 2;   // สี่เหลี่ยมที่มีพื้นที่เท่าวงใบพัด
+          out.push({ role: 'supply', box: { x0: -s, x1: s, y0: hy - 0.10, y1: hy, z0: f.z - s, z1: f.z + s },
+            n: [0, 1, 0], dir: [0, 1, 0], share: m.air / air / m.fans.length, area: Math.PI * f.r * f.r });
+        }
+      }
+      const yb = { y0: -hy + 0.10, y1: hy - 0.20 }, hIn = yb.y1 - yb.y0;
+      const aBack = dev.size.z * hIn, aSide = dev.size.x * hIn, aTot = aBack + 2 * aSide;
+      out.push({ role: 'return', box: { x0: -hx, x1: -hx + 0.10, ...yb, z0: -hz, z1: hz },
+        n: [-1, 0, 0], dir: [1, 0, 0], share: aBack / aTot, area: aBack });
+      out.push({ role: 'return', box: { x0: -hx, x1: hx, ...yb, z0: hz - 0.10, z1: hz },
+        n: [0, 0, 1], dir: [0, 0, -1], share: aSide / aTot, area: aSide });
+      out.push({ role: 'return', box: { x0: -hx, x1: hx, ...yb, z0: -hz, z1: -hz + 0.10 },
+        n: [0, 0, -1], dir: [0, 0, 1], share: aSide / aTot, area: aSide });
+      return out;
+    },
+  },
+
+  louver: {
+    label: 'Louver / ผนังบังตาโปร่ง', short: 'Louver', icon: '🟫', color: 0x9aa3b2, kind: 'solid', opacity: 0.45,
+    size: { x: 4.0, y: 2.4, z: 0.10 },
+    defaults: { free: 50, mountY: null },
+    resizable: true,
+    regions() { return []; },
+  },
+
   box: {
     label: 'สิ่งกีดขวาง', short: 'Obstacle', icon: '📦', color: 0x8a94a8, kind: 'solid',
     size: { x: 0.80, y: 0.80, z: 0.80 },
@@ -148,8 +190,16 @@ export function createDevice(type, pos, roomH) {
     d.setpoint = 25;
     d.running = true;   // สถานะคอมเพรสเซอร์ (ควบคุมโดยเทอร์โมสตัท)
   }
+  if (type === 'vrv') syncVrv(d, true);
   placeY(d, roomH);
   return d;
+}
+
+/** ปรับขนาดตัวเครื่องตามรุ่น VRV — resetFlow = true ใช้ปริมาณลมตาม catalog */
+export function syncVrv(d, resetFlow) {
+  d.size = { x: VRV_DEP, y: VRV_HT, z: vrvWidth(d.model) };
+  if (resetFlow || !(d.flow > 0)) d.flow = vrvCatalogFlow(d.model);
+  for (const k of Object.keys(VRV_DEFAULTS)) if (!(d[k] > 0)) d[k] = VRV_DEFAULTS[k];
 }
 
 /** จัดความสูงตามชนิดอุปกรณ์: ติดฝ้า / วางพื้น / ระบุเอง */
@@ -189,7 +239,8 @@ export function buildDomain(solver, devices, openSides) {
   for (const d of devices) {
     const def = TYPES[d.type];
     if (def.kind === 'heat' && !d.solidBody) continue;
-    solver.addSolidBox(bodyBox(d));
+    if (d.type === 'louver') addLouver(solver, d);
+    else solver.addSolidBox(bodyBox(d));
   }
 
   // 2) แหล่งความร้อน
@@ -204,7 +255,7 @@ export function buildDomain(solver, devices, openSides) {
     if (def.kind !== 'ac' && def.kind !== 'cdu') continue;
     if (!d.on) continue;
     const flowM3s = d.flow / 3600;
-    const entry = { supplies: [], ret: null, dev: d, machine: solver.addMachine() };
+    const entry = { supplies: [], rets: [], dev: d, machine: solver.addMachine() };
     for (const r of def.regions(d)) {
       const box = toWorldBox(d, r.box);
       const dir = toWorldDir(d, r.dir);
@@ -215,13 +266,30 @@ export function buildDomain(solver, devices, openSides) {
         // หน้ากริลคือ inlet boundary: กำหนดอุณหภูมิลมจ่าย ทำให้ลำลมเย็นถูกต้อง
         reg.inlet = solver.addInlet(reg.cells);
         entry.supplies.push(reg);
-      } else entry.ret = reg;
+      } else entry.rets.push(reg);
     }
     bound.set(d.id, entry);
   }
 
   solver.endBuild();
   return bound;
+}
+
+/**
+ * Louver บนกริดหยาบ: ใบบังเป็นแถบทึบแนวนอนสูงหนึ่งเซลล์ สลับกับแถบโล่ง
+ * จำนวนแถบโล่งเท่าสัดส่วนพื้นที่เปิด (free area) ที่ตั้งไว้
+ */
+function addLouver(solver, d) {
+  const b = bodyBox(d), h = solver.h;
+  const j0 = solver.cellJ(b.y0 + 1e-6), j1 = solver.cellJ(b.y1 - 1e-6);
+  const rows = j1 - j0 + 1;
+  const closed = 1 - Math.max(0, Math.min(100, d.free ?? 50)) / 100;
+  for (let r = 0; r < rows; r++) {
+    // กระจายแถบทึบให้ทั่วความสูง: แถวที่ r ทึบเมื่อผลรวมสะสมข้ามจำนวนเต็ม
+    if (Math.floor((r + 1) * closed + 1e-9) === Math.floor(r * closed + 1e-9)) continue;
+    const y0 = (j0 + r - 1) * h;
+    solver.addSolidBox({ ...b, y0, y1: y0 + h });
+  }
 }
 
 /**
@@ -235,19 +303,25 @@ export function buildDomain(solver, devices, openSides) {
 export function updateSupplyTemps(solver, devices, bound, ambient) {
   for (const d of devices) {
     const e = bound.get(d.id);
-    if (!e || !e.ret || !e.supplies.length) continue;
+    if (!e || !e.rets.length || !e.supplies.length) continue;
     const def = TYPES[d.type];
-    // อุณหภูมิลมกลับ = อุณหภูมิอากาศในห้องที่กำลังถูกดูดเข้าเครื่อง
-    const Tret = solver.avgT(e.ret.cells);
+    // อุณหภูมิลมกลับ = อุณหภูมิอากาศที่กำลังถูกดูดเข้าเครื่อง ถ่วงตามปริมาณลมของแต่ละหน้า
+    let sT = 0, sQ = 0;
+    for (const r of e.rets) { sT += solver.avgT(r.cells) * r.flow; sQ += r.flow; }
+    const Tret = sQ > 0 ? sT / sQ : ambient;
     const mdot = RHO * d.flow / 3600;               // kg/s
     let Ts, watts;
 
     if (def.kind === 'cdu') {
       // คอยล์ร้อน: ระบายความร้อนทิ้ง ≈ ความสามารถทำความเย็น × 1.25 (รวมงานคอมเพรสเซอร์)
-      watts = d.btu * BTU_TO_W * 1.25;
-      Ts = Math.min(75, Tret + Math.min(25, watts / (mdot * CP)));
+      // VRV ใช้ capacity ตาม catalog × (1 + 1/EER)
+      watts = d.type === 'vrv' ? vrvHeatW(d.model, d.eer) : d.btu * BTU_TO_W * 1.25;
+      const dT = Math.min(25, watts / (mdot * CP));
+      Ts = Math.min(75, Tret + dT);
       d._intakeT = Tret;
       d._scDelta = Tret - ambient;                  // อากาศร้อนวนกลับเข้าคอยล์
+      d._dTcoil = dT;
+      d._recirc = Math.max(0, d._scDelta) / dT;    // สัดส่วนลมร้อนที่วนกลับ
     } else {
       // เทอร์โมสตัทอ่านอุณหภูมิห้องโดยรวม ไม่ใช่ที่หน้ากริลลมกลับ เพราะบริเวณนั้น
       // อาจมีลมเย็นของตัวเองวนกลับ ทำให้ตัดการทำงานทั้งที่ห้องยังร้อนอยู่

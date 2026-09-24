@@ -314,7 +314,10 @@ export class Solver {
     this.project(16);
     this.applyForced();
     this.applyBoundaries();
-    this.balanceEnergy(dt, e0);
+    // บังคับสมดุลพลังงานเฉพาะห้องปิด — โดเมนภายนอกมีขอบเปิดที่ลมร้อนไหลออกได้
+    // ถ้าบังคับให้พลังงานในโดเมนเพิ่มตามกำลังเครื่องทุกสเต็ป ความร้อนจะสะสมไม่มีที่สิ้นสุด
+    // (หน้าจ่ายลม = inlet กำหนดอุณหภูมิ ใส่ความร้อนของคอยล์เข้าไปถูกต้องอยู่แล้ว)
+    if (this.closed) this.balanceEnergy(dt, e0);
     this.time += dt;
     this.steps++;
   }

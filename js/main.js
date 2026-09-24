@@ -7,8 +7,9 @@ import { Solver } from './solver.js';
 import { Viewer, supplySeeds } from './viewer.js';
 import {
   TYPES, createDevice, placeY, buildDomain, updateSupplyTemps,
-  autoFlow, BTU_OPTIONS,
+  autoFlow, BTU_OPTIONS, syncVrv,
 } from './devices.js';
+import { VRV_MODELS, vrvLabel, vrvCatalogFlow, vrvHeatW } from './catalog.js';
 import { PRESETS } from './presets.js';
 
 const MAX_CELLS = 600000;
@@ -197,11 +198,30 @@ function refreshProps() {
     numRow(body, 'ลึก Z', d.size.z, 0.1, 20, 0.05, v => { d.size.z = v; apply(); });
   }
 
+  if (d.type === 'louver') {
+    sec(body, 'Louver');
+    numRow(body, 'พื้นที่เปิด (%)', d.free, 0, 100, 5, v => { d.free = v; apply(); });
+    note(body, 'จำลองเป็นใบบังทึบแนวนอนสลับช่องโล่งทีละหนึ่งเซลล์ตามสัดส่วนพื้นที่เปิด — louver ทั่วไป 40–60 %');
+  }
+
   if (def.kind === 'ac' || def.kind === 'cdu') {
     sec(body, def.kind === 'cdu' ? 'สมรรถนะคอยล์ร้อน' : 'สมรรถนะเครื่องปรับอากาศ');
-    selRow(body, 'ขนาด (BTU/hr)', String(d.btu), BTU_OPTIONS.map(b => [String(b), b.toLocaleString('en-US')]),
-      v => { d.btu = +v; d.flow = autoFlow(d.type, d.btu); apply(); refreshProps(); });
-    numRow(body, 'อัตราลม (m³/h)', d.flow, 50, 20000, 10, v => { d.flow = v; apply(); });
+    if (d.type === 'vrv') {
+      selRow(body, 'รุ่น', d.model, Object.keys(VRV_MODELS).map(n => [n, vrvLabel(n)]),
+        v => { d.model = v; syncVrv(d, true); clampDevices(); apply(); refreshProps(); });
+      numRow(body, 'ปริมาณลม (m³/h)', d.flow, 1000, 100000, 60, v => { d.flow = v; apply(); refreshProps(); });
+      numRow(body, 'EER', d.eer, 1.5, 8, 0.1, v => { d.eer = v; apply(true); refreshProps(); });
+      numRow(body, 'Capacity ลดลง (%/K)', d.derate, 0, 10, 0.1, v => { d.derate = v; refreshLiveProps(); });
+      numRow(body, 'ขีดจำกัดลมเข้า (°C)', d.lim, 30, 60, 0.5, v => { d.lim = v; refreshLiveProps(); });
+      const cat = vrvCatalogFlow(d.model);
+      note(body, `catalog: ${(cat / 60).toFixed(0)} m³/min (${cat.toLocaleString('en-US')} m³/h)`
+        + ` · ระบายร้อน ${(vrvHeatW(d.model, d.eer) / 1000).toFixed(1)} kW = capacity × (1 + 1/EER)`
+        + ` · ขนาด ${Math.round(d.size.z * 1000)} × ${Math.round(d.size.x * 1000)} × ${Math.round(d.size.y * 1000)} mm`);
+    } else {
+      selRow(body, 'ขนาด (BTU/hr)', String(d.btu), BTU_OPTIONS.map(b => [String(b), b.toLocaleString('en-US')]),
+        v => { d.btu = +v; d.flow = autoFlow(d.type, d.btu); apply(); refreshProps(); });
+      numRow(body, 'อัตราลม (m³/h)', d.flow, 50, 20000, 10, v => { d.flow = v; apply(); });
+    }
     if (def.kind === 'ac') {
       selRow(body, 'โหมดคิดลมจ่าย', d.mode, [['auto', 'คำนวณจาก BTU'], ['fixed', 'กำหนดอุณหภูมิเอง']],
         v => { d.mode = v; apply(); refreshProps(); });
@@ -209,7 +229,7 @@ function refreshProps() {
         numRow(body, 'อุณหภูมิลมจ่าย (°C)', d.supplyT, 5, 30, 0.5, v => { d.supplyT = v; apply(true); });
       }
       numRow(body, 'ตั้งอุณหภูมิห้อง (°C)', d.setpoint, 16, 30, 0.5, v => { d.setpoint = v; apply(true); });
-    } else {
+    } else if (d.type !== 'vrv') {
       selRow(body, 'ทิศทางลมทิ้ง', d.discharge, [['front', 'ออกด้านหน้า'], ['top', 'ออกด้านบน']],
         v => { d.discharge = v; apply(); });
     }
@@ -243,6 +263,12 @@ function refreshLiveProps() {
     rows.push(['อากาศเข้าคอยล์', fmt(d._intakeT, '°C')]);
     rows.push(['ลมทิ้งออก', fmt(d._supplyT, '°C')]);
     rows.push(['วนกลับ (short-circuit)', `<b class="${sc > 3 ? 'stat-bad' : sc > 1.5 ? 'stat-warn' : 'stat-good'}">+${sc.toFixed(1)} K</b>`]);
+    if (d.type === 'vrv' && d._intakeT != null) {
+      const st = vrvStatus(d);
+      rows.push(['สัดส่วนวนกลับ', `<b>${(d._recirc * 100).toFixed(1)} %</b>`]);
+      rows.push(['ผลต่อ capacity', `<b>−${(Math.max(0, sc) * d.derate).toFixed(1)} %</b>`]);
+      rows.push(['สถานะ', `<b class="${st[0]}">${st[1]}</b>`]);
+    }
   } else {
     const sc = d._returnT != null && d._roomT != null ? d._roomT - d._returnT : 0;
     rows.push(['อุณหภูมิห้อง (เทอร์โมสตัท)', fmt(d._roomT, '°C')]);
@@ -253,6 +279,15 @@ function refreshLiveProps() {
     rows.push(['ความเย็นที่ให้จริง', d._load ? `<b>${(d._load / 1000).toFixed(2)} kW</b>` : '<b>0.00 kW</b>']);
   }
   el.innerHTML = rows.map(([a, b]) => `<div class="stat-row" style="padding:3px 10px"><span>${a}</span>${b}</div>`).join('');
+}
+
+/** เกณฑ์เดียวกับ CDU Airflow CFD: เกินขีดจำกัด หรือวนกลับ ≥ 3 K = ต้องแก้ไข, ≥ 1 K = เฝ้าระวัง */
+function vrvStatus(d) {
+  const sc = d._scDelta ?? 0;
+  if ((d._intakeT ?? 0) > d.lim) return ['stat-bad', 'เกินช่วงใช้งาน'];
+  if (sc >= 3) return ['stat-bad', 'ต้องแก้ไข'];
+  if (sc >= 1) return ['stat-warn', 'เฝ้าระวัง'];
+  return ['stat-good', 'ดี'];
 }
 
 function fmt(v, unit) { return v == null ? '<b>–</b>' : `<b>${v.toFixed(1)} ${unit}</b>`; }
@@ -406,7 +441,8 @@ function updateStats() {
       if (TYPES[d.type].kind !== 'cdu' || !d.on) continue;
       const sc = d._scDelta ?? 0;
       const cls = sc > 3 ? 'stat-bad' : sc > 1.5 ? 'stat-warn' : 'stat-good';
-      rows.push([escapeHtml(d.name) + ' เข้าคอยล์', `<b class="${cls}">${(d._intakeT ?? S.ambient).toFixed(1)} °C (+${sc.toFixed(1)})</b>`]);
+      const extra = d.type === 'vrv' ? ` · −${(Math.max(0, sc) * d.derate).toFixed(1)}% cap` : '';
+      rows.push([escapeHtml(d.name) + ' เข้าคอยล์', `<b class="${cls}">${(d._intakeT ?? S.ambient).toFixed(1)} °C (+${sc.toFixed(1)})${extra}</b>`]);
     }
     const worst = Math.max(0, ...S.devices.filter(d => d._scDelta != null).map(d => d._scDelta));
     rows.push(['ความเร็วลมสูงสุด', `<b>${st.maxV.toFixed(2)} m/s</b>`]);
@@ -473,7 +509,7 @@ function saveProject() {
   const data = {
     app: 'AirFlow Studio', version: 1,
     mode: S.mode, room: S.room, ambient: S.ambient, mesh: S.mesh, wind: S.wind,
-    devices: S.devices.map(d => ({ ...d, _returnT: undefined, _supplyT: undefined, _intakeT: undefined, _scDelta: undefined, _load: undefined })),
+    devices: S.devices.map(d => ({ ...d, _returnT: undefined, _supplyT: undefined, _intakeT: undefined, _scDelta: undefined, _load: undefined, _dTcoil: undefined, _recirc: undefined })),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -498,6 +534,7 @@ function loadProjectData(data) {
     Object.assign(d, raw, { id: d.id, pos: { x: raw.pos?.x ?? 1, y: 0, z: raw.pos?.z ?? 1 } });
     if (raw.size) d.size = { ...d.size, ...raw.size };
     if (raw.btu && raw.flow == null) d.flow = autoFlow(d.type, d.btu);
+    if (d.type === 'vrv') syncVrv(d, raw.flow == null);
     placeY(d, S.room.H);
     S.devices.push(d);
   }

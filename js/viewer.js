@@ -428,7 +428,7 @@ export class Viewer {
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
 function signature(d) {
-  return [d.type, d.yaw, d.size.x, d.size.y, d.size.z, d.vane, d.discharge, d.on].join('|');
+  return [d.type, d.yaw, d.size.x, d.size.y, d.size.z, d.vane, d.discharge, d.model, d.on].join('|');
 }
 
 /* ───────── การสร้างรูปทรงอุปกรณ์ ───────── */
@@ -440,7 +440,7 @@ function buildDeviceMesh(dev) {
 
   const bodyMat = new THREE.MeshStandardMaterial({
     color: def.color, roughness: 0.55, metalness: 0.08,
-    transparent: true, opacity: def.kind === 'heat' ? 0.55 : 0.95,
+    transparent: true, opacity: def.opacity ?? (def.kind === 'heat' ? 0.55 : 0.95),
   });
   const body = new THREE.Mesh(new THREE.BoxGeometry(s.x, s.y, s.z), bodyMat);
   body.userData.dim = bodyMat.opacity;
