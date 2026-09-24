@@ -35,6 +35,54 @@ export function toWorldDir(dev, d) {
   return [x / len, d[1] / len, z / len];
 }
 
+/* ───────── คอยล์ร้อน VRV แบบโมดูล (Daikin RXQ-B) ───────── */
+
+/*
+ * ค่าโดยประมาณจากแคตตาล็อก — ใช้เป็นจุดตั้งต้นของการจำลอง ควรตรวจสอบกับเอกสารรุ่นจริง
+ * w = ความกว้างหน้าเครื่อง (ม.), kw = ความสามารถทำความเย็น, cmm = อัตราลมพัดลม (m³/min)
+ */
+export const VRV_MODELS = {
+  8:  { w: 0.93, fans: 1, kw: 22.4, cmm: 162 },
+  10: { w: 0.93, fans: 1, kw: 28.0, cmm: 175 },
+  12: { w: 0.93, fans: 1, kw: 33.5, cmm: 185 },
+  14: { w: 1.24, fans: 2, kw: 40.0, cmm: 223 },
+  16: { w: 1.24, fans: 2, kw: 45.0, cmm: 233 },
+  18: { w: 1.24, fans: 2, kw: 50.4, cmm: 251 },
+  20: { w: 1.24, fans: 2, kw: 56.0, cmm: 261 },
+  22: { w: 1.24, fans: 2, kw: 61.5, cmm: 271 },
+  24: { w: 1.24, fans: 2, kw: 67.0, cmm: 280 },
+  26: { w: 1.24, fans: 2, kw: 73.5, cmm: 290 },
+};
+export const VRV_HP = Object.keys(VRV_MODELS).map(Number);
+export const VRV_HEIGHT = 1.685, VRV_DEPTH = 0.765;
+export const VRV_GAP = 0.10;          // ระยะห่างมาตรฐานระหว่างโมดูลที่รวมเป็นระบบเดียวกัน
+const COIL_BOTTOM = 0.12;             // ฐานเครื่องใต้แผงคอยล์
+const COIL_TOP = 0.30;                // ช่องพัดลมเหนือแผงคอยล์
+
+/** ตำแหน่งของแต่ละโมดูลตามแกน Z เฉพาะตัว (เรียงซ้ายไปขวา เว้นช่อง VRV_GAP) */
+export function vrvLayout(dev) {
+  const mods = dev.modules.map(hp => ({ hp, ...(VRV_MODELS[hp] || VRV_MODELS[10]) }));
+  const total = mods.reduce((a, m) => a + m.w, 0) + VRV_GAP * (mods.length - 1);
+  let z = -total / 2;
+  return mods.map(m => {
+    const r = { ...m, z0: z, z1: z + m.w };
+    z += m.w + VRV_GAP;
+    return r;
+  });
+}
+
+/** คำนวณขนาดรวม อัตราลม และความสามารถของระบบจากรายการโมดูล */
+export function syncVrv(d) {
+  if (!Array.isArray(d.modules) || !d.modules.length) d.modules = [10];
+  d.modules = d.modules.map(hp => (VRV_MODELS[hp] ? +hp : 10));
+  const mods = vrvLayout(d);
+  d.size = { x: VRV_DEPTH, y: VRV_HEIGHT, z: mods[mods.length - 1].z1 - mods[0].z0 };
+  d.flow = mods.reduce((a, m) => a + m.cmm, 0) * 60;
+  d.kw = mods.reduce((a, m) => a + m.kw, 0);
+  d.btu = Math.round(d.kw * 1000 / BTU_TO_W);
+  delete d.discharge;
+}
+
 /* ───────── นิยามอุปกรณ์ ───────── */
 
 export const TYPES = {
@@ -91,20 +139,75 @@ export const TYPES = {
   },
 
   outdoor: {
-    label: 'คอยล์ร้อน (คอนเดนซิ่ง)', short: 'Condensing Unit', icon: '🔥', color: 0xd9dee8, kind: 'cdu',
-    size: { x: 0.40, y: 0.75, z: 0.95 },
-    defaults: { btu: 24000, discharge: 'front', mountY: null },
-    flowPerKBtu: 145,
-    regions(dev) {
-      const top = dev.discharge === 'top';
-      const supply = top
-        ? { box: { x0: -0.18, x1: 0.18, y0: 0.28, y1: 0.375, z0: -0.42, z1: 0.42 }, n: [0, 1, 0], dir: [0, 1, 0], area: 0.20 }
-        : { box: { x0: 0.09, x1: 0.20, y0: -0.30, y1: 0.30, z0: -0.42, z1: 0.42 }, n: [1, 0, 0], dir: [1, 0, 0], area: 0.20 };
-      return [
-        { role: 'supply', ...supply, share: 1 },
-        { role: 'return', box: { x0: -0.20, x1: -0.09, y0: -0.34, y1: 0.34, z0: -0.44, z1: 0.44 },
-          n: [-1, 0, 0], dir: [1, 0, 0], share: 1, area: 0.60 },
-      ];
+    label: 'คอยล์ร้อน VRV (RXQ)', short: 'CDU', icon: '🔥', color: 0xe6e9ee, kind: 'cdu',
+    size: { x: VRV_DEPTH, y: VRV_HEIGHT, z: 0.93 },
+    defaults: { modules: [10], mountY: null },
+    // ตำแหน่งจริงของตัวเครื่องแต่ละโมดูล (มีช่องว่าง 10 ซม. ระหว่างโมดูล)
+    solids(dev) {
+      const hx = dev.size.x / 2, hy = dev.size.y / 2;
+      return vrvLayout(dev).map(m => ({ x0: -hx, x1: hx, y0: -hy, y1: hy, z0: m.z0, z1: m.z1 }));
+    },
+    /*
+     * แต่ละโมดูล: ลมทิ้งออกทางพัดลมด้านบน (1 ใบสำหรับ 8–12 HP, 2 ใบสำหรับ 14 HP ขึ้นไป)
+     * ดูดอากาศเข้าผ่านแผงคอยล์ 3 ด้าน — ด้านหลัง (−X) และด้านข้างซ้าย/ขวา (±Z)
+     * ด้านหน้า (+X) เป็นแผงปิดทึบ
+     *
+     * h = ขนาดเซลล์ของ solver (ไม่ระบุ = ใช้วาดรูป) ถ้าช่อง 10 ซม. ระหว่างโมดูลแคบกว่า 2 เซลล์
+     * เมชจะมองไม่เห็นช่องนี้ (เซลล์ถูกตัวเครื่องสองข้างปิดหมด) คอยล์ด้านในจึงดูดอากาศ
+     * ผ่านปากช่องด้านหน้าและด้านหลังแทน ซึ่งเป็นทางที่อากาศเข้าช่องนี้ได้จริง
+     *
+     * parts = ส่วนแบ่งลมของหน้ากริลนี้ที่นับเป็นของโมดูล/ด้านใด ใช้เฉลี่ยอุณหภูมิเข้าคอยล์
+     */
+    regions(dev, h) {
+      const hx = dev.size.x / 2, hy = dev.size.y / 2;
+      const mods = vrvLayout(dev);
+      const last = mods.length - 1;
+      const coarse = h != null && VRV_GAP < 2 * h;
+      const cmmSum = mods.reduce((a, m) => a + m.cmm, 0);
+      const cy0 = -hy + COIL_BOTTOM, cy1 = hy - COIL_TOP, hc = cy1 - cy0;
+      const t = 0.08;                                    // ความหนาของชั้นเซลล์ที่แทนหน้าคอยล์
+      const sideArea = (2 * hx - 0.15) * hc;
+      const out = [];
+      const coil = (box, n, dir, share, area, parts) =>
+        out.push({ role: 'return', box: { ...box, y0: cy0, y1: cy1 }, n, dir, share, area, parts });
+
+      mods.forEach((m, mi) => {
+        const fShare = m.cmm / cmmSum;
+        const w = m.z1 - m.z0;
+        // พัดลมด้านบน
+        const a = Math.min(0.33, w / m.fans / 2 - 0.02, hx - 0.03);
+        for (let k = 0; k < m.fans; k++) {
+          const zc = m.z0 + w * (k + 0.5) / m.fans;
+          out.push({ role: 'supply', module: mi,
+            box: { x0: -a, x1: a, y0: hy - 0.10, y1: hy, z0: zc - a, z1: zc + a },
+            n: [0, 1, 0], dir: [0, 1, 0], share: fShare / m.fans, area: Math.PI * a * a });
+        }
+        // แผงคอยล์ 3 ด้าน — แบ่งลมตามพื้นที่หน้าคอยล์ (ความเร็วลมผ่านคอยล์เท่ากันทุกด้าน)
+        const backArea = (w - 0.06) * hc;
+        const k = fShare / (backArea + 2 * sideArea);
+        const own = (face, area) => [{ module: mi, face, w: k * area }];
+        coil({ x0: -hx, x1: -hx + t, z0: m.z0 + 0.03, z1: m.z1 - 0.03 },
+          [-1, 0, 0], [1, 0, 0], k * backArea, backArea, own('back', backArea));
+        if (mi === 0 || !coarse) {
+          coil({ x0: -hx + 0.03, x1: hx - 0.12, z0: m.z0, z1: m.z0 + t },
+            [0, 0, -1], [0, 0, 1], k * sideArea, sideArea, own('left', sideArea));
+        }
+        if (mi === last || !coarse) {
+          coil({ x0: -hx + 0.03, x1: hx - 0.12, z0: m.z1 - t, z1: m.z1 },
+            [0, 0, 1], [0, 0, -1], k * sideArea, sideArea, own('right', sideArea));
+        }
+        // ช่องระหว่างโมดูลนี้กับโมดูลถัดไป (เมชหยาบ): คอยล์ขวาของโมดูลนี้ + คอยล์ซ้ายของโมดูลถัดไป
+        // ดูดลมผ่านปากช่องด้านหน้าและด้านหลัง ปากละครึ่ง
+        if (coarse && mi < last) {
+          const n2 = mods[mi + 1], k2 = (n2.cmm / cmmSum) / ((n2.w - 0.06) * hc + 2 * sideArea);
+          const parts = [{ module: mi, face: 'right', w: k * sideArea / 2 }, { module: mi + 1, face: 'left', w: k2 * sideArea / 2 }];
+          const share = (k + k2) * sideArea / 2;
+          const gz = { z0: m.z1, z1: n2.z0 };
+          coil({ x0: hx, x1: hx + 0.06, ...gz }, [1, 0, 0], [-1, 0, 0], share, VRV_GAP * hc, parts);
+          coil({ x0: -hx - 0.06, x1: -hx, ...gz }, [-1, 0, 0], [1, 0, 0], share, VRV_GAP * hc, parts);
+        }
+      });
+      return out;
     },
   },
 
@@ -141,10 +244,13 @@ export function createDevice(type, pos, roomH) {
   };
   // แอร์ติดผนังต้องเว้นช่องเหนือเครื่องไว้ให้กริลลมกลับด้านบนดูดอากาศได้
   if (type === 'wall') d.mountY = Math.max(d.size.y / 2, roomH - 0.35 - d.size.y / 2);
-  if (def.kind === 'ac' || def.kind === 'cdu') {
+  if (def.kind === 'cdu') {
+    d.modules = [...def.defaults.modules];
+    syncVrv(d);
+  } else if (def.kind === 'ac') {
     d.flow = Math.round(def.flowPerKBtu * d.btu / 1000 / 10) * 10;
     d.mode = 'auto';
-    d.supplyT = type === 'outdoor' ? 45 : 15;
+    d.supplyT = 15;
     d.setpoint = 25;
     d.running = true;   // สถานะคอมเพรสเซอร์ (ควบคุมโดยเทอร์โมสตัท)
   }
@@ -179,7 +285,7 @@ export function worldFootprint(dev) {
 
 /**
  * สร้างโดเมนจากรายการอุปกรณ์
- * คืนค่า map: deviceId → { supplies:[region], ret:region }
+ * คืนค่า map: deviceId → { supplies:[region], rets:[region] }
  */
 export function buildDomain(solver, devices, openSides) {
   solver.beginBuild(openSides);
@@ -189,7 +295,8 @@ export function buildDomain(solver, devices, openSides) {
   for (const d of devices) {
     const def = TYPES[d.type];
     if (def.kind === 'heat' && !d.solidBody) continue;
-    solver.addSolidBox(bodyBox(d));
+    if (def.solids) for (const b of def.solids(d)) solver.addSolidBox(toWorldBox(d, b));
+    else solver.addSolidBox(bodyBox(d));
   }
 
   // 2) แหล่งความร้อน
@@ -204,18 +311,21 @@ export function buildDomain(solver, devices, openSides) {
     if (def.kind !== 'ac' && def.kind !== 'cdu') continue;
     if (!d.on) continue;
     const flowM3s = d.flow / 3600;
-    const entry = { supplies: [], ret: null, dev: d, machine: solver.addMachine() };
-    for (const r of def.regions(d)) {
+    const entry = { supplies: [], rets: [], dev: d, machine: solver.addMachine() };
+    for (const r of def.regions(d, solver.h)) {
       const box = toWorldBox(d, r.box);
       const dir = toWorldDir(d, r.dir);
       const n = toWorldDir(d, r.n);
       const reg = solver.addFlowRegion(box, dir, n, flowM3s * r.share, r.area);
       reg.role = r.role;
+      reg.share = r.share;
+      reg.module = r.module ?? 0;
+      reg.parts = r.parts;
       if (r.role === 'supply') {
         // หน้ากริลคือ inlet boundary: กำหนดอุณหภูมิลมจ่าย ทำให้ลำลมเย็นถูกต้อง
         reg.inlet = solver.addInlet(reg.cells);
         entry.supplies.push(reg);
-      } else entry.ret = reg;
+      } else entry.rets.push(reg);
     }
     bound.set(d.id, entry);
   }
@@ -235,40 +345,38 @@ export function buildDomain(solver, devices, openSides) {
 export function updateSupplyTemps(solver, devices, bound, ambient) {
   for (const d of devices) {
     const e = bound.get(d.id);
-    if (!e || !e.ret || !e.supplies.length) continue;
+    if (!e || !e.rets.length || !e.supplies.length) continue;
     const def = TYPES[d.type];
+
+    if (def.kind === 'cdu') {
+      updateCdu(d, e, solver, ambient);
+      continue;
+    }
+
     // อุณหภูมิลมกลับ = อุณหภูมิอากาศในห้องที่กำลังถูกดูดเข้าเครื่อง
-    const Tret = solver.avgT(e.ret.cells);
+    const Tret = weightedT(solver, e.rets);
     const mdot = RHO * d.flow / 3600;               // kg/s
     let Ts, watts;
 
-    if (def.kind === 'cdu') {
-      // คอยล์ร้อน: ระบายความร้อนทิ้ง ≈ ความสามารถทำความเย็น × 1.25 (รวมงานคอมเพรสเซอร์)
-      watts = d.btu * BTU_TO_W * 1.25;
-      Ts = Math.min(75, Tret + Math.min(25, watts / (mdot * CP)));
-      d._intakeT = Tret;
-      d._scDelta = Tret - ambient;                  // อากาศร้อนวนกลับเข้าคอยล์
-    } else {
-      // เทอร์โมสตัทอ่านอุณหภูมิห้องโดยรวม ไม่ใช่ที่หน้ากริลลมกลับ เพราะบริเวณนั้น
-      // อาจมีลมเย็นของตัวเองวนกลับ ทำให้ตัดการทำงานทั้งที่ห้องยังร้อนอยู่
-      const roomT = solver.avgTemp ?? ambient;
-      d._roomT = roomT;
-      if (d.running && roomT < d.setpoint - 0.5) d.running = false;
-      else if (!d.running && roomT > d.setpoint + 0.5) d.running = true;
+    // เทอร์โมสตัทอ่านอุณหภูมิห้องโดยรวม ไม่ใช่ที่หน้ากริลลมกลับ เพราะบริเวณนั้น
+    // อาจมีลมเย็นของตัวเองวนกลับ ทำให้ตัดการทำงานทั้งที่ห้องยังร้อนอยู่
+    const roomT = solver.avgTemp ?? ambient;
+    d._roomT = roomT;
+    if (d.running && roomT < d.setpoint - 0.5) d.running = false;
+    else if (!d.running && roomT > d.setpoint + 0.5) d.running = true;
 
-      if (!d.running) {
-        watts = 0;                                   // พัดลมหมุนอย่างเดียว
-        Ts = Tret;
-      } else if (d.mode === 'auto') {
-        watts = -d.btu * BTU_TO_W * 0.75;            // ความร้อนสัมผัส ~75% ของขนาดเครื่อง
-        Ts = Tret - Math.min(20, -watts / (mdot * CP));
-      } else {
-        Ts = d.supplyT;
-        watts = -Math.max(0, (Tret - Ts) * mdot * CP);
-      }
-      Ts = Math.max(8, Math.min(40, Ts));            // ไม่ต่ำกว่าจุดที่คอยล์จะเป็นน้ำแข็ง
-      d._returnT = Tret;
+    if (!d.running) {
+      watts = 0;                                   // พัดลมหมุนอย่างเดียว
+      Ts = Tret;
+    } else if (d.mode === 'auto') {
+      watts = -d.btu * BTU_TO_W * 0.75;            // ความร้อนสัมผัส ~75% ของขนาดเครื่อง
+      Ts = Tret - Math.min(20, -watts / (mdot * CP));
+    } else {
+      Ts = d.supplyT;
+      watts = -Math.max(0, (Tret - Ts) * mdot * CP);
     }
+    Ts = Math.max(8, Math.min(40, Ts));            // ไม่ต่ำกว่าจุดที่คอยล์จะเป็นน้ำแข็ง
+    d._returnT = Tret;
 
     // หน้ากริลจ่ายลมที่อุณหภูมิ Ts (รูปแบบการกระจายลมเย็น)
     // ส่วนกำลังของเครื่องบอกให้ solver รักษาสมดุลพลังงานรวมของห้องให้ถูกต้อง
@@ -277,6 +385,52 @@ export function updateSupplyTemps(solver, devices, bound, ambient) {
     d._supplyT = Ts;
     d._load = Math.abs(watts);
   }
+}
+
+/** อุณหภูมิเฉลี่ยถ่วงน้ำหนักตามสัดส่วนลม (= พื้นที่หน้าคอยล์) ของหลายหน้ากริล */
+function weightedT(solver, regs) {
+  let s = 0, w = 0;
+  for (const r of regs) { s += solver.avgT(r.cells) * r.share; w += r.share; }
+  return w > 0 ? s / w : solver.ambient;
+}
+
+/**
+ * คอยล์ร้อน VRV: อุณหภูมิอากาศเข้าคอยล์ = ค่าเฉลี่ยจากแผงคอยล์ทั้งหมด (หลัง + ข้างซ้าย + ข้างขวา
+ * ของทุกโมดูล) ถ่วงน้ำหนักตามพื้นที่หน้าคอยล์ ลมทิ้งของแต่ละโมดูลคิดจากอากาศที่โมดูลนั้นดูดเข้า
+ * ความร้อนที่ระบายทิ้ง ≈ ความสามารถทำความเย็น × 1.25 (รวมงานคอมเพรสเซอร์)
+ */
+function updateCdu(d, e, solver, ambient) {
+  const mods = vrvLayout(d);
+  const acc = mods.map(() => ({ s: 0, w: 0, faces: {} }));
+  for (const r of e.rets) {
+    const T = solver.avgT(r.cells);
+    for (const p of r.parts) {
+      const a = acc[p.module];
+      a.s += T * p.w; a.w += p.w;
+      const f = a.faces[p.face] || (a.faces[p.face] = { s: 0, w: 0 });
+      f.s += T * p.w; f.w += p.w;
+    }
+  }
+  const info = mods.map((m, mi) => {
+    const a = acc[mi];
+    const intake = a.w > 0 ? a.s / a.w : ambient;
+    const faces = {};
+    for (const [k, f] of Object.entries(a.faces)) faces[k] = f.s / f.w;
+    const watts = m.kw * 1000 * 1.25;
+    const mdot = RHO * m.cmm / 60;
+    const supplyT = Math.min(75, intake + Math.min(25, watts / (mdot * CP)));
+    for (const s of e.supplies) if (s.module === mi) s.inlet.T = supplyT;
+    return { hp: m.hp, intake, supplyT, watts, faces };
+  });
+  const intake = weightedT(solver, e.rets);
+  const watts = info.reduce((a, m) => a + m.watts, 0);
+  e.machine.watts = watts;
+  d._modules = info;
+  d._intakeT = intake;
+  d._scDelta = intake - ambient;                     // อากาศร้อนวนกลับเข้าคอยล์
+  d._hotFace = Math.max(...info.flatMap(m => Object.values(m.faces))) - ambient;
+  d._supplyT = info.reduce((a, m) => a + m.supplyT * m.watts, 0) / watts;
+  d._load = watts;
 }
 
 export function autoFlow(type, btu) {

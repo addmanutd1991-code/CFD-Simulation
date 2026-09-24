@@ -314,7 +314,9 @@ export class Solver {
     this.project(16);
     this.applyForced();
     this.applyBoundaries();
-    this.balanceEnergy(dt, e0);
+    // ใช้เฉพาะห้องปิด — โดเมนภายนอกมีความร้อนไหลออกทางขอบเปิดจริง ถ้าบังคับสมดุล
+    // จะนับความร้อนที่ไหลออกเป็น "ส่วนที่หายไป" แล้วเติมกลับจนทั้งโดเมนร้อนขึ้นเรื่อย ๆ
+    if (!this.openSides) this.balanceEnergy(dt, e0);
     this.time += dt;
     this.steps++;
   }

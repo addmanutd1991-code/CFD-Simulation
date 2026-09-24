@@ -7,7 +7,7 @@ import { Solver } from './solver.js';
 import { Viewer, supplySeeds } from './viewer.js';
 import {
   TYPES, createDevice, placeY, buildDomain, updateSupplyTemps,
-  autoFlow, BTU_OPTIONS,
+  autoFlow, BTU_OPTIONS, VRV_HP, VRV_GAP, syncVrv,
 } from './devices.js';
 import { PRESETS } from './presets.js';
 
@@ -197,22 +197,42 @@ function refreshProps() {
     numRow(body, 'ลึก Z', d.size.z, 0.1, 20, 0.05, v => { d.size.z = v; apply(); });
   }
 
-  if (def.kind === 'ac' || def.kind === 'cdu') {
-    sec(body, def.kind === 'cdu' ? 'สมรรถนะคอยล์ร้อน' : 'สมรรถนะเครื่องปรับอากาศ');
+  if (def.kind === 'cdu') {
+    sec(body, 'ระบบคอยล์ร้อน VRV');
+    selRow(body, 'จำนวนโมดูล', String(d.modules.length), [1, 2, 3, 4].map(n => [String(n), `${n} โมดูล`]),
+      v => {
+        const n = +v, last = d.modules[d.modules.length - 1];
+        d.modules = Array.from({ length: n }, (_, i) => d.modules[i] ?? last);
+        syncVrv(d); clampDevices(); apply(); refreshProps();
+      });
+    d.modules.forEach((hp, i) => {
+      selRow(body, `โมดูล ${i + 1}`, String(hp), VRV_HP.map(h => [String(h), `RXQ${h}B`]),
+        v => { d.modules[i] = +v; syncVrv(d); clampDevices(); apply(); refreshProps(); });
+    });
+    const hp = d.modules.reduce((a, b) => a + b, 0);
+    note(body, `รวม ${hp} HP · ทำความเย็น ${d.kw.toFixed(1)} kW · ลมพัดลม ${d.flow.toLocaleString('en-US')} m³/h`);
+    note(body, `ขนาดรวม กว้าง ${(d.size.z * 1000).toFixed(0)} × สูง ${(d.size.y * 1000).toFixed(0)} × ลึก ${(d.size.x * 1000).toFixed(0)} มม.`
+      + (d.modules.length > 1 ? ` (เว้นระหว่างโมดูล ${VRV_GAP * 100} ซม.)` : ''));
+    note(body, 'ลมทิ้งออกด้านบน · ดูดอากาศเข้าคอยล์ด้านหลังและด้านข้างทั้งสอง · ด้านหน้าเป็นแผงปิด'
+      + (d.modules.length > 1 && VRV_GAP < 2 * solver.h ? ' — ช่อง 10 ซม. ระหว่างโมดูลแคบกว่าเมช คอยล์ด้านในจึงคิดอากาศเข้าจากปากช่องด้านหน้าและด้านหลัง' : ''));
+
+    sec(body, 'ค่าที่วัดได้ขณะคำนวณ');
+    const live = document.createElement('div');
+    live.id = 'prop-live';
+    body.appendChild(live);
+  }
+
+  if (def.kind === 'ac') {
+    sec(body, 'สมรรถนะเครื่องปรับอากาศ');
     selRow(body, 'ขนาด (BTU/hr)', String(d.btu), BTU_OPTIONS.map(b => [String(b), b.toLocaleString('en-US')]),
       v => { d.btu = +v; d.flow = autoFlow(d.type, d.btu); apply(); refreshProps(); });
     numRow(body, 'อัตราลม (m³/h)', d.flow, 50, 20000, 10, v => { d.flow = v; apply(); });
-    if (def.kind === 'ac') {
-      selRow(body, 'โหมดคิดลมจ่าย', d.mode, [['auto', 'คำนวณจาก BTU'], ['fixed', 'กำหนดอุณหภูมิเอง']],
-        v => { d.mode = v; apply(); refreshProps(); });
-      if (d.mode === 'fixed') {
-        numRow(body, 'อุณหภูมิลมจ่าย (°C)', d.supplyT, 5, 30, 0.5, v => { d.supplyT = v; apply(true); });
-      }
-      numRow(body, 'ตั้งอุณหภูมิห้อง (°C)', d.setpoint, 16, 30, 0.5, v => { d.setpoint = v; apply(true); });
-    } else {
-      selRow(body, 'ทิศทางลมทิ้ง', d.discharge, [['front', 'ออกด้านหน้า'], ['top', 'ออกด้านบน']],
-        v => { d.discharge = v; apply(); });
+    selRow(body, 'โหมดคิดลมจ่าย', d.mode, [['auto', 'คำนวณจาก BTU'], ['fixed', 'กำหนดอุณหภูมิเอง']],
+      v => { d.mode = v; apply(); refreshProps(); });
+    if (d.mode === 'fixed') {
+      numRow(body, 'อุณหภูมิลมจ่าย (°C)', d.supplyT, 5, 30, 0.5, v => { d.supplyT = v; apply(true); });
     }
+    numRow(body, 'ตั้งอุณหภูมิห้อง (°C)', d.setpoint, 16, 30, 0.5, v => { d.setpoint = v; apply(true); });
     if (d.vane !== undefined) {
       numRow(body, 'มุมบานเกล็ด (°)', d.vane, 0, 70, 5, v => { d.vane = v; apply(); });
     }
@@ -239,10 +259,19 @@ function refreshLiveProps() {
   const def = TYPES[d.type];
   const rows = [];
   if (def.kind === 'cdu') {
-    const sc = d._scDelta ?? 0;
-    rows.push(['อากาศเข้าคอยล์', fmt(d._intakeT, '°C')]);
-    rows.push(['ลมทิ้งออก', fmt(d._supplyT, '°C')]);
-    rows.push(['วนกลับ (short-circuit)', `<b class="${sc > 3 ? 'stat-bad' : sc > 1.5 ? 'stat-warn' : 'stat-good'}">+${sc.toFixed(1)} K</b>`]);
+    const cls = (v) => v > 3 ? 'stat-bad' : v > 1.5 ? 'stat-warn' : 'stat-good';
+    const sc = d._scDelta ?? 0, hot = d._hotFace ?? 0;
+    rows.push(['อากาศเข้าคอยล์ (เฉลี่ยทุกแผง)', fmt(d._intakeT, '°C')]);
+    rows.push(['วนกลับเฉลี่ย (short-circuit)', `<b class="${cls(sc)}">+${sc.toFixed(1)} K</b>`]);
+    rows.push(['แผงคอยล์ที่ร้อนที่สุด', `<b class="${cls(hot)}">+${hot.toFixed(1)} K</b>`]);
+    rows.push(['ลมทิ้งออกด้านบน', fmt(d._supplyT, '°C')]);
+    rows.push(['ระบายความร้อนทิ้ง', d._load ? `<b>${(d._load / 1000).toFixed(1)} kW</b>` : '<b>–</b>']);
+    const faceTH = { back: 'หลัง', left: 'ซ้าย', right: 'ขวา' };
+    (d._modules || []).forEach((m, i) => {
+      const f = ['back', 'left', 'right'].map(k => `${faceTH[k]} ${m.faces[k]?.toFixed(1) ?? '–'}`).join(' · ');
+      rows.push([`โมดูล ${i + 1} (${m.hp} HP) เข้าคอยล์`, fmt(m.intake, '°C')]);
+      rows.push([`<span style="padding-left:10px;opacity:.75">${f} °C</span>`, '']);
+    });
   } else {
     const sc = d._returnT != null && d._roomT != null ? d._roomT - d._returnT : 0;
     rows.push(['อุณหภูมิห้อง (เทอร์โมสตัท)', fmt(d._roomT, '°C')]);
@@ -406,13 +435,14 @@ function updateStats() {
       if (TYPES[d.type].kind !== 'cdu' || !d.on) continue;
       const sc = d._scDelta ?? 0;
       const cls = sc > 3 ? 'stat-bad' : sc > 1.5 ? 'stat-warn' : 'stat-good';
-      rows.push([escapeHtml(d.name) + ' เข้าคอยล์', `<b class="${cls}">${(d._intakeT ?? S.ambient).toFixed(1)} °C (+${sc.toFixed(1)})</b>`]);
+      const hp = d.modules.reduce((a, b) => a + b, 0);
+      rows.push([`${escapeHtml(d.name)} (${hp} HP) เข้าคอยล์เฉลี่ย`, `<b class="${cls}">${(d._intakeT ?? S.ambient).toFixed(1)} °C (+${sc.toFixed(1)})</b>`]);
     }
     const worst = Math.max(0, ...S.devices.filter(d => d._scDelta != null).map(d => d._scDelta));
     rows.push(['ความเร็วลมสูงสุด', `<b>${st.maxV.toFixed(2)} m/s</b>`]);
     box.innerHTML = rows.map(r => `<div class="stat-row"><span>${r[0]}</span>${r[1]}</div>`).join('')
       + `<div class="stat-note">${worst > 3
-        ? '⚠️ อากาศร้อนวนกลับเข้าคอยล์มาก ประสิทธิภาพจะตกและอาจตัดการทำงาน — ควรเพิ่มระยะห่าง เปลี่ยนทิศลมทิ้ง หรือย้ายสิ่งกีดขวาง'
+        ? '⚠️ อากาศร้อนวนกลับเข้าคอยล์มาก ประสิทธิภาพจะตกและอาจตัดการทำงาน — ควรเพิ่มระยะห่างด้านดูด (หลัง/ข้าง) ติดท่อลมทิ้ง (discharge duct) หรือย้ายสิ่งกีดขวาง'
         : worst > 1.5
           ? '⚠️ เริ่มมีอากาศร้อนวนกลับ ควรตรวจระยะห่างด้านดูดของคอยล์'
           : '✅ การระบายอากาศของคอยล์ร้อนอยู่ในเกณฑ์ดี'}</div>`;
@@ -473,7 +503,7 @@ function saveProject() {
   const data = {
     app: 'AirFlow Studio', version: 1,
     mode: S.mode, room: S.room, ambient: S.ambient, mesh: S.mesh, wind: S.wind,
-    devices: S.devices.map(d => ({ ...d, _returnT: undefined, _supplyT: undefined, _intakeT: undefined, _scDelta: undefined, _load: undefined })),
+    devices: S.devices.map(d => ({ ...d, _returnT: undefined, _supplyT: undefined, _intakeT: undefined, _scDelta: undefined, _hotFace: undefined, _modules: undefined, _load: undefined })),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -497,7 +527,8 @@ function loadProjectData(data) {
     const d = createDevice(raw.type, { x: raw.pos?.x ?? 1, z: raw.pos?.z ?? 1 }, S.room.H);
     Object.assign(d, raw, { id: d.id, pos: { x: raw.pos?.x ?? 1, y: 0, z: raw.pos?.z ?? 1 } });
     if (raw.size) d.size = { ...d.size, ...raw.size };
-    if (raw.btu && raw.flow == null) d.flow = autoFlow(d.type, d.btu);
+    if (TYPES[d.type].kind === 'cdu') syncVrv(d);           // ไฟล์รุ่นเก่า (ไม่มี modules) → 10 HP
+    else if (raw.btu && raw.flow == null) d.flow = autoFlow(d.type, d.btu);
     placeY(d, S.room.H);
     S.devices.push(d);
   }

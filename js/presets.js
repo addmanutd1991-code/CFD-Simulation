@@ -41,15 +41,16 @@ export const PRESETS = {
     ],
   },
 
-  'cdu-wall': {
-    label: 'คอยล์ร้อน 2 ตัวชิดกำแพง (ตรวจ Short-circuit)',
+  'vrv-wall': {
+    label: 'คอยล์ร้อน VRV 2 ระบบชิดกำแพง (ตรวจ Short-circuit)',
     mode: 'outdoor', ambient: 35, mesh: 0.15, wind: { speed: 0.5, dirDeg: 0 },
-    room: { W: 7.0, H: 4.0, D: 5.0 },
+    room: { W: 9.0, H: 4.5, D: 6.0 },
     devices: [
-      { type: 'box', name: 'กำแพงอาคาร', pos: { x: 3.5, z: 0.45 }, yaw: 0, size: { x: 6.6, y: 4.0, z: 0.3 } },
-      { type: 'outdoor', name: 'CDU-1', pos: { x: 2.3, z: 1.1 }, yaw: 180, btu: 24000, discharge: 'front', mountY: 0.45 },
-      { type: 'outdoor', name: 'CDU-2', pos: { x: 4.7, z: 1.1 }, yaw: 180, btu: 24000, discharge: 'front', mountY: 0.45 },
-      { type: 'box', name: 'รั้วบังตา', pos: { x: 3.5, z: 2.6 }, yaw: 0, size: { x: 6.0, y: 1.8, z: 0.15 } },
+      { type: 'box', name: 'กำแพงอาคาร', pos: { x: 4.5, z: 0.30 }, yaw: 0, size: { x: 8.6, y: 4.5, z: 0.30 } },
+      // หมุน 270° ให้ด้านหน้า (แผงปิด) หันออกจากกำแพง — คอยล์ด้านหลังห่างกำแพง 50 ซม.
+      { type: 'outdoor', name: 'VRV-1', pos: { x: 2.4, z: 1.33 }, yaw: 270, modules: [16, 18] },
+      { type: 'outdoor', name: 'VRV-2', pos: { x: 6.4, z: 1.33 }, yaw: 270, modules: [10, 12] },
+      { type: 'box', name: 'รั้วบังตา', pos: { x: 4.5, z: 3.2 }, yaw: 0, size: { x: 8.0, y: 1.8, z: 0.15 } },
     ],
   },
 };
