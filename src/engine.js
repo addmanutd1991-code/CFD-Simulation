@@ -26,15 +26,15 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     const t0 = performance.now();
     while (performance.now() - t0 < slice) {
       solver.step();
-      if (solver.converged || solver.time >= solver.tEnd) break;
+      if (solver.converged || solver.time >= solver.tMax) break;
     }
     const now = performance.now();
-    const done = solver.converged || solver.time >= solver.tEnd;
+    const done = solver.converged || solver.time >= solver.tMax;
     if (done) running = false;
     const wantFields = done || now - lastField > fieldEvery;
     if (wantFields) lastField = now;
     send(wantFields);
-    if (done) post({ type: 'done', reason: solver.converged ? 'converged' : 'time', report: solver.report() });
+    if (done) post({ type: 'done', reason: solver.converged ? 'converged' : 'limit', report: solver.report() });
     else timer = setTimeout(loop, 0);
   };
 
@@ -49,9 +49,9 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
         send(true);
       } else if (msg.cmd === 'run') {
         if (!solver) return;
-        if (msg.tEnd) solver.tEnd = msg.tEnd;
-        if (solver.time >= solver.tEnd || solver.converged) solver.tEnd = solver.time + 60;
-        solver.converged = false;
+        if (msg.tMax) solver.tMax = msg.tMax;
+        // สั่งเดินต่อหลังชนเพดานเวลา → ขยายเพดานออกไปอีกเท่าเดิม
+        if (solver.time >= solver.tMax) solver.tMax = solver.time + (msg.tMax || 600);
         running = true;
         if (!timer) timer = setTimeout(loop, 0);
       } else if (msg.cmd === 'pause') {

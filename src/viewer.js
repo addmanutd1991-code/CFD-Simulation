@@ -29,7 +29,7 @@ export class Viewer {
     this.dom = null;
     this.results = null;
     this.section = { axis: 'x', pos: 0, show: true };
-    this.display = { field: 'T', particles: true, iso: true, isoDT: 2, labels: true, range: null };
+    this.display = { field: 'T', particles: true, iso: true, isoDT: 2, labels: false, range: null };
 
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -40,7 +40,7 @@ export class Viewer {
     r.domElement.classList.add('gl');
 
     this.labelLayer = document.createElement('div');
-    this.labelLayer.className = 'labels';
+    this.labelLayer.className = 'labels hidden';   // ปิดป้ายชื่อเป็นค่าเริ่มต้น ไม่ให้บังผล
     host.appendChild(this.labelLayer);
 
     this.persp = new THREE.PerspectiveCamera(40, 1, 0.1, 2000);
@@ -113,7 +113,7 @@ export class Viewer {
     if (view === '3d') {
       this.camera = this.persp;
       c.object = this.persp;
-      const R = Math.max(d.W, d.D) * 0.95;
+      const R = Math.max(d.W, d.D, d.H * 1.6) * 0.95;
       this.persp.position.set(cx - R * 0.55, R * 0.62, cz + R * 0.95);
       c.target.set(cx, cy, cz);
       c.enableRotate = true;
@@ -147,9 +147,11 @@ export class Viewer {
   setModel(scene, dom) {
     this.sceneData = scene;
     this.objects = scene.objects;
-    const domChanged = !this.dom || ['ox', 'oz', 'W', 'D', 'H'].some(k => Math.abs(this.dom[k] - dom[k]) > 1e-6);
+    const bcKey = JSON.stringify(scene.bc || {});
+    const domChanged = !this.dom || this._bcKey !== bcKey || ['ox', 'oz', 'W', 'D', 'H'].some(k => Math.abs(this.dom[k] - dom[k]) > 1e-6);
     const first = !this.dom;
     this.dom = dom;
+    this._bcKey = bcKey;
     if (domChanged) this.#buildGround();
     this.#buildWindArrow();
     this.#rebuildObjects();
@@ -379,6 +381,33 @@ export class Viewer {
     box.position.set(ox + W / 2, H / 2, oz + D / 2);
     box.raycast = () => {};
     this.gGround.add(box);
+
+    // ขอบโดเมนที่เป็นผนัง / สมมาตร แสดงเป็นพื้นผิวโปร่งแสง
+    const bc = this.sceneData?.bc;
+    if (bc) {
+      const col = { wall: 0xa8b4c0, symmetry: 0x5fd39a };
+      const faces = {
+        xmin: [D, H, ox, H / 2, oz + D / 2, 0, Math.PI / 2], xmax: [D, H, ox + W, H / 2, oz + D / 2, 0, -Math.PI / 2],
+        zmin: [W, H, ox + W / 2, H / 2, oz, 0, 0], zmax: [W, H, ox + W / 2, H / 2, oz + D, 0, Math.PI],
+        ymax: [W, D, ox + W / 2, H, oz + D / 2, Math.PI / 2, 0],
+      };
+      for (const [f, [a, b, x0, y0, z0, rx, ry]] of Object.entries(faces)) {
+        const t = bc[f]?.type;
+        if (t !== 'wall' && t !== 'symmetry') continue;
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(a, b), new THREE.MeshBasicMaterial({
+          color: col[t], transparent: true, opacity: t === 'wall' ? 0.16 : 0.12, side: THREE.DoubleSide, depthWrite: false,
+        }));
+        m.position.set(x0, y0, z0);
+        m.rotation.set(rx, ry, 0, 'YXZ');
+        m.raycast = () => {};
+        m.renderOrder = 1;
+        this.gGround.add(m);
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: col[t], transparent: true, opacity: 0.7 }));
+        e.position.copy(m.position); e.rotation.copy(m.rotation);
+        e.raycast = () => {};
+        this.gGround.add(e);
+      }
+    }
 
     // ไม้บรรทัด: ขอบด้านใต้ (แกน x) และขอบด้านตะวันออก (แกน z)
     const step = Math.max(W, D) > 40 ? 2 : 1;

@@ -24,6 +24,15 @@ const CFL_VEL = 1.5;    // Semi-Lagrangian ยอม CFL > 1
 const CFL_SCALAR = 0.5;    // ต่อผลรวมความเร็วไหลออกของเซลล์ (MUSCL + Euler)
 const SAMPLE_DT = 0.5;  // s — ระยะเก็บประวัติผล
 
+/** เกณฑ์ลู่เข้า — ต้องผ่านทุกข้อต่อเนื่องกัน HOLD ครั้ง (ครั้งละ SAMPLE_DT) */
+export const CONV = {
+  tMin: 60,          // s — เวลาขั้นต่ำก่อนเริ่มตัดสิน (ให้ลมร้อนเดินทางทั่วโดเมน)
+  drift: 0.05,       // K — ค่าเฉลี่ย 10 s ล่าสุดของ T ลมเข้าเทียบ 10 s ก่อนหน้า
+  balLo: 0.95, balHi: 1.05,
+  mass: 0.01,        // RMS(∇·u)·h / u_max หลัง projection
+  hold: 6,
+};
+
 export class Solver {
   constructor(mesh, params) {
     Object.assign(this, {
@@ -42,7 +51,7 @@ export class Solver {
     // ทิศลมแบบอุตุนิยมวิทยา: "พัดมาจาก" — 0° = จากทิศเหนือ (−z) พัดไปทาง +z
     this.wx = -Math.sin(wr) * this.windSpeed;
     this.wz = Math.cos(wr) * this.windSpeed;
-    this.tEnd = params.tEnd || 180;
+    this.tMax = params.tMax || 1800;   // เพดานกันไม่จบ — ปกติหยุดเมื่อผลลู่เข้า
     this.rho = airRho(this.amb);
     this.cp = AIR_CP;
     this.beta = 1 / (this.amb + 273.15);
@@ -60,6 +69,7 @@ export class Solver {
     this.fanOf = new Int16Array(N);   // หน้า v ที่เป็นพัดลม → ดัชนีโมดูล + 1
 
     this.#classifyFaces();
+    this.#buildMirror(mesh.bc);
     this.#buildProjection();
     this.reset();
   }
@@ -120,6 +130,40 @@ export class Solver {
     });
   }
 
+  /**
+   * ขอบสมมาตร (ผนังลื่น): ความเร็วตั้งฉากเป็นศูนย์ (หน้าติดเซลล์ทึบอยู่แล้ว) และความเร็วแนวขนาน
+   * ในชั้นเงาเท่ากับชั้นในสุด — ไม่มีแรงเฉือนที่ขอบ ต่างจากผนังซึ่งชั้นเงามีความเร็วศูนย์
+   */
+  #buildMirror(bc) {
+    const { NX, NY, NZ, sy, sz } = this;
+    const pairs = { u: [], v: [], w: [] };
+    const add = (arrs, ghost, inner) => { for (const a of arrs) pairs[a].push(ghost, inner); };
+    const sym = f => bc && bc[f] && bc[f].type === 'symmetry';
+    for (let k = 0; k < NZ; k++)
+      for (let j = 0; j < NY; j++) {
+        if (sym('xmin')) add(['v', 'w'], j * sy + k * sz, 1 + j * sy + k * sz);
+        if (sym('xmax')) add(['v', 'w'], NX - 1 + j * sy + k * sz, NX - 2 + j * sy + k * sz);
+      }
+    for (let j = 0; j < NY; j++)
+      for (let i = 0; i < NX; i++) {
+        if (sym('zmin')) add(['u', 'v'], i + j * sy, i + j * sy + sz);
+        if (sym('zmax')) add(['u', 'v'], i + j * sy + (NZ - 1) * sz, i + j * sy + (NZ - 2) * sz);
+      }
+    for (let k = 0; k < NZ; k++)
+      for (let i = 0; i < NX; i++) {
+        if (sym('ymin')) add(['u', 'w'], i + k * sz, i + sy + k * sz);
+        if (sym('ymax')) add(['u', 'w'], i + (NY - 1) * sy + k * sz, i + (NY - 2) * sy + k * sz);
+      }
+    this.mirror = { u: Int32Array.from(pairs.u), v: Int32Array.from(pairs.v), w: Int32Array.from(pairs.w) };
+  }
+
+  #applyMirror() {
+    for (const a of ['u', 'v', 'w']) {
+      const m = this.mirror[a], f = this[a];
+      for (let q = 0; q < m.length; q += 2) f[m[q]] = f[m[q + 1]];
+    }
+  }
+
   #buildProjection() {
     const { N, type, sy, sz, fixU, fixV, fixW } = this;
     this.pm = new Uint8Array(N);
@@ -169,7 +213,10 @@ export class Solver {
     this.time = 0; this.steps = 0; this.dt = 0;
     this.vmax = 1;
     this.divErr = 0;
-    this.hist = { t: [], tin: this.mods.map(() => []), cin: this.mods.map(() => []), bal: [] };
+    this.hist = { t: [], tin: this.mods.map(() => []), cin: this.mods.map(() => []), bal: [], res: { mass: [], mom: [], energy: [] } };
+    this.prev = { u: this.u.slice(), v: this.v.slice(), w: this.w.slice(), T: this.T.slice() };
+    this.hold = 0;
+    this.checks = null;
     this.acc = this.#newAcc();
     this.nextSample = SAMPLE_DT;
     this.modState = this.mods.map(m => ({ Tin: this.amb, TinMax: this.amb, Cin: 0, Tdis: this.amb, capF: 1, qRej: 0 }));
@@ -191,6 +238,7 @@ export class Solver {
     this.#diffuseVelocity(dt);
     this.#porous(dt);
     this.#applyFixed();
+    this.#applyMirror();
     const it = this.steps < 20 ? 80 : this.pIters;
     this.project(it);
     this.#adaptIterations();
@@ -574,8 +622,34 @@ export class Solver {
     H.t.push(this.time);
     this.mods.forEach((m, mi) => { H.tin[mi].push(acc.tin[mi] / t); H.cin[mi].push(acc.cin[mi] / t); });
     H.bal.push({ qIn: acc.qIn / t, qOut: acc.qOut / t, dE: acc.dE / t });
+    this.#residuals();
     this.acc = this.#newAcc();
     this.#checkConvergence();
+  }
+
+  /**
+   * Residual แบบ CFX (ใช้ดูแนวโน้ม): RMS ของการเปลี่ยนแปลงในช่วง SAMPLE_DT ที่ทำให้ไร้มิติ
+   *   mass   = RMS(∇·u)·h / u_max
+   *   mom    = RMS(Δu) / u_max
+   *   energy = RMS(ΔT) / ΔT_ref   (ΔT_ref = อุณหภูมิลมเป่าเกินอากาศภายนอกสูงสุด)
+   */
+  #residuals() {
+    const { fluid, u, v, w, T, prev, sy, sz } = this;
+    let du = 0, dT = 0;
+    for (let a = 0; a < fluid.length; a++) {
+      const c = fluid[a];
+      const x = u[c] - prev.u[c], y = v[c] - prev.v[c], z = w[c] - prev.w[c], t = T[c] - prev.T[c];
+      du += x * x + y * y + z * z; dT += t * t;
+    }
+    void sy; void sz;
+    const n = Math.max(1, fluid.length);
+    let dTref = 1;
+    for (const st of this.modState) dTref = Math.max(dTref, st.Tdis - this.amb);
+    const R = this.hist.res;
+    R.mass.push(this.divErr);
+    R.mom.push(Math.sqrt(du / (3 * n)) / Math.max(0.5, this.vmax));
+    R.energy.push(Math.sqrt(dT / n) / dTref);
+    prev.u.set(u); prev.v.set(v); prev.w.set(w); prev.T.set(T);
   }
 
   /** ค่าเฉลี่ยของประวัติในช่วงเวลา [t0, t1] */
@@ -596,20 +670,25 @@ export class Solver {
 
   #checkConvergence() {
     const t = this.time;
-    if (t < 60) return;
-    let ok = true, maxDrift = 0;
+    let maxDrift = 0;
     this.mods.forEach((m, mi) => {
       if (!m.active) return;
       const a = this.#windowMean(this.hist.tin[mi], t - 10, t);
       const b = this.#windowMean(this.hist.tin[mi], t - 20, t - 10);
       const d = Math.abs(a - b);
-      if (d > maxDrift) maxDrift = d;
-      if (!(d <= 0.05)) ok = false;
+      maxDrift = isFinite(d) && isFinite(maxDrift) ? Math.max(maxDrift, d) : NaN;
     });
     const bal = this.energyBalance(10).ratio;
-    this.drift = maxDrift;
-    if (!(bal >= 0.95 && bal <= 1.05)) ok = false;
-    this.converged = ok;
+    this.drift = t >= 20 ? maxDrift : NaN;
+    this.checks = {
+      time: t >= CONV.tMin,
+      drift: this.drift <= CONV.drift,
+      balance: bal >= CONV.balLo && bal <= CONV.balHi,
+      mass: this.divErr <= CONV.mass,
+    };
+    const ok = Object.values(this.checks).every(Boolean);
+    this.hold = ok ? this.hold + 1 : 0;
+    this.converged = this.hold >= CONV.hold;
   }
 
   /* ───────── ผลลัพธ์ ───────── */
@@ -634,13 +713,14 @@ export class Solver {
     });
     const bal = this.energyBalance(10);
     return {
-      time: t, steps: this.steps, dt: this.dt, tEnd: this.tEnd,
+      time: t, steps: this.steps, dt: this.dt, tMax: this.tMax,
+      checks: this.checks, hold: this.hold, conv: CONV,
       avgWindow: win,
       divErr: this.divErr, pIters: this.pIters, drift: this.drift ?? NaN,
       balance: bal, converged: this.converged,
       vmax: this.vmax,
       modules: mods,
-      history: { t: this.hist.t.slice(-400), tin: this.hist.tin.map(a => a.slice(-400)) },
+      history: decimate(this.hist, 500),
     };
   }
 
@@ -659,6 +739,18 @@ export class Solver {
       }
     return { T: this.T.slice(), C: this.C.slice(), u: uc, v: vc, w: wc };
   }
+}
+
+/** ย่อประวัติให้เหลือไม่เกิน n จุด (ส่งไปวาดกราฟ) — เก็บจุดสุดท้ายเสมอ */
+function decimate(H, n) {
+  const L = H.t.length, step = Math.max(1, Math.ceil(L / n));
+  const idx = [];
+  for (let a = (L - 1) % step; a < L; a += step) idx.push(a);
+  const pick = arr => idx.map(a => arr[a]);
+  return {
+    t: pick(H.t), tin: H.tin.map(pick),
+    res: { mass: pick(H.res.mass), mom: pick(H.res.mom), energy: pick(H.res.energy) },
+  };
 }
 
 /** van Leer: ความชันแบบค่าเฉลี่ยฮาร์มอนิก เป็นศูนย์เมื่อสองข้างต่างทิศ */

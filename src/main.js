@@ -3,7 +3,7 @@
  */
 
 import { MODELS, getModel, unitSize, status as unitStatus, MODULE_H, MODULE_D } from './models.js';
-import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene } from './scene.js';
+import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES } from './scene.js';
 import { buildMesh } from './mesher.js';
 import { Viewer } from './viewer.js';
 import { Runner } from './runner.js';
@@ -298,7 +298,7 @@ function renderProps() {
 
 const SETTINGS = [
   ['#s-amb', 'site', 'ambient'], ['#s-wind', 'site', 'windSpeed'], ['#s-dir', 'site', 'windDir'],
-  ['#s-cell', 'sim', 'cell'], ['#s-tend', 'sim', 'tEnd'], ['#s-margin', 'sim', 'margin'], ['#s-top', 'sim', 'top'],
+  ['#s-cell', 'sim', 'cell'], ['#s-tmax', 'sim', 'tMax'],
   ['#p-tref', 'perf', 'Tref'], ['#p-tlim', 'perf', 'Tlimit'],
 ];
 
@@ -307,6 +307,12 @@ function renderSettings() {
   $('#p-kcap').value = round2(scene.perf.kCap * 100);
   $('#p-kpow').value = round2(scene.perf.kPow * 100);
   $('#proj-name').value = scene.name;
+  for (const f of BC_FACES) {
+    const row = $(`[data-bc="${f}"]`);
+    $('select', row).value = scene.bc[f].type;
+    const d = $('input', row);
+    if (d) d.value = scene.bc[f].dist;
+  }
 }
 
 function bindSettings() {
@@ -320,17 +326,30 @@ function bindSettings() {
   $('#p-kcap').addEventListener('change', (e) => edit(() => { scene.perf.kCap = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#p-kpow').addEventListener('change', (e) => edit(() => { scene.perf.kPow = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#proj-name').addEventListener('change', (e) => { scene.name = e.target.value.trim() || 'โปรเจกต์'; saveAutosave(); });
+  for (const f of BC_FACES) {
+    const row = $(`[data-bc="${f}"]`);
+    $('select', row).addEventListener('change', (e) => edit(() => { scene.bc[f].type = e.target.value; }));
+    $('input', row)?.addEventListener('change', (e) => {
+      const v = parseFloat(e.target.value);
+      if (!isFinite(v)) { renderSettings(); return; }
+      edit(() => { scene.bc[f].dist = Math.min(40, Math.max(0.5, v)); });
+    });
+  }
 }
+
+/** ต้องมีขอบเปิดอย่างน้อยหนึ่งด้าน มิฉะนั้นความร้อนออกจากโดเมนไม่ได้และผลไม่มีวันนิ่ง */
+function hasOpenFace() { return BC_FACES.some(f => scene.bc[f].type === 'open'); }
 
 function updateEstimate() {
   const d = domainOf(scene);
-  const steps = scene.sim.tEnd / (0.25 * d.h);
+  // โดยทั่วไปลู่เข้าในช่วง 60–150 วินาทีจำลอง — ประมาณที่ 120 s
+  const steps = 120 / (0.25 * d.h);
   const sec = d.cells * 0.6e-6 * steps;
   const el = $('#mesh-info');
   el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์`;
   el.classList.toggle('warn', d.cells > 1.2e6);
   if (run.state !== 'running') $('#estimate').textContent = scene.objects.some(o => o.type === 'cdu')
-    ? `${fmtK(d.cells)} เซลล์ · ≤ ${fmtDur(sec)}` : '';
+    ? `${fmtK(d.cells)} เซลล์ · ประมาณ ${fmtDur(sec)}` : '';
 }
 
 /* ───────── การคำนวณ ───────── */
@@ -342,6 +361,10 @@ function startOrToggle() {
     updateRunUI();
     return;
   }
+  if (run.state === 'done' && run.report?.converged && !run.stale) {
+    toast('ผลลู่เข้าแล้ว — แก้แบบหรือกด ↺ รีเซ็ตผล เพื่อคำนวณใหม่');
+    return;
+  }
   if ((run.state === 'paused' || run.state === 'done') && !run.stale && run.mesh) {
     run.state = 'running';
     run.lastWall = performance.now(); run.lastT = run.report?.time || 0;
@@ -350,6 +373,7 @@ function startOrToggle() {
     return;
   }
   if (!scene.objects.some(o => o.type === 'cdu')) { toast('ยังไม่มี CDU ในฉาก — กด + CDU แล้ววางเครื่องก่อน'); return; }
+  if (!hasOpenFace()) { toast('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน ไม่เช่นนั้นลมร้อนออกไม่ได้และผลจะไม่ลู่เข้า', 5000); return; }
   const d = domainOf(scene);
   if (d.cells > 3.5e6) { toast(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์) — เพิ่มขนาดเซลล์หรือลดระยะเผื่อ`); return; }
   if (d.cells > 1.2e6 && !confirm(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`)) return;
@@ -366,7 +390,7 @@ function startOrToggle() {
   viewer.setResults(null);
   runner.send({
     cmd: 'init', mesh,
-    params: { ambient: scene.site.ambient, windSpeed: scene.site.windSpeed, windDir: scene.site.windDir, perf: scene.perf, tEnd: scene.sim.tEnd },
+    params: { ambient: scene.site.ambient, windSpeed: scene.site.windSpeed, windDir: scene.site.windDir, perf: scene.perf, tMax: scene.sim.tMax },
   });
   runner.send({ cmd: 'run' });
   renderWarnings(mesh.warnings);
@@ -415,7 +439,7 @@ function onEngineMessage(msg) {
   if (msg.type === 'done') {
     run.state = 'done';
     const conv = msg.reason === 'converged';
-    toast(conv ? `ลู่เข้าแล้วที่ t = ${msg.report.time.toFixed(0)} s` : `ครบเวลาจำลอง ${msg.report.time.toFixed(0)} s`);
+    toast(conv ? `ลู่เข้าแล้วที่ t = ${msg.report.time.toFixed(0)} s` : `ถึงเพดานเวลา ${msg.report.time.toFixed(0)} s แต่ยังไม่ลู่เข้า — กดคำนวณต่อได้`, 5000);
     addComparison();
   }
   renderResults();
@@ -470,27 +494,34 @@ function updateRunUI() {
   st.classList.toggle('done', run.state === 'done');
   b.classList.toggle('running', run.state === 'running');
   if (run.state === 'running') b.textContent = '⏸ หยุด';
-  else if ((run.state === 'paused' || run.state === 'done') && !run.stale) b.textContent = run.state === 'done' ? '▶ คำนวณต่อ +60 s' : '▶ คำนวณต่อ';
+  else if (run.state === 'paused' && !run.stale) b.textContent = '▶ คำนวณต่อ';
+  else if (run.state === 'done' && !run.stale) b.textContent = r?.converged ? '✓ ลู่เข้าแล้ว' : '▶ คำนวณต่อจนลู่เข้า';
   else b.textContent = '▶ คำนวณ';
 
-  const tEnd = r?.tEnd ?? scene.sim.tEnd;
   const t = r?.time ?? 0;
+  const ck = r?.checks;
+  const nPass = ck ? Object.values(ck).filter(Boolean).length : 0, nAll = ck ? Object.keys(ck).length : 4;
   let text = 'พร้อมคำนวณ';
   if (run.stale) text = 'แบบเปลี่ยน — กดคำนวณใหม่';
   else if (run.state === 'running') text = t < 0.01 ? 'กำลังเตรียมเมช…' : 'กำลังคำนวณ';
   else if (run.state === 'paused') text = 'หยุดชั่วคราว';
-  else if (run.state === 'done') text = r?.converged ? 'ลู่เข้าแล้ว ✓' : 'ครบเวลาจำลอง';
+  else if (run.state === 'done') text = r?.converged ? 'ลู่เข้าแล้ว ✓' : 'ถึงเพดานเวลา (ยังไม่ลู่เข้า)';
   $('#st-text').textContent = text;
-  $('#st-time').textContent = `t ${t.toFixed(1)}/${tEnd.toFixed(0)} s`;
-  $('#st-bar').style.width = `${Math.min(100, (t / tEnd) * 100)}%`;
-  if (run.state === 'running' && run.rate > 0) $('#estimate').textContent = `เหลือไม่เกิน ~${fmtDur((tEnd - t) / run.rate)}`;
+  // ความคืบหน้า = เกณฑ์ลู่เข้าที่ผ่าน + จำนวนครั้งที่ผ่านต่อเนื่อง
+  let prog = 0;
+  if (r?.converged) prog = 1;
+  else if (ck) prog = (nPass / nAll) * 0.8 + (r.hold / r.conv.hold) * 0.2;
+  $('#st-time').textContent = r ? `t ${t.toFixed(1)} s · เกณฑ์ ${r.converged ? nAll : nPass}/${nAll}` : 't 0.0 s';
+  $('#st-bar').style.width = `${Math.min(100, prog * 100)}%`;
+  if (run.state === 'running' && r) $('#estimate').textContent = isFinite(r.drift)
+    ? `ΔT ลมเข้าเปลี่ยน ±${r.drift.toFixed(3)} K (เป้า ≤ ${r.conv.drift})` : 'กำลังสะสมข้อมูลเพื่อตรวจการลู่เข้า…';
   else updateEstimate();
 
   const badge = $('#res-badge');
   badge.className = 'badge';
   if (run.stale) { badge.textContent = 'ผลเก่า (แบบถูกแก้ไข)'; badge.classList.add('stale'); }
   else if (run.state === 'running') { badge.textContent = 'กำลังคำนวณ — ผลเปลี่ยนแบบสด'; badge.classList.add('run'); }
-  else if (run.state === 'done') { badge.textContent = r?.converged ? 'ลู่เข้าแล้ว' : 'ครบเวลา (ยังไม่นิ่งตามเกณฑ์)'; badge.classList.add(r?.converged ? 'ok' : 'stale'); }
+  else if (run.state === 'done') { badge.textContent = r?.converged ? 'ลู่เข้าแล้ว' : 'ยังไม่ลู่เข้า (ถึงเพดานเวลา)'; badge.classList.add(r?.converged ? 'ok' : 'stale'); }
   else if (run.state === 'paused') badge.textContent = 'หยุดชั่วคราว';
   else badge.textContent = 'ยังไม่มีผล';
   $('#btn-csv').disabled = $('#btn-report').disabled = !run.report;
@@ -506,6 +537,7 @@ function renderResults() {
     $('#quality').innerHTML = '';
     $('#advice').innerHTML = '<li class="muted">กด ▶ คำนวณ เพื่อดูผล</li>';
     drawChart(null);
+    drawResiduals();
     return;
   }
   const rows = [];
@@ -541,6 +573,7 @@ function renderResults() {
   renderQuality();
   renderAdvice(units);
   drawChart(units);
+  drawResiduals();
 }
 
 function kpi(k, v, s, st) {
@@ -556,11 +589,18 @@ function renderQuality() {
   q.push(['เวลาจำลอง · สเต็ป', `${r.time.toFixed(1)} s · ${r.steps}`]);
   q.push(['Δt', `${(r.dt * 1000).toFixed(0)} ms`]);
   q.push(['รอบ Poisson ต่อสเต็ป', `${r.pIters}`]);
-  q.push(['ความคลาดเคลื่อนมวล', `${(r.divErr * 100).toFixed(2)}%`, cls(r.divErr < 0.01)]);
+  // เกณฑ์ลู่เข้า — ต้องผ่านทุกข้อต่อเนื่องกัน
+  const C = r.conv, ck = r.checks || {};
+  const mark = (ok) => ok ? '✓ ' : '✗ ';
   const bal = r.balance.ratio;
-  q.push(['สมดุลพลังงาน (10 s)', isFinite(bal) ? `${(bal * 100).toFixed(1)}%` : '–', cls(bal >= 0.95 && bal <= 1.05)]);
+  q.push(['<b>เกณฑ์ลู่เข้า</b>', r.converged ? '<b>ผ่านครบ ✓</b>' : `ผ่านต่อเนื่อง ${r.hold}/${C.hold} ครั้ง`, r.converged ? 'good' : '']);
+  q.push([`${mark(ck.time)}เวลาจำลอง ≥ ${C.tMin} s`, `${r.time.toFixed(1)} s`, cls(ck.time)]);
+  q.push([`${mark(ck.drift)}T ลมเข้าเปลี่ยน ≤ ±${C.drift} K`, isFinite(r.drift) ? `±${r.drift.toFixed(3)} K` : 'รอข้อมูล 20 s', cls(ck.drift)]);
+  q.push([`${mark(ck.balance)}สมดุลพลังงาน ${C.balLo * 100}–${C.balHi * 100}%`, isFinite(bal) ? `${(bal * 100).toFixed(1)}%` : '–', cls(ck.balance)]);
+  q.push([`${mark(ck.mass)}ความคลาดเคลื่อนมวล ≤ ${C.mass * 100}%`, `${(r.divErr * 100).toFixed(2)}%`, cls(ck.mass)]);
   q.push(['ความร้อนจาก CDU', `${(r.balance.qIn / 1000).toFixed(1)} kW`]);
-  q.push(['การเปลี่ยน T ลมเข้า (10 s)', isFinite(r.drift) ? `±${r.drift.toFixed(3)} K` : 'รอ 60 s', cls(r.drift <= 0.05)]);
+  const bcName = { open: 'เปิด', wall: 'ผนัง', symmetry: 'สมมาตร' };
+  q.push(['ขอบ X− / X+ / Z− / Z+ / บน', ['xmin', 'xmax', 'zmin', 'zmax', 'ymax'].map(f => bcName[M.bc[f].type]).join(' / ')]);
   const fa = M.modules.filter(m => m.active);
   const ratio = fa.reduce((s, m) => s + m.fanAreaGrid, 0) / Math.max(1e-6, fa.reduce((s, m) => s + m.fanAreaReal, 0));
   q.push(['พื้นที่พัดลมบนกริด / จริง', `${(ratio * 100).toFixed(0)}%`, cls(ratio > 0.6 && ratio < 1.6)]);
@@ -595,7 +635,7 @@ function renderAdvice(units) {
   if (!out.length) out.push('<li><b class="st-ok">ทุกเครื่อง ΔT &lt; 1 K</b> — ลมร้อนวนกลับน้อย ผังนี้ใช้ได้ในเงื่อนไขที่ตั้งไว้</li>');
   const r = run.report;
   if (run.mesh.h >= 0.45) out.push('<li class="muted">ผลจากเมชหยาบ (0.5 ม.) ใช้ร่างผังเท่านั้น — ยืนยันด้วยเซลล์ 0.25–0.35 ม.</li>');
-  if (run.state === 'done' && !r.converged) out.push('<li class="muted">ยังไม่นิ่งตามเกณฑ์ ±0.05 K — กด "คำนวณต่อ" เพื่อเดินต่อ</li>');
+  if (run.state === 'done' && !r.converged) out.push('<li class="muted">ถึงเพดานเวลาแต่ยังไม่ลู่เข้า — กด "คำนวณต่อจนลู่เข้า" หรือเพิ่มเพดานเวลาในหัวข้อขั้นสูง</li>');
   if (!(scene.site.windSpeed > 0)) out.push('<li class="muted">คำนวณแบบไม่มีลม (มักเป็นกรณีแย่ที่สุด) — ลองใส่ลม 1–3 m/s จากทิศที่พบบ่อยเพื่อเทียบ</li>');
   $('#advice').innerHTML = out.join('');
 }
@@ -640,7 +680,7 @@ function drawChart(units) {
     x.beginPath(); x.moveTo(pl, Y(v)); x.lineTo(W - pr, Y(v)); x.stroke();
     x.fillText(v.toFixed(1), 4, Y(v) + 4);
   }
-  const t0 = t[0], t1 = t[t.length - 1], stepX = t1 - t0 > 120 ? 30 : t1 - t0 > 40 ? 10 : 5;
+  const t0 = t[0], t1 = t[t.length - 1], stepX = t1 - t0 > 400 ? 120 : t1 - t0 > 120 ? 30 : t1 - t0 > 40 ? 10 : 5;
   for (let v = Math.ceil(t0 / stepX) * stepX; v <= t1; v += stepX) x.fillText(`${v}s`, X(v) - 8, H - pb + 14);
   // เส้นอากาศภายนอก
   x.setLineDash([4, 4]); x.strokeStyle = '#86a0b3';
@@ -661,6 +701,54 @@ function drawChart(units) {
     lx += w;
   }
   $('#chart-note').textContent = `เส้นประ = อากาศภายนอก ${amb} °C`;
+}
+
+/* กราฟ residual (สเกล log) แบบ CFX */
+function drawResiduals() {
+  const cv = $('#chart-res');
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 600, H = cv.clientHeight || 220;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const x = cv.getContext('2d');
+  x.scale(dpr, dpr);
+  x.clearRect(0, 0, W, H);
+  const r = run.report;
+  const h = r?.history;
+  if (!h || h.t.length < 2) {
+    x.fillStyle = '#5c7385'; x.font = '13px sans-serif';
+    x.fillText('กราฟ residual จะแสดงระหว่างคำนวณ', 14, 26);
+    return;
+  }
+  const series = [
+    { name: 'มวล (continuity)', color: '#4fc3f7', ys: h.res.mass },
+    { name: 'โมเมนตัม', color: '#f2c14e', ys: h.res.mom },
+    { name: 'พลังงาน', color: '#ef6f6c', ys: h.res.energy },
+  ];
+  const lo = -8, hi = 0;   // log10
+  const pl = 42, pr = 10, pt = 10, pb = 44;
+  const t = h.t;
+  const X = v => pl + (v - t[0]) / Math.max(1e-6, t[t.length - 1] - t[0]) * (W - pl - pr);
+  const Y = v => pt + (1 - (Math.log10(Math.max(1e-8, v)) - lo) / (hi - lo)) * (H - pt - pb);
+  x.strokeStyle = '#243a4c'; x.fillStyle = '#86a0b3'; x.font = '11px "IBM Plex Mono", monospace'; x.lineWidth = 1;
+  for (let e = lo; e <= hi; e += 2) {
+    const y = Y(10 ** e);
+    x.beginPath(); x.moveTo(pl, y); x.lineTo(W - pr, y); x.stroke();
+    x.fillText(`1e${e}`, 4, y + 4);
+  }
+  const t1 = t[t.length - 1], stepX = t1 - t[0] > 400 ? 120 : t1 - t[0] > 120 ? 30 : 10;
+  for (let v = Math.ceil(t[0] / stepX) * stepX; v <= t1; v += stepX) x.fillText(`${v}s`, X(v) - 8, H - pb + 14);
+  for (const s of series) {
+    x.strokeStyle = s.color; x.lineWidth = 1.5; x.beginPath();
+    s.ys.forEach((y, a) => (a ? x.lineTo(X(t[a]), Y(y)) : x.moveTo(X(t[a]), Y(y))));
+    x.stroke();
+  }
+  let lx = pl;
+  x.font = '11.5px sans-serif';
+  for (const s of series) {
+    x.fillStyle = s.color; x.fillRect(lx, H - 20, 12, 3);
+    x.fillStyle = '#b9ccd9'; x.fillText(s.name, lx + 16, H - 15);
+    lx += x.measureText(s.name).width + 30;
+  }
 }
 
 /* เปรียบเทียบทางเลือก */
@@ -781,7 +869,7 @@ function exportReport() {
   const html = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>${esc(scene.name)} — CDU Airflow CFD</title><style>${css}</style></head><body>
     <h1>${esc(scene.name)}</h1><p class="muted">รายงานจาก CDU Airflow CFD · ${date}</p>
     <p>อากาศภายนอก ${scene.site.ambient} °C · ลม ${scene.site.windSpeed} m/s จากทิศ ${scene.site.windDir}° · เซลล์ ${run.mesh.h} ม.
-      (${run.mesh.nx}×${run.mesh.ny}×${run.mesh.nz}) · เวลาจำลอง ${r.time.toFixed(0)} s · ${r.converged ? 'ลู่เข้าแล้ว' : 'ยังไม่นิ่งตามเกณฑ์'}
+      (${run.mesh.nx}×${run.mesh.ny}×${run.mesh.nz}) · เวลาจำลอง ${r.time.toFixed(0)} s · ${r.converged ? 'ลู่เข้าแล้ว' : 'ยังไม่ลู่เข้า'}
       · สมดุลพลังงาน ${(r.balance.ratio * 100).toFixed(1)}%</p>
     <img src="${img}" alt="ภาพ 3 มิติ">
     <h2>ผลรายเครื่อง</h2>
@@ -856,7 +944,7 @@ function bindUI() {
     $$('.tab').forEach(x => x.classList.toggle('on', x === b));
     $('#tab-tool').hidden = b.dataset.tab !== 'tool';
     $('#tab-readme').hidden = b.dataset.tab !== 'readme';
-    if (b.dataset.tab === 'tool') { viewer.resize(); drawChart(unitsNow()); }
+    if (b.dataset.tab === 'tool') { viewer.resize(); drawChart(unitsNow()); drawResiduals(); }
   }));
   $$('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $$('.vt').forEach(b => b.addEventListener('click', () => {
@@ -945,7 +1033,7 @@ function bindUI() {
       nudge(k === 'arrowleft' ? -s : k === 'arrowright' ? s : 0, k === 'arrowup' ? -s : k === 'arrowdown' ? s : 0);
     }
   });
-  window.addEventListener('resize', () => drawChart(unitsNow()));
+  window.addEventListener('resize', () => { drawChart(unitsNow()); drawResiduals(); });
 }
 
 function renderModelTable() {

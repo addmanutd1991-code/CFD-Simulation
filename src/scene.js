@@ -12,7 +12,12 @@ import { DEFAULT_PERF, unitSize } from './models.js';
 
 export const DEFAULTS = {
   site: { ambient: 35, windSpeed: 0, windDir: 0 },
-  sim: { cell: 0.25, tEnd: 180, margin: 4, top: 5 },
+  sim: { cell: 0.25, tMax: 1800 },
+  bc: {
+    xmin: { type: 'open', dist: 4 }, xmax: { type: 'open', dist: 4 },
+    zmin: { type: 'open', dist: 4 }, zmax: { type: 'open', dist: 4 },
+    ymax: { type: 'open', dist: 5 }, ymin: { type: 'wall' },
+  },
   perf: { ...DEFAULT_PERF },
 };
 
@@ -22,9 +27,22 @@ export function newScene() {
     name: 'โปรเจกต์ใหม่',
     site: { ...DEFAULTS.site },
     sim: { ...DEFAULTS.sim },
+    bc: cloneBC(DEFAULTS.bc),
     perf: { ...DEFAULTS.perf },
     objects: [],
   };
+}
+
+/**
+ * ขอบเขตโดเมน (boundary) หกด้าน
+ *   type: 'open' = ขอบเปิด ความดันบรรยากาศ · 'wall' = ผนังทึบ (no-slip) · 'symmetry' = สมมาตร (ผนังลื่น)
+ *   dist: ระยะจากวัตถุที่อยู่ริมสุดถึงขอบด้านนั้น (ม.) — ด้านพื้น (ymin) ไม่มีระยะ อยู่ที่ y = 0 เสมอ
+ */
+export const BC_FACES = ['xmin', 'xmax', 'zmin', 'zmax', 'ymax', 'ymin'];
+export const BC_TYPES = ['open', 'wall', 'symmetry'];
+
+export function cloneBC(bc) {
+  return Object.fromEntries(BC_FACES.map(f => [f, { ...DEFAULTS.bc[f], ...(bc?.[f] || {}) }]));
 }
 
 export function nextId(scene) {
@@ -77,7 +95,8 @@ export function objectBounds(o) {
  * ปัดขนาดให้ลงตัวกับขนาดเซลล์
  */
 export function domainOf(scene) {
-  const { cell, margin, top } = scene.sim;
+  const { cell } = scene.sim;
+  const bc = scene.bc || DEFAULTS.bc;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, ymax = 0;
   for (const o of scene.objects) {
     const b = objectBounds(o);
@@ -87,10 +106,10 @@ export function domainOf(scene) {
   }
   if (!isFinite(x0)) { x0 = 0; x1 = 10; z0 = 0; z1 = 10; }
   const snap = v => Math.round(v / cell) * cell;
-  const ox = snap(x0 - margin), oz = snap(z0 - margin);
-  const W = Math.min(150, Math.ceil((x1 + margin - ox) / cell) * cell);
-  const D = Math.min(150, Math.ceil((z1 + margin - oz) / cell) * cell);
-  const H = Math.min(60, Math.ceil(Math.max(6, ymax + top) / cell) * cell);
+  const ox = snap(x0 - bc.xmin.dist), oz = snap(z0 - bc.zmin.dist);
+  const W = Math.min(150, Math.ceil((x1 + bc.xmax.dist - ox) / cell) * cell);
+  const D = Math.min(150, Math.ceil((z1 + bc.zmax.dist - oz) / cell) * cell);
+  const H = Math.min(60, Math.ceil(Math.max(3, ymax + bc.ymax.dist) / cell) * cell);
   const nx = Math.round(W / cell), ny = Math.round(H / cell), nz = Math.round(D / cell);
   return { ox, oz, W, H, D, h: cell, nx, ny, nz, cells: nx * ny * nz };
 }
@@ -200,6 +219,15 @@ export function normalizeScene(raw) {
   s.name = String(raw.name || s.name);
   Object.assign(s.site, raw.site || {});
   Object.assign(s.sim, raw.sim || {});
+  // ไฟล์รุ่นก่อนมี margin/top ร่วมกันทุกด้าน และมีเวลาจำลองสูงสุดแบบตายตัว
+  if (raw.sim?.margin != null) for (const f of ['xmin', 'xmax', 'zmin', 'zmax']) s.bc[f].dist = raw.sim.margin;
+  if (raw.sim?.top != null) s.bc.ymax.dist = raw.sim.top;
+  delete s.sim.margin; delete s.sim.top; delete s.sim.tEnd;
+  if (raw.bc) s.bc = cloneBC(raw.bc);
+  for (const f of BC_FACES) {
+    if (!BC_TYPES.includes(s.bc[f].type) || (f === 'ymin' && s.bc[f].type === 'open')) s.bc[f].type = DEFAULTS.bc[f].type;
+    if (f !== 'ymin') s.bc[f].dist = Math.max(0.5, Number(s.bc[f].dist) || DEFAULTS.bc[f].dist);
+  }
   Object.assign(s.perf, raw.perf || {});
   const objs = Array.isArray(raw.objects) ? raw.objects : [];
   let id = 1;

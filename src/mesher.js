@@ -14,7 +14,7 @@
  */
 
 import { unitModules, unitSize, FAN_AREA } from './models.js';
-import { domainOf } from './scene.js';
+import { domainOf, cloneBC } from './scene.js';
 
 export const FLUID = 0, SOLID = 1, OPEN = 2;
 
@@ -41,12 +41,15 @@ export function buildMesh(scene) {
   const I = x => Math.floor((x - ox) / h) + 1, J = y => Math.floor(y / h) + 1, K = z => Math.floor((z - oz) / h) + 1;
   const ci = (a, lo, hi) => a < lo ? lo : a > hi ? hi : a;
 
-  // ชั้นเงา: พื้นเป็นของแข็ง ด้านข้างและด้านบนเป็นขอบเปิด
+  // ชั้นเงาตามชนิดขอบที่เลือก: ขอบเปิด = OPEN, ผนัง/สมมาตร = SOLID
+  // (สมมาตรต่างจากผนังตรงที่ solver สะท้อนความเร็วแนวขนานเข้าไปในชั้นเงา → ผนังลื่น)
+  const bc = cloneBC(scene.bc);
+  const faceOf = (i, j, k) => j === 0 ? 'ymin' : j === NY - 1 ? 'ymax' : i === 0 ? 'xmin' : i === NX - 1 ? 'xmax' : k === 0 ? 'zmin' : 'zmax';
   for (let k = 0; k < NZ; k++)
     for (let j = 0; j < NY; j++)
       for (let i = 0; i < NX; i++) {
         if (i > 0 && i < NX - 1 && j > 0 && j < NY - 1 && k > 0 && k < NZ - 1) continue;
-        type[i + j * sy + k * sz] = j === 0 ? SOLID : OPEN;
+        type[i + j * sy + k * sz] = bc[faceOf(i, j, k)].type === 'open' ? OPEN : SOLID;
       }
 
   /** วนเซลล์ภายในที่กึ่งกลางอยู่ในกรอบ AABB ที่กำหนด */
@@ -266,7 +269,7 @@ export function buildMesh(scene) {
   }));
 
   return {
-    dom, nx, ny, nz, h, ox, oz, NX, NY, NZ, N, sy, sz,
+    dom, nx, ny, nz, h, ox, oz, NX, NY, NZ, N, sy, sz, bc,
     type, kp, modules: pack,
     units: units.map(u => ({ id: u.id, name: u.name, model: u.model, modules: u.modules.map(m => modules.indexOf(m)) })),
     stats: { fluid, porous, solid: nx * ny * nz - fluid },

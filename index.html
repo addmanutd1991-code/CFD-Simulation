@@ -118,7 +118,7 @@
               <label><input type="checkbox" id="d-section" checked> ระนาบหน้าตัด</label>
               <label><input type="checkbox" id="d-particles" checked> อนุภาคลม</label>
               <label><input type="checkbox" id="d-iso" checked> ผิวลมร้อน</label>
-              <label><input type="checkbox" id="d-labels" checked> ป้ายชื่อ</label>
+              <label title="ปิดไว้เพื่อไม่ให้ตัวหนังสือบังผล"><input type="checkbox" id="d-labels"> ป้ายชื่อ</label>
             </div>
             <label class="row">ผิวลมร้อนที่ ΔT ≥ <span class="mono val" id="d-iso-val">2.0 K</span></label>
             <input type="range" id="d-iso-dt" min="0.5" max="8" step="0.5" value="2">
@@ -146,11 +146,10 @@
                 <option value="0.2">0.20 ม. — ละเอียดมาก (ช้า)</option>
               </select>
             </label>
-            <label class="row">เวลาจำลองสูงสุด (s) <input type="number" id="s-tend" step="10" min="30" max="900"></label>
+            <p class="note">คำนวณจนกว่าจะลู่เข้า (ดูเกณฑ์ในแผง "คุณภาพการคำนวณ") — ไม่ต้องกำหนดเวลา</p>
             <details>
               <summary>ขั้นสูง</summary>
-              <label class="row">ระยะเผื่อโดเมนรอบข้าง (ม.) <input type="number" id="s-margin" step="0.5" min="2" max="15"></label>
-              <label class="row">ระยะเผื่อเหนือวัตถุสูงสุด (ม.) <input type="number" id="s-top" step="0.5" min="3" max="20"></label>
+              <label class="row">เพดานเวลาจำลอง กันไม่จบ (s) <input type="number" id="s-tmax" step="60" min="120" max="7200"></label>
               <label class="row">T พิกัดของ capacity (°C) <input type="number" id="p-tref" step="0.5"></label>
               <label class="row">capacity ลดลง (%/K) <input type="number" id="p-kcap" step="0.1" min="0" max="5"></label>
               <label class="row">กำลังไฟเพิ่มขึ้น (%/K) <input type="number" id="p-kpow" step="0.1" min="0" max="8"></label>
@@ -159,6 +158,23 @@
             </details>
             <div class="mesh-info mono" id="mesh-info"></div>
           </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h3>ขอบเขตโดเมน (Boundary)</h3></div>
+          <table class="bc-table">
+            <thead><tr><th>ด้าน</th><th>ชนิด</th><th class="n">ระยะจากวัตถุ (ม.)</th></tr></thead>
+            <tbody>
+              <tr data-bc="xmin"><td><b>X−</b> <span class="muted">ตะวันตก</span></td><td><select><option value="open">เปิด</option><option value="wall">ผนัง</option><option value="symmetry">สมมาตร</option></select></td><td class="n"><input type="number" step="0.5" min="0.5" max="40"></td></tr>
+              <tr data-bc="xmax"><td><b>X+</b> <span class="muted">ตะวันออก</span></td><td><select><option value="open">เปิด</option><option value="wall">ผนัง</option><option value="symmetry">สมมาตร</option></select></td><td class="n"><input type="number" step="0.5" min="0.5" max="40"></td></tr>
+              <tr data-bc="zmin"><td><b>Z−</b> <span class="muted">เหนือ</span></td><td><select><option value="open">เปิด</option><option value="wall">ผนัง</option><option value="symmetry">สมมาตร</option></select></td><td class="n"><input type="number" step="0.5" min="0.5" max="40"></td></tr>
+              <tr data-bc="zmax"><td><b>Z+</b> <span class="muted">ใต้</span></td><td><select><option value="open">เปิด</option><option value="wall">ผนัง</option><option value="symmetry">สมมาตร</option></select></td><td class="n"><input type="number" step="0.5" min="0.5" max="40"></td></tr>
+              <tr data-bc="ymax"><td><b>Y+</b> <span class="muted">ด้านบน</span></td><td><select><option value="open">เปิด</option><option value="wall">ผนัง</option><option value="symmetry">สมมาตร</option></select></td><td class="n"><input type="number" step="0.5" min="0.5" max="40"></td></tr>
+              <tr data-bc="ymin"><td><b>Y−</b> <span class="muted">พื้น</span></td><td><select><option value="wall">ผนัง</option><option value="symmetry">สมมาตร</option></select></td><td class="n muted">y = 0</td></tr>
+            </tbody>
+          </table>
+          <p class="note">เปิด = อากาศไหลเข้าออกได้ที่ความดันบรรยากาศ · ผนัง = ผนังทึบ (no-slip) · สมมาตร = ผนังลื่น ใช้แทนครึ่งโดเมนที่เหมือนกัน
+            · ด้านที่เป็นผนัง/สมมาตรแสดงเป็นพื้นผิวสีในภาพ 3D</p>
         </div>
       </aside>
     </div>
@@ -195,6 +211,19 @@
         <div class="card">
           <div class="card-h"><h3>คุณภาพการคำนวณ</h3></div>
           <div id="quality" class="quality"></div>
+        </div>
+      </div>
+      <div class="res-grid">
+        <div class="card">
+          <div class="card-h"><h3>Residual</h3><span class="muted small">RMS ไร้มิติ สเกล log — ใช้ดูแนวโน้ม</span></div>
+          <canvas id="chart-res" height="220"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-h"><h3>การลู่เข้าทำงานอย่างไร</h3></div>
+          <p class="small muted" style="margin:0">ลมร้อนเหนือ CDU กระเพื่อมตลอดเวลา residual จึงลดลงถึงระดับหนึ่งแล้วแกว่งอยู่ ไม่ลงถึงศูนย์
+            โปรแกรมจึงตัดสินการลู่เข้าจากค่าที่ใช้งานจริง — ค่าเฉลี่ย 10 วินาทีของ T ลมเข้าทุกโมดูลต้องนิ่งภายใน ±0.05 K
+            สมดุลพลังงาน 95–105% และความคลาดเคลื่อนมวล ≤ 1% ผ่านครบต่อเนื่อง 6 ครั้ง (3 วินาทีจำลอง) จึงหยุดเอง
+            ถ้ายังไม่ผ่านจะคำนวณต่อไปเรื่อย ๆ จนถึงเพดานเวลา (ค่าเริ่มต้น 1,800 s)</p>
         </div>
       </div>
       <div class="res-grid">
@@ -250,7 +279,11 @@
         <tr><td>ความปั่นป่วน</td><td>Smagorinsky: ν<sub>t</sub> = (C<sub>s</sub>Δ)²|S| + ν<sub>0</sub> โดย C<sub>s</sub> = 0.17, ν<sub>0</sub> = 0.002 m²/s และ α<sub>t</sub> = ν<sub>t</sub>/0.85</td></tr>
         <tr><td>แรงลอยตัว</td><td>Boussinesq เทียบอุณหภูมิอากาศภายนอก β = 1/(T<sub>∞</sub> + 273.15)</td></tr>
         <tr><td>อุณหภูมิ / tracer</td><td>Finite volume แบบอนุรักษ์ ค่าที่หน้าเซลล์ใช้ MUSCL + van Leer limiter (ไม่สั่น ไม่เกินค่าจริง) แบ่งสเต็ปย่อยตาม CFL — พลังงานที่ CDU ปล่อยออกเท่ากับที่ออกจากโดเมนพอดี</td></tr>
-        <tr><td>ขอบเปิด</td><td>ความดันบรรยากาศ ลมไหลเข้ามีอุณหภูมิ T<sub>∞</sub> และ tracer = 0 · ถ้ามีลม ด้านต้นลมกำหนดความเร็วแบบ power law u(y) = U<sub>10</sub>(y/10)<sup>0.2</sup></td></tr>
+        <tr><td>ขอบโดเมน</td><td>เลือกได้ทีละด้าน (X−, X+, Z−, Z+, Y+, Y−) พร้อมระยะจากวัตถุ ·
+          <b>เปิด</b>: ความดันบรรยากาศ ลมไหลเข้ามีอุณหภูมิ T<sub>∞</sub> และ tracer = 0 ถ้ามีลม ด้านต้นลมกำหนดความเร็วแบบ power law u(y) = U<sub>10</sub>(y/10)<sup>0.2</sup> ·
+          <b>ผนัง</b>: ความเร็วเป็นศูนย์ ไม่มีความร้อนผ่าน ·
+          <b>สมมาตร</b>: ความเร็วตั้งฉากเป็นศูนย์ ความเร็วแนวขนานไม่ถูกหน่วง (ผนังลื่น) — ใช้ตัดโดเมนครึ่งหนึ่งเมื่อผังสมมาตร ·
+          ต้องมีด้านที่เปิดอย่างน้อยหนึ่งด้าน</td></tr>
         <tr><td>Louver</td><td>ตัวกลางพรุน: Δp = K·½ρu², K = (1/(C<sub>d</sub>·φ) − 1)², C<sub>d</sub> = 0.6, φ = % พื้นที่เปิด</td></tr>
       </table>
 
@@ -284,9 +317,11 @@
 
       <h2>เกณฑ์หยุดคำนวณและคุณภาพ</h2>
       <ul>
-        <li>หลัง 60 วินาที ถ้าค่าเฉลี่ย 10 วินาทีล่าสุดของ T ลมเข้าทุกโมดูลต่างจาก 10 วินาทีก่อนหน้าไม่เกิน ±0.05 K
-          และสมดุลพลังงาน (ความร้อนออกจากโดเมน + การสะสม) ÷ (ความร้อนที่ CDU ปล่อย) อยู่ในช่วง 95–105% → ถือว่าลู่เข้า หยุดเอง</li>
-        <li>ไม่เช่นนั้นหยุดเมื่อครบเวลาจำลองสูงสุด (ค่าเริ่มต้น 180 วินาที) กด ▶ อีกครั้งเพื่อคำนวณต่ออีก 60 วินาที</li>
+        <li>คำนวณต่อไปจนกว่าจะลู่เข้า โดยต้องผ่านทุกข้อต่อเนื่องกัน 6 ครั้ง (ตรวจทุก 0.5 วินาทีจำลอง):
+          เวลาจำลอง ≥ 60 s · ค่าเฉลี่ย 10 s ล่าสุดของ T ลมเข้าทุกโมดูลต่างจาก 10 s ก่อนหน้าไม่เกิน ±0.05 K ·
+          สมดุลพลังงาน (ความร้อนออกจากโดเมน + การสะสม) ÷ (ความร้อนที่ CDU ปล่อย) 95–105% · ความคลาดเคลื่อนมวล ≤ 1%</li>
+        <li>กราฟ residual (มวล โมเมนตัม พลังงาน) แสดงแนวโน้มแบบ CFX แต่ไม่ใช้ตัดสิน เพราะลมร้อนกระเพื่อมตลอดเวลา residual จึงไม่ลงถึงศูนย์</li>
+        <li>เพดานเวลา (ค่าเริ่มต้น 1,800 s) มีไว้กันกรณีที่ไม่มีวันนิ่ง เช่น ปิดขอบทุกด้าน — ถ้าถึงเพดาน กดคำนวณต่อได้</li>
         <li>ความคลาดเคลื่อนของมวล = RMS ของ ∇·u หลัง projection เทียบความเร็วสูงสุด ควรต่ำกว่า 1%</li>
       </ul>
 
