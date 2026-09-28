@@ -536,7 +536,7 @@ function buildGenericMesh(dev) {
 
   const bodyMat = new THREE.MeshStandardMaterial({
     color: def.color, roughness: 0.55, metalness: 0.08,
-    transparent: true, opacity: def.kind === 'heat' ? 0.55 : 0.95,
+    transparent: true, opacity: def.opacity ?? (def.kind === 'heat' ? 0.55 : 0.95),
   });
   const body = new THREE.Mesh(new THREE.BoxGeometry(s.x, s.y, s.z), bodyMat);
   body.userData.dim = bodyMat.opacity;

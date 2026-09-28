@@ -6,6 +6,10 @@
  * มุม yaw หมุนรอบแกน Y เป็นขั้นละ 90°
  */
 
+import {
+  VRV_HT, VRV_DEP, VRV_GAP, VRV_MODULES, VRV_DEFAULTS, modulesOf, modelOf,
+} from './catalog.js';
+
 const RHO = 1.2, CP = 1005;
 const BTU_TO_W = 0.29307;
 
@@ -35,33 +39,14 @@ export function toWorldDir(dev, d) {
   return [x / len, d[1] / len, z / len];
 }
 
-/* ───────── คอยล์ร้อน VRV แบบโมดูล (Daikin RXQ-B) ───────── */
+/* ───────── คอยล์ร้อน VRV แบบโมดูล (Daikin VRV 6A RXQ-BY1S — ข้อมูลใน catalog.js) ───────── */
 
-/*
- * ค่าโดยประมาณจากแคตตาล็อก — ใช้เป็นจุดตั้งต้นของการจำลอง ควรตรวจสอบกับเอกสารรุ่นจริง
- * w = ความกว้างหน้าเครื่อง (ม.), kw = ความสามารถทำความเย็น, cmm = อัตราลมพัดลม (m³/min)
- */
-export const VRV_MODELS = {
-  8:  { w: 0.93, fans: 1, kw: 22.4, cmm: 162 },
-  10: { w: 0.93, fans: 1, kw: 28.0, cmm: 175 },
-  12: { w: 0.93, fans: 1, kw: 33.5, cmm: 185 },
-  14: { w: 1.24, fans: 2, kw: 40.0, cmm: 223 },
-  16: { w: 1.24, fans: 2, kw: 45.0, cmm: 233 },
-  18: { w: 1.24, fans: 2, kw: 50.4, cmm: 251 },
-  20: { w: 1.24, fans: 2, kw: 56.0, cmm: 261 },
-  22: { w: 1.24, fans: 2, kw: 61.5, cmm: 271 },
-  24: { w: 1.24, fans: 2, kw: 67.0, cmm: 280 },
-  26: { w: 1.24, fans: 2, kw: 73.5, cmm: 290 },
-};
-export const VRV_HP = Object.keys(VRV_MODELS).map(Number);
-export const VRV_HEIGHT = 1.685, VRV_DEPTH = 0.765;
-export const VRV_GAP = 0.10;          // ระยะห่างมาตรฐานระหว่างโมดูลที่รวมเป็นระบบเดียวกัน
 const COIL_BOTTOM = 0.12;             // ฐานเครื่องใต้แผงคอยล์
 const COIL_TOP = 0.30;                // ช่องพัดลมเหนือแผงคอยล์
 
 /** ตำแหน่งของแต่ละโมดูลตามแกน Z เฉพาะตัว (เรียงซ้ายไปขวา เว้นช่อง VRV_GAP) */
 export function vrvLayout(dev) {
-  const mods = dev.modules.map(hp => ({ hp, ...(VRV_MODELS[hp] || VRV_MODELS[10]) }));
+  const mods = dev.modules.map(hp => ({ hp, ...(VRV_MODULES[hp] || VRV_MODULES[20]) }));
   const total = mods.reduce((a, m) => a + m.w, 0) + VRV_GAP * (mods.length - 1);
   let z = -total / 2;
   return mods.map(m => {
@@ -71,15 +56,26 @@ export function vrvLayout(dev) {
   });
 }
 
-/** คำนวณขนาดรวม อัตราลม และความสามารถของระบบจากรายการโมดูล */
-export function syncVrv(d) {
-  if (!Array.isArray(d.modules) || !d.modules.length) d.modules = [10];
-  d.modules = d.modules.map(hp => (VRV_MODELS[hp] ? +hp : 10));
+/** ปริมาณลมรวมตาม catalog ของชุดโมดูล (m³/h) */
+export function vrvCatalogFlow(d) {
+  return vrvLayout(d).reduce((a, m) => a + m.cmm, 0) * 60;
+}
+
+/**
+ * คำนวณขนาดรวม ปริมาณลม และความสามารถของระบบจากรายการโมดูล
+ * ถ้ายังไม่มี modules แต่มีชื่อรุ่นชุด (model) จะแยกเป็นโมดูลตาม catalog
+ * resetFlow = true ใช้ปริมาณลมตาม catalog (ไม่เช่นนั้นคงค่าที่ผู้ใช้ปรับไว้)
+ */
+export function syncVrv(d, resetFlow = false) {
+  if (!Array.isArray(d.modules) || !d.modules.length) d.modules = modulesOf(d.model);
+  d.modules = d.modules.map(hp => (VRV_MODULES[hp] ? +hp : 20));
+  d.model = modelOf(d.modules) || 'custom';
   const mods = vrvLayout(d);
-  d.size = { x: VRV_DEPTH, y: VRV_HEIGHT, z: mods[mods.length - 1].z1 - mods[0].z0 };
-  d.flow = mods.reduce((a, m) => a + m.cmm, 0) * 60;
+  d.size = { x: VRV_DEP, y: VRV_HT, z: mods[mods.length - 1].z1 - mods[0].z0 };
+  if (resetFlow || !(d.flow > 0)) d.flow = vrvCatalogFlow(d);
   d.kw = mods.reduce((a, m) => a + m.kw, 0);
   d.btu = Math.round(d.kw * 1000 / BTU_TO_W);
+  for (const k of Object.keys(VRV_DEFAULTS)) if (!(d[k] > 0)) d[k] = VRV_DEFAULTS[k];
   delete d.discharge;
 }
 
@@ -139,9 +135,9 @@ export const TYPES = {
   },
 
   outdoor: {
-    label: 'คอยล์ร้อน VRV (RXQ)', short: 'CDU', icon: '🔥', color: 0xe6e9ee, kind: 'cdu',
-    size: { x: VRV_DEPTH, y: VRV_HEIGHT, z: 0.93 },
-    defaults: { modules: [10], mountY: null },
+    label: 'คอยล์ร้อน VRV 6A (RXQ-BY1S)', short: 'CDU', icon: '🔥', color: 0xe6e9ee, kind: 'cdu',
+    size: { x: VRV_DEP, y: VRV_HT, z: 1.24 },
+    defaults: { model: 'RXQ20BY1S', ...VRV_DEFAULTS, mountY: null },
     // ตำแหน่งจริงของตัวเครื่องแต่ละโมดูล (มีช่องว่าง 10 ซม. ระหว่างโมดูล)
     solids(dev) {
       const hx = dev.size.x / 2, hy = dev.size.y / 2;
@@ -211,6 +207,14 @@ export const TYPES = {
     },
   },
 
+  louver: {
+    label: 'Louver / ผนังบังตาโปร่ง', short: 'Louver', icon: '🟫', color: 0x9aa3b2, kind: 'solid', opacity: 0.45,
+    size: { x: 4.0, y: 2.4, z: 0.10 },
+    defaults: { free: 50, mountY: null },
+    resizable: true,
+    regions() { return []; },
+  },
+
   box: {
     label: 'สิ่งกีดขวาง', short: 'Obstacle', icon: '📦', color: 0x8a94a8, kind: 'solid',
     size: { x: 0.80, y: 0.80, z: 0.80 },
@@ -245,8 +249,7 @@ export function createDevice(type, pos, roomH) {
   // แอร์ติดผนังต้องเว้นช่องเหนือเครื่องไว้ให้กริลลมกลับด้านบนดูดอากาศได้
   if (type === 'wall') d.mountY = Math.max(d.size.y / 2, roomH - 0.35 - d.size.y / 2);
   if (def.kind === 'cdu') {
-    d.modules = [...def.defaults.modules];
-    syncVrv(d);
+    syncVrv(d, true);
   } else if (def.kind === 'ac') {
     d.flow = Math.round(def.flowPerKBtu * d.btu / 1000 / 10) * 10;
     d.mode = 'auto';
@@ -295,7 +298,8 @@ export function buildDomain(solver, devices, openSides) {
   for (const d of devices) {
     const def = TYPES[d.type];
     if (def.kind === 'heat' && !d.solidBody) continue;
-    if (def.solids) for (const b of def.solids(d)) solver.addSolidBox(toWorldBox(d, b));
+    if (d.type === 'louver') addLouver(solver, d);
+    else if (def.solids) for (const b of def.solids(d)) solver.addSolidBox(toWorldBox(d, b));
     else solver.addSolidBox(bodyBox(d));
   }
 
@@ -332,6 +336,23 @@ export function buildDomain(solver, devices, openSides) {
 
   solver.endBuild();
   return bound;
+}
+
+/**
+ * Louver บนกริดหยาบ: ใบบังเป็นแถบทึบแนวนอนสูงหนึ่งเซลล์ สลับกับแถบโล่ง
+ * จำนวนแถบโล่งเท่าสัดส่วนพื้นที่เปิด (free area) ที่ตั้งไว้
+ */
+function addLouver(solver, d) {
+  const b = bodyBox(d), h = solver.h;
+  const j0 = solver.cellJ(b.y0 + 1e-6), j1 = solver.cellJ(b.y1 - 1e-6);
+  const rows = j1 - j0 + 1;
+  const closed = 1 - Math.max(0, Math.min(100, d.free ?? 50)) / 100;
+  for (let r = 0; r < rows; r++) {
+    // กระจายแถบทึบให้ทั่วความสูง: แถวที่ r ทึบเมื่อผลรวมสะสมข้ามจำนวนเต็ม
+    if (Math.floor((r + 1) * closed + 1e-9) === Math.floor(r * closed + 1e-9)) continue;
+    const y0 = (j0 + r - 1) * h;
+    solver.addSolidBox({ ...b, y0, y1: y0 + h });
+  }
 }
 
 /**
@@ -397,10 +418,11 @@ function weightedT(solver, regs) {
 /**
  * คอยล์ร้อน VRV: อุณหภูมิอากาศเข้าคอยล์ = ค่าเฉลี่ยจากแผงคอยล์ทั้งหมด (หลัง + ข้างซ้าย + ข้างขวา
  * ของทุกโมดูล) ถ่วงน้ำหนักตามพื้นที่หน้าคอยล์ ลมทิ้งของแต่ละโมดูลคิดจากอากาศที่โมดูลนั้นดูดเข้า
- * ความร้อนที่ระบายทิ้ง ≈ ความสามารถทำความเย็น × 1.25 (รวมงานคอมเพรสเซอร์)
+ * ความร้อนที่ระบายทิ้ง = capacity ของโมดูล × (1 + 1/EER)
  */
 function updateCdu(d, e, solver, ambient) {
   const mods = vrvLayout(d);
+  const flowScale = d.flow / vrvCatalogFlow(d);      // ผู้ใช้ปรับปริมาณลมต่างจาก catalog ได้
   const acc = mods.map(() => ({ s: 0, w: 0, faces: {} }));
   for (const r of e.rets) {
     const T = solver.avgT(r.cells);
@@ -416,11 +438,12 @@ function updateCdu(d, e, solver, ambient) {
     const intake = a.w > 0 ? a.s / a.w : ambient;
     const faces = {};
     for (const [k, f] of Object.entries(a.faces)) faces[k] = f.s / f.w;
-    const watts = m.kw * 1000 * 1.25;
-    const mdot = RHO * m.cmm / 60;
-    const supplyT = Math.min(75, intake + Math.min(25, watts / (mdot * CP)));
+    const watts = m.kw * 1000 * (1 + 1 / Math.max(1, d.eer || VRV_DEFAULTS.eer));
+    const mdot = RHO * m.cmm / 60 * flowScale;
+    const dT = Math.min(25, watts / (mdot * CP));
+    const supplyT = Math.min(75, intake + dT);
     for (const s of e.supplies) if (s.module === mi) s.inlet.T = supplyT;
-    return { hp: m.hp, intake, supplyT, watts, faces };
+    return { hp: m.hp, intake, supplyT, dT, watts, faces };
   });
   const intake = weightedT(solver, e.rets);
   const watts = info.reduce((a, m) => a + m.watts, 0);
@@ -430,6 +453,8 @@ function updateCdu(d, e, solver, ambient) {
   d._scDelta = intake - ambient;                     // อากาศร้อนวนกลับเข้าคอยล์
   d._hotFace = Math.max(...info.flatMap(m => Object.values(m.faces))) - ambient;
   d._supplyT = info.reduce((a, m) => a + m.supplyT * m.watts, 0) / watts;
+  d._dTcoil = info.reduce((a, m) => a + m.dT * m.watts, 0) / watts;
+  d._recirc = Math.max(0, d._scDelta) / d._dTcoil;   // สัดส่วนลมร้อนที่วนกลับ
   d._load = watts;
 }
 
