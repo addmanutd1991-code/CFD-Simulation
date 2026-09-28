@@ -14,6 +14,8 @@ import { cduFootprint } from './scene.js';
 import { rgb } from './colormap.js';
 
 const ACCENT = 0x4fc3f7;
+/** สีสถานะ CDU ตามอุณหภูมิลมเข้า */
+export const BAND = { green: 0x3ecf6e, yellow: 0xf5c518, red: 0xe5433b };
 const SNAP = 0.1;
 const MAX_STREAKS = 3200;
 
@@ -241,14 +243,17 @@ export class Viewer {
       pad.castShadow = pad.receiveShadow = true;
       g.add(pad);
     }
-    const side = new THREE.MeshStandardMaterial({ map: T.coil, roughness: 0.7, metalness: 0.15 });
-    const front = new THREE.MeshStandardMaterial({ map: T.front, roughness: 0.6, metalness: 0.1 });
-    const top = new THREE.MeshStandardMaterial({ color: 0xe9ecef, roughness: 0.6 });
     const bottom = new THREE.MeshStandardMaterial({ color: 0x7c848c });
     const fanMat = new THREE.MeshStandardMaterial({ color: 0x23282e, roughness: 0.5 });
     const guardMat = new THREE.MeshStandardMaterial({ color: 0x8b939b, roughness: 0.4, metalness: 0.4, side: THREE.DoubleSide });
+    g.userData.modMats = [];
     for (const m of mods) {
       const w = m.x1 - m.x0;
+      // วัสดุแยกต่อโมดูล เพื่อระบายสีตามอุณหภูมิลมเข้าของโมดูลนั้น
+      const side = new THREE.MeshStandardMaterial({ map: T.coil, roughness: 0.7, metalness: 0.15 });
+      const front = new THREE.MeshStandardMaterial({ map: T.front, roughness: 0.6, metalness: 0.1 });
+      const top = new THREE.MeshStandardMaterial({ color: 0xe9ecef, roughness: 0.6 });
+      g.userData.modMats.push([side, front, top]);
       // ลำดับหน้าของ BoxGeometry: +x, −x, +y, −y, +z (หน้าเครื่อง), −z (หลัง)
       const body = new THREE.Mesh(new THREE.BoxGeometry(w, sz.h, sz.d), [side, side, top, bottom, front, side]);
       body.position.set((m.x0 + m.x1) / 2, yb + sz.h / 2, 0);
@@ -282,7 +287,28 @@ export class Viewer {
     g.add(arrow);
     g.position.set(o.x, 0, o.z);
     g.rotation.y = o.rot * Math.PI / 180;
+    this.#tintCdu(o.id, g);
     return g;
+  }
+
+  /**
+   * ระบายสีโมดูลของ CDU ตามอุณหภูมิลมเข้าเฉลี่ยของโมดูลนั้น
+   *   T ≤ เขียว → เขียว · เขียว < T ≤ แดง → เหลือง · T > แดง → แดง   (ค่าเริ่มต้น 40 / 46 °C)
+   * ยังไม่มีผล → สีปกติของตัวเครื่อง
+   */
+  #tintCdu(id, g) {
+    const temps = this.results?.modTin?.get(id);
+    const b = this.sceneData?.bands || { green: 40, red: 46 };
+    g.userData.modMats?.forEach((mats, i) => {
+      const t = temps?.[i];
+      const c = t == null || !isFinite(t) ? 0xffffff : t <= b.green ? BAND.green : t <= b.red ? BAND.yellow : BAND.red;
+      mats[0].color.setHex(c); mats[1].color.setHex(c);
+      mats[2].color.setHex(c === 0xffffff ? 0xe9ecef : c);
+    });
+  }
+
+  refreshCduColors() {
+    for (const o of this.objects) if (o.type === 'cdu') { const g = this.meshes.get(o.id); if (g) this.#tintCdu(o.id, g); }
   }
 
   #wallMesh(o) {
@@ -532,6 +558,7 @@ export class Viewer {
     this.#updateIso();
     if (!res) this.streakCount = 0;
     this.refreshLabels();
+    this.refreshCduColors();
   }
 
   setDisplay(patch) {

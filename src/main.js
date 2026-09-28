@@ -67,6 +67,7 @@ function afterChange(geom = true) {
   updateEstimate();
   syncSectionUI();
   $('#empty-hint').hidden = scene.objects.length > 0;
+  updateBandLegend();
   saveAutosave();
   if (geom) invalidate();
 }
@@ -307,6 +308,8 @@ function renderSettings() {
   $('#p-kcap').value = round2(scene.perf.kCap * 100);
   $('#p-kpow').value = round2(scene.perf.kPow * 100);
   $('#proj-name').value = scene.name;
+  $('#b-green').value = scene.bands.green;
+  $('#b-red').value = scene.bands.red;
   for (const f of BC_FACES) {
     const row = $(`[data-bc="${f}"]`);
     $('select', row).value = scene.bc[f].type;
@@ -333,6 +336,22 @@ function bindSettings() {
       const v = parseFloat(e.target.value);
       if (!isFinite(v)) { renderSettings(); return; }
       edit(() => { scene.bc[f].dist = Math.min(40, Math.max(0.5, v)); });
+    });
+  }
+}
+
+function bindBands() {
+  for (const [id, k] of [['#b-green', 'green'], ['#b-red', 'red']]) {
+    $(id).addEventListener('change', (e) => {
+      const v = parseFloat(e.target.value);
+      const nb = { ...scene.bands, [k]: v };
+      if (!isFinite(v) || !(nb.red > nb.green)) { toast('เกณฑ์สีแดงต้องมากกว่าเกณฑ์สีเขียว'); renderSettings(); return; }
+      pushUndo();
+      scene.bands = nb;
+      saveAutosave();
+      viewer.refreshCduColors();
+      updateBandLegend();
+      renderResults();
     });
   }
 }
@@ -454,9 +473,29 @@ function pushFieldsToViewer() {
     dTmax: Math.max(4, Math.ceil(maxDis * 0.75)),
     vmax: run.report?.vmax || 5,
     units,
+    // T ลมเข้าเฉลี่ยรายโมดูล เรียงตามโมดูลของเครื่อง → ใช้ระบายสีตัวเครื่อง
+    modTin: new Map((units || []).map(u => [u.id, u.modules.map(m => m.Tin)])),
   });
+  updateBandLegend();
   updateColorbar();
   if (selected()?.type === 'cdu') renderProps();
+}
+
+/** แถบสีตามเกณฑ์ T ลมเข้า: 'green' | 'yellow' | 'red' */
+function band(t) {
+  const b = scene.bands;
+  return t <= b.green ? 'green' : t <= b.red ? 'yellow' : 'red';
+}
+function chip(t) { return `<i class="chip chip-${band(t)}" title="T ลมเข้า ${t.toFixed(1)} °C"></i>`; }
+
+function updateBandLegend() {
+  const b = scene.bands;
+  const el = $('#band-legend');
+  el.hidden = !run.fields || run.stale;
+  el.innerHTML = `<span class="muted">สี CDU = T ลมเข้าเฉลี่ยรายโมดูล</span>
+    <span><i class="chip chip-green"></i>≤ ${b.green} °C</span>
+    <span><i class="chip chip-yellow"></i>${b.green}–${b.red} °C</span>
+    <span><i class="chip chip-red"></i>&gt; ${b.red} °C</span>`;
 }
 
 /** ผลรายเครื่อง (รวมโมดูล) จากรายงานล่าสุด */
@@ -544,13 +583,13 @@ function renderResults() {
   for (const u of units) {
     rows.push(`<tr data-id="${u.id}" class="${u.id === selectedId ? 'sel' : ''}">
       <td><b>${esc(u.name)}</b></td><td>${esc(u.model)}</td><td class="n">${u.kwRated.toFixed(1)}</td><td class="n">${u.cmm.toFixed(0)}</td>
-      <td class="n">${u.Tin.toFixed(2)}</td><td class="n">${u.TinMax.toFixed(1)}</td><td class="n st-${u.status.key}">+${u.dT.toFixed(2)}</td>
+      <td class="n">${chip(Math.max(...u.modules.map(m => m.Tin)))}${u.Tin.toFixed(2)}</td><td class="n">${u.TinMax.toFixed(1)}</td><td class="n st-${u.status.key}">+${u.dT.toFixed(2)}</td>
       <td class="n">${(u.Cin * 100).toFixed(1)}</td><td class="n">${u.Tdis.toFixed(1)}</td><td class="n">${(u.capF * 100).toFixed(1)}</td>
       <td class="n">${u.kwAvail.toFixed(1)}</td><td class="n">${u.blockedPct.toFixed(0)}</td>
       <td><span class="pill st-${u.status.key}">${u.status.short}</span></td></tr>`);
     if (u.modules.length > 1) for (const m of u.modules) {
       rows.push(`<tr class="sub" data-id="${u.id}"><td>โมดูล ${m.hp} HP</td><td></td><td class="n">${m.kw.toFixed(1)}</td><td class="n">${(m.q * 60).toFixed(0)}</td>
-        <td class="n">${m.Tin.toFixed(2)}</td><td class="n">${m.TinMax.toFixed(1)}</td><td class="n">+${(m.Tin - scene.site.ambient).toFixed(2)}</td>
+        <td class="n">${chip(m.Tin)}${m.Tin.toFixed(2)}</td><td class="n">${m.TinMax.toFixed(1)}</td><td class="n">+${(m.Tin - scene.site.ambient).toFixed(2)}</td>
         <td class="n">${(m.Cin * 100).toFixed(1)}</td><td class="n">${m.Tdis.toFixed(1)}</td><td class="n">${(m.capF * 100).toFixed(1)}</td>
         <td class="n">${(m.kw * m.capF).toFixed(1)}</td><td class="n">${m.blockedPct.toFixed(0)}</td><td></td></tr>`);
     }
@@ -1005,6 +1044,7 @@ function bindUI() {
   });
 
   bindSettings();
+  bindBands();
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();

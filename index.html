@@ -69,6 +69,7 @@
             <div class="bar"><i id="st-bar"></i></div>
           </div>
           <div class="toolhint" id="toolhint" hidden></div>
+          <div class="band-legend" id="band-legend" hidden></div>
           <div class="empty-hint" id="empty-hint" hidden>
             <b>เริ่มต้นใช้งาน</b>
             <span>กด <kbd>+ CDU</kbd> แล้วคลิกบนพื้นเพื่อวางเครื่อง · <kbd>+ ผนัง / louver</kbd> เพื่อลากผนังรอบลาน · แล้วกด <kbd>▶ คำนวณ</kbd></span>
@@ -120,6 +121,11 @@
               <label><input type="checkbox" id="d-iso" checked> ผิวลมร้อน</label>
               <label title="ปิดไว้เพื่อไม่ให้ตัวหนังสือบังผล"><input type="checkbox" id="d-labels"> ป้ายชื่อ</label>
             </div>
+            <div class="row">สี CDU ตาม T ลมเข้า (°C)
+              <span class="bands"><i class="chip chip-green"></i>≤<input type="number" id="b-green" step="0.5">
+              <i class="chip chip-red"></i>&gt;<input type="number" id="b-red" step="0.5"></span>
+            </div>
+            <p class="note">เขียว ≤ เกณฑ์แรก · เหลือง ระหว่างสองเกณฑ์ · แดง &gt; เกณฑ์ที่สอง (ค่าเริ่มต้น 40 / 46 °C ที่อากาศภายนอก 35 °C)</p>
             <label class="row">ผิวลมร้อนที่ ΔT ≥ <span class="mono val" id="d-iso-val">2.0 K</span></label>
             <input type="range" id="d-iso-dt" min="0.5" max="8" step="0.5" value="2">
           </div>

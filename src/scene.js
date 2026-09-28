@@ -13,6 +13,8 @@ import { DEFAULT_PERF, unitSize } from './models.js';
 export const DEFAULTS = {
   site: { ambient: 35, windSpeed: 0, windDir: 0 },
   sim: { cell: 0.25, tMax: 1800 },
+  // เกณฑ์สี CDU ตาม T ลมเข้ารายโมดูล (°C) ที่อากาศภายนอก 35 °C: ≤ green เขียว, ≤ red เหลือง, > red แดง
+  bands: { green: 40, red: 46 },
   bc: {
     xmin: { type: 'open', dist: 4 }, xmax: { type: 'open', dist: 4 },
     zmin: { type: 'open', dist: 4 }, zmax: { type: 'open', dist: 4 },
@@ -28,6 +30,7 @@ export function newScene() {
     site: { ...DEFAULTS.site },
     sim: { ...DEFAULTS.sim },
     bc: cloneBC(DEFAULTS.bc),
+    bands: { ...DEFAULTS.bands },
     perf: { ...DEFAULTS.perf },
     objects: [],
   };
@@ -224,6 +227,8 @@ export function normalizeScene(raw) {
   if (raw.sim?.top != null) s.bc.ymax.dist = raw.sim.top;
   delete s.sim.margin; delete s.sim.top; delete s.sim.tEnd;
   if (raw.bc) s.bc = cloneBC(raw.bc);
+  Object.assign(s.bands, raw.bands || {});
+  if (!(s.bands.red > s.bands.green)) s.bands = { ...DEFAULTS.bands };
   for (const f of BC_FACES) {
     if (!BC_TYPES.includes(s.bc[f].type) || (f === 'ymin' && s.bc[f].type === 'open')) s.bc[f].type = DEFAULTS.bc[f].type;
     if (f !== 'ymin') s.bc[f].dist = Math.max(0.5, Number(s.bc[f].dist) || DEFAULTS.bc[f].dist);

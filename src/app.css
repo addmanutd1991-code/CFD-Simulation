@@ -241,3 +241,13 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
 .bc-table select { width: 92px; padding: 3px 6px; }
 .bc-table input { width: 64px; padding: 3px 6px; }
 #chart-res { width: 100%; height: 220px; display: block; }
+
+/* สีสถานะ CDU ตาม T ลมเข้า */
+.chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.chip-green { background: #3ecf6e; } .chip-yellow { background: #f5c518; } .chip-red { background: #e5433b; }
+.bands { display: inline-flex; align-items: center; gap: 4px; }
+.bands input { width: 58px; padding: 3px 6px; margin-right: 6px; }
+.band-legend {
+  position: absolute; left: 10px; bottom: 10px; z-index: 3; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  background: rgba(14,24,32,.88); border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 10px; font-size: 12px;
+}
