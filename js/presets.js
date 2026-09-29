@@ -41,15 +41,37 @@ export const PRESETS = {
     ],
   },
 
-  'cdu-wall': {
-    label: 'คอยล์ร้อน 2 ตัวชิดกำแพง (ตรวจ Short-circuit)',
+  'vrv-wall': {
+    label: 'คอยล์ร้อน VRV 6A 2 ระบบชิดกำแพง (ตรวจ Short-circuit)',
     mode: 'outdoor', ambient: 35, mesh: 0.15, wind: { speed: 0.5, dirDeg: 0 },
-    room: { W: 7.0, H: 4.0, D: 5.0 },
+    room: { W: 9.0, H: 4.5, D: 6.0 },
     devices: [
-      { type: 'box', name: 'กำแพงอาคาร', pos: { x: 3.5, z: 0.45 }, yaw: 0, size: { x: 6.6, y: 4.0, z: 0.3 } },
-      { type: 'outdoor', name: 'CDU-1', pos: { x: 2.3, z: 1.1 }, yaw: 180, btu: 24000, discharge: 'front', mountY: 0.45 },
-      { type: 'outdoor', name: 'CDU-2', pos: { x: 4.7, z: 1.1 }, yaw: 180, btu: 24000, discharge: 'front', mountY: 0.45 },
-      { type: 'box', name: 'รั้วบังตา', pos: { x: 3.5, z: 2.6 }, yaw: 0, size: { x: 6.0, y: 1.8, z: 0.15 } },
+      { type: 'box', name: 'กำแพงอาคาร', pos: { x: 4.5, z: 0.30 }, yaw: 0, size: { x: 8.6, y: 4.5, z: 0.30 } },
+      // หมุน 270° ให้ด้านหน้า (แผงปิด) หันออกจากกำแพง — คอยล์ด้านหลังห่างกำแพง 50 ซม.
+      { type: 'outdoor', name: 'VRV-1', pos: { x: 2.4, z: 1.33 }, yaw: 270, model: 'RXQ34BY1S' },
+      { type: 'outdoor', name: 'VRV-2', pos: { x: 6.4, z: 1.33 }, yaw: 270, model: 'RXQ28BY1S' },
+      { type: 'box', name: 'รั้วบังตา', pos: { x: 4.5, z: 3.2 }, yaw: 0, size: { x: 8.0, y: 1.8, z: 0.15 } },
+    ],
+  },
+
+  // ผังเดียวกับตัวอย่างใน CDU Airflow CFD: ลานวางเครื่อง 24 × 16 ม. อากาศ 35 °C ไม่มีลม
+  // คอยล์ร้อน VRV 6A สองแถวหันด้านหน้าเข้าหากัน ด้านหลังชิด louver พื้นที่เปิด 50 %
+  // yaw 270 = ด้านหน้าหัน +Z, yaw 90 = ด้านหน้าหัน −Z (ลมเข้าด้านหลังและด้านข้าง ลมออกด้านบน)
+  'vrv-yard': {
+    label: 'ลานคอยล์ร้อน VRV 6A 6 ชุด + louver',
+    mode: 'outdoor', ambient: 35, mesh: 0.25, wind: { speed: 0, dirDeg: 180 },
+    room: { W: 24, H: 8, D: 16 },
+    devices: [
+      { type: 'box', name: 'ห้องเครื่อง / ช่องบันได', pos: { x: 2.5, z: 8 }, yaw: 0, size: { x: 5, y: 4.5, z: 16 } },
+      { type: 'louver', name: 'Louver ด้านเหนือ', pos: { x: 13, z: 3 }, yaw: 0, size: { x: 14, y: 2.4, z: 0.1 }, free: 50 },
+      { type: 'louver', name: 'Louver ด้านตะวันออก', pos: { x: 20, z: 8 }, yaw: 0, size: { x: 0.1, y: 2.4, z: 10 }, free: 50 },
+      { type: 'louver', name: 'Louver ด้านใต้', pos: { x: 13, z: 13 }, yaw: 0, size: { x: 14, y: 2.4, z: 0.1 }, free: 50 },
+      { type: 'outdoor', name: 'CDU-1', model: 'RXQ20BY1S', pos: { x: 9, z: 4.4 }, yaw: 270 },
+      { type: 'outdoor', name: 'CDU-2', model: 'RXQ28BY1S', pos: { x: 13, z: 4.4 }, yaw: 270 },
+      { type: 'outdoor', name: 'CDU-3', model: 'RXQ20BY1S', pos: { x: 17, z: 4.4 }, yaw: 270 },
+      { type: 'outdoor', name: 'CDU-4', model: 'RXQ16BY1S', pos: { x: 9, z: 11.6 }, yaw: 90 },
+      { type: 'outdoor', name: 'CDU-5', model: 'RXQ28BY1S', pos: { x: 13, z: 11.6 }, yaw: 90 },
+      { type: 'outdoor', name: 'CDU-6', model: 'RXQ16BY1S', pos: { x: 17, z: 11.6 }, yaw: 90 },
     ],
   },
 };

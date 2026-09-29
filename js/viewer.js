@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { TYPES, toWorldBox, toWorldDir, worldFootprint } from './devices.js';
+import { TYPES, toWorldBox, toWorldDir, worldFootprint, vrvLayout } from './devices.js';
 
 /* แถบสี coolwarm — ใช้ร่วมกับแถบสีใน CSS */
 const RAMP = [
@@ -142,7 +142,8 @@ export class Viewer {
         this.devMeshes.set(d.id, m);
       }
       m.position.set(d.pos.x, d.pos.y, d.pos.z);
-      m.rotation.y = -d.yaw * Math.PI / 180;
+      // ต้องหมุนทิศเดียวกับ rot() ใน devices.js ไม่เช่นนั้นที่ 90°/270° รูปทรงจะกลับด้านกับที่ solver เห็น
+      m.rotation.y = d.yaw * Math.PI / 180;
       m.userData.dev = d;
       const isSel = this.selected === d.id;
       if (m.userData.outline) m.userData.outline.visible = isSel;
@@ -428,19 +429,114 @@ export class Viewer {
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
 function signature(d) {
-  return [d.type, d.yaw, d.size.x, d.size.y, d.size.z, d.vane, d.discharge, d.on].join('|');
+  return [d.type, d.yaw, d.size.x, d.size.y, d.size.z, d.vane, d.modules?.join('+'), d.on].join('|');
 }
 
 /* ───────── การสร้างรูปทรงอุปกรณ์ ───────── */
 
 function buildDeviceMesh(dev) {
   const def = TYPES[dev.type];
+  const g = def.kind === 'cdu' ? buildVrvMesh(dev) : buildGenericMesh(dev);
+  const s = dev.size;
+  const out = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(s.x * 1.10 + 0.06, s.y * 1.10 + 0.06, s.z * 1.10 + 0.06)),
+    new THREE.LineBasicMaterial({ color: 0x2f9bdb, depthTest: false })
+  );
+  out.renderOrder = 5;
+  out.visible = false;
+  g.add(out);
+  g.userData.outline = out;
+  g.userData.sig = signature(dev);
+  g.userData.dev = dev;
+  return g;
+}
+
+/*
+ * คอยล์ร้อน VRV แบบโมดูล: ตัวเครื่องสีเทาอ่อน ด้านหน้าเป็นแผงปิด (+X)
+ * แผงคอยล์ครีบอลูมิเนียมด้านหลังและด้านข้าง พัดลมบนหลังคา 1–2 ใบต่อโมดูล
+ */
+function buildVrvMesh(dev) {
+  const g = new THREE.Group();
+  const hx = dev.size.x / 2, hy = dev.size.y / 2;
+  const regions = TYPES[dev.type].regions(dev);
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x1a1f28, transparent: true, opacity: 0.5 });
+  const finMat = new THREE.LineBasicMaterial({ color: 0x3a4250, transparent: true, opacity: 0.55 });
+  const add = (mesh, dim) => { mesh.userData.dim = dim; g.add(mesh); return mesh; };
+
+  for (const m of vrvLayout(dev)) {
+    const w = m.z1 - m.z0, zc = (m.z0 + m.z1) / 2;
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe6e9ee, roughness: 0.55, metalness: 0.08, transparent: true, opacity: 0.97 });
+    const body = add(new THREE.Mesh(new THREE.BoxGeometry(2 * hx, 2 * hy, w), bodyMat), 0.97);
+    body.position.z = zc;
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(2 * hx, 2 * hy, w)), lineMat);
+    edges.position.z = zc;
+    g.add(edges);
+
+    // ฐานเครื่อง
+    const base = add(new THREE.Mesh(new THREE.BoxGeometry(2 * hx + 0.01, 0.08, w + 0.01),
+      new THREE.MeshStandardMaterial({ color: 0x9aa2af, roughness: 0.7, transparent: true, opacity: 0.97 })), 0.97);
+    base.position.set(0, -hy + 0.04, zc);
+
+    // เส้นแบ่งแผงหน้า: แนวนอนใต้ช่องพัดลม + แนวตั้งแบ่งแผงหน้าคู่ (รุ่นหน้ากว้าง)
+    const pts = [
+      hx + 0.003, hy - 0.30, m.z0, hx + 0.003, hy - 0.30, m.z1,
+    ];
+    if (m.fans > 1) pts.push(hx + 0.003, -hy + 0.08, zc, hx + 0.003, hy - 0.30, zc);
+    const seam = new THREE.BufferGeometry();
+    seam.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    g.add(new THREE.LineSegments(seam, lineMat));
+  }
+
+  for (const r of regions) {
+    const b = r.box;
+    if (r.role === 'return') {
+      // แผงคอยล์: วาดเป็นแผ่นบางที่ผิวนอก พร้อมเส้นครีบแนวตั้ง
+      const coilMat = new THREE.MeshStandardMaterial({ color: 0x69727f, roughness: 0.8, metalness: 0.3, transparent: true, opacity: 0.9 });
+      const hh = b.y1 - b.y0, yc = (b.y0 + b.y1) / 2;
+      const fin = [];
+      let panel;
+      const face = r.parts[0].face;
+      if (face === 'back') {
+        const d2 = b.z1 - b.z0, zc = (b.z0 + b.z1) / 2;
+        panel = new THREE.Mesh(new THREE.BoxGeometry(0.012, hh, d2), coilMat);
+        panel.position.set(-hx - 0.006, yc, zc);
+        for (let z = b.z0 + 0.04; z < b.z1; z += 0.05) fin.push(-hx - 0.013, b.y0, z, -hx - 0.013, b.y1, z);
+      } else {
+        const sgn = face === 'right' ? 1 : -1;
+        const zf = sgn > 0 ? b.z1 : b.z0;
+        const d2 = b.x1 - b.x0, xc = (b.x0 + b.x1) / 2;
+        panel = new THREE.Mesh(new THREE.BoxGeometry(d2, hh, 0.012), coilMat);
+        panel.position.set(xc, yc, zf + sgn * 0.006);
+        for (let x = b.x0 + 0.04; x < b.x1; x += 0.05) fin.push(x, b.y0, zf + sgn * 0.013, x, b.y1, zf + sgn * 0.013);
+      }
+      add(panel, 0.9);
+      const fg = new THREE.BufferGeometry();
+      fg.setAttribute('position', new THREE.Float32BufferAttribute(fin, 3));
+      g.add(new THREE.LineSegments(fg, finMat));
+    } else {
+      // พัดลมด้านบน: ขอบวงแหวนดำ + ใบพัดสีส้ม (ลมร้อนออก) + ลูกศรชี้ขึ้น
+      const rad = (b.x1 - b.x0) / 2, zc = (b.z0 + b.z1) / 2;
+      const ring = add(new THREE.Mesh(new THREE.CylinderGeometry(rad + 0.02, rad + 0.02, 0.06, 32, 1, true),
+        new THREE.MeshStandardMaterial({ color: 0x2b3038, roughness: 0.6, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })), 0.95);
+      ring.position.set(0, hy + 0.03, zc);
+      const fan = add(new THREE.Mesh(new THREE.CircleGeometry(rad, 32),
+        new THREE.MeshStandardMaterial({ color: 0xf0763c, emissive: 0x4a1c06, roughness: 0.4, transparent: true, opacity: 0.95 })), 0.95);
+      fan.rotation.x = -Math.PI / 2;
+      fan.position.set(0, hy + 0.004, zc);
+      g.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, hy + 0.05, zc), 0.5, 0xf0763c, 0.14, 0.10));
+    }
+  }
+  return g;
+}
+
+function buildGenericMesh(dev) {
+  const def = TYPES[dev.type];
   const g = new THREE.Group();
   const s = dev.size;
 
   const bodyMat = new THREE.MeshStandardMaterial({
     color: def.color, roughness: 0.55, metalness: 0.08,
-    transparent: true, opacity: def.kind === 'heat' ? 0.55 : 0.95,
+    transparent: true, opacity: def.opacity ?? (def.kind === 'heat' ? 0.55 : 0.95),
   });
   const body = new THREE.Mesh(new THREE.BoxGeometry(s.x, s.y, s.z), bodyMat);
   body.userData.dim = bodyMat.opacity;
@@ -474,16 +570,6 @@ function buildDeviceMesh(dev) {
     }
   }
 
-  const out = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(s.x * 1.10 + 0.06, s.y * 1.10 + 0.06, s.z * 1.10 + 0.06)),
-    new THREE.LineBasicMaterial({ color: 0x2f9bdb, depthTest: false })
-  );
-  out.renderOrder = 5;
-  out.visible = false;
-  g.add(out);
-  g.userData.outline = out;
-  g.userData.sig = signature(dev);
-  g.userData.dev = dev;
   return g;
 }
 
