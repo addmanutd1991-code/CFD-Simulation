@@ -363,7 +363,7 @@ function updateEstimate() {
   const d = domainOf(scene);
   // โดยทั่วไปลู่เข้าในช่วง 60–150 วินาทีจำลอง — ประมาณที่ 120 s
   const steps = 120 / (0.25 * d.h);
-  const sec = d.cells * 0.6e-6 * steps;
+  const sec = d.cells * 0.4e-6 * steps;   // ≈0.4 µs ต่อเซลล์ต่อสเต็ป (WebAssembly)
   const el = $('#mesh-info');
   el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์`;
   el.classList.toggle('warn', d.cells > 1.2e6);

@@ -1,18 +1,41 @@
-/* selftest.mjs — ทดสอบ solver แบบไม่ใช้เบราว์เซอร์: สมดุลพลังงาน การลู่เข้า และเวลาที่ใช้ */
+/*
+ * selftest.mjs — ทดสอบ solver แบบไม่ใช้เบราว์เซอร์: สมดุลพลังงาน การลู่เข้า และเวลาที่ใช้
+ *
+ *   node tools/selftest.mjs <preset> <cell> <tEnd>            ใช้ WebAssembly (ปกติ)
+ *   node tools/selftest.mjs <preset> <cell> <tEnd> --js       บังคับใช้ JavaScript ล้วน
+ *   node tools/selftest.mjs <preset> <cell> <tEnd> --compare  เดินทั้งสองแบบคู่กัน ตรวจว่าผลตรงกันทุกบิต
+ */
 import { presetScene } from '../src/scene.js';
 import { buildMesh } from '../src/mesher.js';
 import { Solver } from '../src/solver.js';
 
-const key = process.argv[2] || 'rooftop';
-const cell = Number(process.argv[3] || 0.5);
-const tMax = Number(process.argv[4] || 1800);
+const flags = process.argv.slice(2).filter(a => a.startsWith('--'));
+const [key = 'rooftop', cellArg = 0.5, tArg = 1800] = process.argv.slice(2).filter(a => !a.startsWith('--'));
+const cell = Number(cellArg), tMax = Number(tArg);
 const s = presetScene(key);
 s.sim.cell = cell;
 const t0 = performance.now();
 const mesh = buildMesh(s);
 console.log(`preset=${key} cell=${cell} grid=${mesh.nx}x${mesh.ny}x${mesh.nz} (${mesh.nx * mesh.ny * mesh.nz} cells) mesh ${(performance.now() - t0).toFixed(0)} ms`);
 mesh.warnings.forEach(w => console.log('  warn:', w));
-const sol = new Solver(mesh, { ambient: s.site.ambient, windSpeed: s.site.windSpeed, windDir: s.site.windDir, perf: s.perf, tMax });
+const params = { ambient: s.site.ambient, windSpeed: s.site.windSpeed, windDir: s.site.windDir, perf: s.perf, tMax };
+
+if (flags.includes('--compare')) {
+  const a = new Solver(mesh, { ...params, kernels: null }), b = new Solver(mesh, params);
+  if (!b.k) { console.log('โหลด WebAssembly ไม่ได้'); process.exit(1); }
+  let ta = 0, tb = 0, bad = 0;
+  while (a.time < tMax && !a.converged) {
+    let t = performance.now(); a.step(); ta += performance.now() - t;
+    t = performance.now(); b.step(); tb += performance.now() - t;
+    for (const f of ['u', 'v', 'w', 'T', 'C', 'phi']) for (let c = 0; c < a.N; c++) if (!Object.is(a[f][c], b[f][c])) bad++;
+    if (bad) { console.log(`ต่างกันที่สเต็ป ${a.steps}: ${bad} ค่า`); process.exit(1); }
+  }
+  console.log(`ตรงกันทุกบิต ${a.steps} สเต็ป (t=${a.time.toFixed(1)} s) · JS ${(ta / a.steps).toFixed(1)} ms/step · WebAssembly ${(tb / b.steps).toFixed(1)} ms/step (เร็วขึ้น ${(ta / tb).toFixed(2)} เท่า)`);
+  process.exit(0);
+}
+
+const sol = new Solver(mesh, flags.includes('--js') ? { ...params, kernels: null } : params);
+console.log(`kernels: ${sol.k ? 'WebAssembly' : 'JavaScript'}`);
 const t1 = performance.now();
 let lastPrint = 0;
 while (sol.time < tMax && !sol.converged) {

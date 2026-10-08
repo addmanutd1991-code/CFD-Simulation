@@ -7,6 +7,7 @@
  */
 
 import { Solver } from './solver.js';
+import { createKernelsAsync } from './kernels.js';
 
 export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
   let solver = null, running = false, timer = 0, lastField = 0;
@@ -38,31 +39,42 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     else timer = setTimeout(loop, 0);
   };
 
+  // คำสั่งถูกประมวลผลตามลำดับ — init รอโหลด WebAssembly (แบบ async ใช้ได้ทั้งใน worker และ
+  // main thread) ก่อน คำสั่ง run ที่ส่งตามมาทันทีจึงไม่หลุด
+  let queue = Promise.resolve();
+
+  const handleMsg = async (msg) => {
+    if (msg.cmd === 'init') {
+      running = false;
+      clearTimeout(timer); timer = 0;
+      solver = null;
+      const t0 = performance.now();
+      const kernels = await createKernelsAsync(Solver.memoryBytes(msg.mesh));
+      solver = new Solver(msg.mesh, { ...msg.params, kernels });
+      post({ type: 'ready', ms: performance.now() - t0, wasm: !!kernels });
+      send(true);
+    } else if (msg.cmd === 'run') {
+      if (!solver) return;
+      if (msg.tMax) solver.tMax = msg.tMax;
+      // สั่งเดินต่อหลังชนเพดานเวลา → ขยายเพดานออกไปอีกเท่าเดิม
+      if (solver.time >= solver.tMax) solver.tMax = solver.time + (msg.tMax || 600);
+      running = true;
+      if (!timer) timer = setTimeout(loop, 0);
+    } else if (msg.cmd === 'pause') {
+      running = false;
+      clearTimeout(timer); timer = 0;
+      if (solver) send(true);
+    } else if (msg.cmd === 'dispose') {
+      running = false;
+      clearTimeout(timer); timer = 0;
+      solver = null;
+    }
+  };
+
   return {
     handle(msg) {
-      if (msg.cmd === 'init') {
-        running = false;
-        clearTimeout(timer);
-        const t0 = performance.now();
-        solver = new Solver(msg.mesh, msg.params);
-        post({ type: 'ready', ms: performance.now() - t0 });
-        send(true);
-      } else if (msg.cmd === 'run') {
-        if (!solver) return;
-        if (msg.tMax) solver.tMax = msg.tMax;
-        // สั่งเดินต่อหลังชนเพดานเวลา → ขยายเพดานออกไปอีกเท่าเดิม
-        if (solver.time >= solver.tMax) solver.tMax = solver.time + (msg.tMax || 600);
-        running = true;
-        if (!timer) timer = setTimeout(loop, 0);
-      } else if (msg.cmd === 'pause') {
-        running = false;
-        clearTimeout(timer); timer = 0;
-        if (solver) send(true);
-      } else if (msg.cmd === 'dispose') {
-        running = false;
-        clearTimeout(timer); timer = 0;
-        solver = null;
-      }
+      // ข้อผิดพลาดโยนต่อแบบไม่ผูกกับ promise เพื่อให้ worker.onerror ทำงาน (runner ถอยไปใช้ main thread)
+      queue = queue.then(() => handleMsg(msg)).catch(err => setTimeout(() => { throw err; }));
     },
   };
 }
