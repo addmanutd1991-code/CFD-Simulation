@@ -486,7 +486,35 @@ function band(t) {
   const b = scene.bands;
   return t <= b.green ? 'green' : t <= b.red ? 'yellow' : 'red';
 }
-function chip(t) { return `<i class="chip chip-${band(t)}" title="T ลมเข้า ${t.toFixed(1)} °C"></i>`; }
+function chip(t) { return `<i class="chip chip-${band(t)}" title="T ลมเข้า ${t.toFixed(1)} °C — ${BAND_TEXT[band(t)].short}"></i>`; }
+
+/** ความหมายของแต่ละแถบสีตามคำแนะนำของ Daikin */
+const BAND_TEXT = {
+  green: { short: 'ระบายความร้อนได้', label: 'ระบายความร้อนได้ (Daikin แนะนำ)' },
+  yellow: { short: 'ประสิทธิภาพลดลง', label: 'ทำงานได้ แต่ประสิทธิภาพลดลง' },
+  red: { short: 'ระบายความร้อนไม่ได้', label: 'ระบายความร้อนไม่ได้ — ควรปรับการวาง' },
+};
+
+/** เกณฑ์อุณหภูมิลมกลับ (HTML) — ใช้ทั้งในหน้าผลและรายงาน */
+function bandCriteriaHTML() {
+  const b = scene.bands;
+  return `<ul class="criteria">
+    <li><i class="chip chip-green"></i>อุณหภูมิลมกลับที่ไม่เกิน ${b.green} องศาเซลเซียส คอยล์ร้อนสามารถระบายความร้อนได้ เป็นอุณหภูมิลมกลับที่ Daikin แนะนำ</li>
+    <li><i class="chip chip-yellow"></i>อุณหภูมิลมกลับที่อยู่ระหว่าง ${b.green}–${b.red} องศาเซลเซียส คอยล์ร้อนสามารถทำงานได้ แต่ประสิทธิภาพการทำงานของเครื่องปรับอากาศจะลดลง</li>
+    <li><i class="chip chip-red"></i>อุณหภูมิลมกลับที่เกิน ${b.red} องศาเซลเซียส คอยล์ร้อนไม่สามารถระบายความร้อนได้ ควรปรับเปลี่ยนลักษณะการวางคอยล์ร้อน</li>
+  </ul>`;
+}
+
+/** หมายเหตุท้ายผล/รายงาน */
+const REMARK_HTML = `<p><b>REMARK :</b></p>
+  <ol>
+    <li>เนื่องจากการจำลองการไหลของอากาศที่เกิดขึ้น เป็นการทดลองด้วย PROGRAM COMPUTER เท่านั้น วัตถุประสงค์เพื่อใช้ในการป้องกันหรือหาแนวทางแก้ไขปัญหาเรื่องของการระบายความร้อน ซึ่งไม่ใช่สภาวะอากาศจริงที่เกิดขึ้นกับ CDU</li>
+    <li>ทั้งนี้ทิศทางลมที่เข้ามาจะขึ้นอยู่กับฤดูกาล และช่วงเวลาในขณะนั้นด้วย ซึ่งจะแตกต่างกับ CFD ที่มีอยู่เพียงทิศทางเดียว ดังนั้นควรจะทำการทดลองติดตั้ง MOCK UP ROOM เพื่อตรวจสอบ ผลที่ได้จาก CFD อีกครั้ง</li>
+  </ol>
+  <p lang="en">Please noted that this simulation is done on the computer system that analyses the air flow pattern. A/C equipment under simulation only applicable to DAIKIN system and is not based on any actual experiments. Therefore, the simulation does not guarantee the phenomena at the actual installation site.</p>`;
+
+/** แถบสีของเครื่อง: ใช้โมดูลที่ T ลมเข้าสูงสุด (เหมือนสีในตาราง) */
+function unitBand(u) { return band(Math.max(...u.modules.map(m => m.Tin))); }
 
 function updateBandLegend() {
   const b = scene.bands;
@@ -575,6 +603,7 @@ function renderResults() {
     $('#kpis').innerHTML = '';
     $('#quality').innerHTML = '';
     $('#advice').innerHTML = '<li class="muted">กด ▶ คำนวณ เพื่อดูผล</li>';
+    $('#criteria').innerHTML = bandCriteriaHTML();
     drawChart(null);
     drawResiduals();
     return;
@@ -595,6 +624,7 @@ function renderResults() {
     }
   }
   tb.innerHTML = rows.join('');
+  $('#criteria').innerHTML = bandCriteriaHTML();
   $$('tr', tb).forEach(tr => tr.addEventListener('click', () => select(Number(tr.dataset.id))));
 
   // ตัวเลขสรุป
@@ -885,9 +915,9 @@ function openProject(file) {
 function exportCSV() {
   const units = unitsNow();
   if (!units) return;
-  const head = ['CDU', 'รุ่น', 'kW พิกัด', 'อัตราลม m3/min', 'T ลมเข้าเฉลี่ย C', 'T ลมเข้าสูงสุด C', 'dT K', 'ลมวนกลับ %', 'T ลมเป่า C', 'Capacity %', 'kW ที่ได้', 'คอยล์ถูกบัง %', 'สถานะ'];
+  const head = ['CDU', 'รุ่น', 'kW พิกัด', 'อัตราลม m3/min', 'T ลมเข้าเฉลี่ย C', 'T ลมเข้าสูงสุด C', 'dT K', 'ลมวนกลับ %', 'T ลมเป่า C', 'Capacity %', 'kW ที่ได้', 'คอยล์ถูกบัง %', 'สถานะ', 'เกณฑ์ T ลมกลับ'];
   const rows = units.map(u => [u.name, u.model, u.kwRated.toFixed(1), u.cmm.toFixed(0), u.Tin.toFixed(2), u.TinMax.toFixed(2), u.dT.toFixed(2),
-    (u.Cin * 100).toFixed(1), u.Tdis.toFixed(1), (u.capF * 100).toFixed(1), u.kwAvail.toFixed(1), u.blockedPct.toFixed(0), u.status.label]);
+    (u.Cin * 100).toFixed(1), u.Tdis.toFixed(1), (u.capF * 100).toFixed(1), u.kwAvail.toFixed(1), u.blockedPct.toFixed(0), u.status.label, BAND_TEXT[unitBand(u)].label]);
   const csv = '﻿' + [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
   download(`${safeName(scene.name)}-results.csv`, csv, 'text/csv');
 }
@@ -901,10 +931,14 @@ function exportReport() {
   const css = `body{font-family:"IBM Plex Sans Thai",Tahoma,sans-serif;color:#1c2a36;max-width:1000px;margin:24px auto;padding:0 18px}
     h1{margin:0}table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}th,td{border:1px solid #c8d3dc;padding:5px 7px;text-align:left}
     td.n{text-align:right;font-family:monospace}th{background:#eef3f7}img{width:100%;border:1px solid #c8d3dc;border-radius:6px}
-    .muted{color:#667a8a}.ok{color:#1c8a55}.watch{color:#b8860b}.bad{color:#c8551b}.trip{color:#c21d2d}ul{padding-left:18px}`;
+    .muted{color:#667a8a}.criteria{list-style:none;padding-left:0}.criteria li{margin:4px 0}
+    .chip{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+    .chip-green{background:#3ecf6e}.chip-yellow{background:#f5c518}.chip-red{background:#e5433b}
+    .remark{border-top:1px solid #c8d3dc;margin-top:22px;padding-top:8px;font-size:13px}.ok{color:#1c8a55}.watch{color:#b8860b}.bad{color:#c8551b}.trip{color:#c21d2d}ul{padding-left:18px}`;
   const tbl = units.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.model)}</td><td class="n">${u.kwRated.toFixed(1)}</td><td class="n">${u.cmm.toFixed(0)}</td>
     <td class="n">${u.Tin.toFixed(2)}</td><td class="n">${u.TinMax.toFixed(1)}</td><td class="n">+${u.dT.toFixed(2)}</td><td class="n">${(u.Cin * 100).toFixed(1)}</td>
-    <td class="n">${(u.capF * 100).toFixed(1)}</td><td class="n">${u.kwAvail.toFixed(1)}</td><td class="${u.status.key}">${u.status.label}</td></tr>`).join('');
+    <td class="n">${(u.capF * 100).toFixed(1)}</td><td class="n">${u.kwAvail.toFixed(1)}</td><td class="${u.status.key}">${u.status.label}</td>
+    <td><i class="chip chip-${unitBand(u)}"></i>${BAND_TEXT[unitBand(u)].label}</td></tr>`).join('');
   const html = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>${esc(scene.name)} — CDU Airflow CFD</title><style>${css}</style></head><body>
     <h1>${esc(scene.name)}</h1><p class="muted">รายงานจาก CDU Airflow CFD · ${date}</p>
     <p>อากาศภายนอก ${scene.site.ambient} °C · ลม ${scene.site.windSpeed} m/s จากทิศ ${scene.site.windDir}° · เซลล์ ${run.mesh.h} ม.
@@ -912,9 +946,11 @@ function exportReport() {
       · สมดุลพลังงาน ${(r.balance.ratio * 100).toFixed(1)}%</p>
     <img src="${img}" alt="ภาพ 3 มิติ">
     <h2>ผลรายเครื่อง</h2>
-    <table><tr><th>CDU</th><th>รุ่น</th><th>kW พิกัด</th><th>ลม m³/min</th><th>T ลมเข้า °C</th><th>สูงสุด °C</th><th>ΔT K</th><th>ลมวนกลับ %</th><th>Capacity %</th><th>kW ที่ได้</th><th>สถานะ</th></tr>${tbl}</table>
+    <table><tr><th>CDU</th><th>รุ่น</th><th>kW พิกัด</th><th>ลม m³/min</th><th>T ลมเข้า °C</th><th>สูงสุด °C</th><th>ΔT K</th><th>ลมวนกลับ %</th><th>Capacity %</th><th>kW ที่ได้</th><th>สถานะ</th><th>เกณฑ์ T ลมกลับ</th></tr>${tbl}</table>
+    <h2>เกณฑ์อุณหภูมิลมกลับ</h2>${bandCriteriaHTML()}
     <h2>ข้อสังเกต</h2><ul>${$('#advice').innerHTML}</ul>
     <p class="muted">ค่าเฉลี่ยตามเวลาในช่วง ${r.avgWindow.toFixed(0)} วินาทีสุดท้าย · ตัวเลขสมรรถนะเป็นค่าอ้างอิงโดยประมาณ ใช้เพื่อเปรียบเทียบผังการวางเครื่อง</p>
+    <div class="remark">${REMARK_HTML}</div>
     </body></html>`;
   download(`${safeName(scene.name)}-report.html`, html, 'text/html');
 }
