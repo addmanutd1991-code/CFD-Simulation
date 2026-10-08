@@ -6,6 +6,7 @@
   "description": "CDU Airflow CFD — จำลองลมร้อนวนกลับของคอยล์ร้อน VRV ในเบราว์เซอร์",
   "scripts": {
     "build": "node tools/build.mjs",
+    "build:wasm": "node tools/build-wasm.mjs",
     "test": "node tools/selftest.mjs",
     "serve": "python3 -m http.server 8000"
   },

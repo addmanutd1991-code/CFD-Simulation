@@ -15,7 +15,8 @@
 npm install
 npm run serve        # แล้วเปิด http://localhost:8000
 npm run build        # สร้าง dist/cdu-airflow-cfd.html ใหม่
-npm test             # ทดสอบ solver: node tools/selftest.mjs <preset> <cell> <tEnd>
+npm run build:wasm   # คอมไพล์ src/kernels.c ใหม่ (ต้องมี clang + wasm-ld) — เฉพาะเมื่อแก้ kernels.c
+npm test             # ทดสอบ solver: node tools/selftest.mjs <preset> <cell> <tEnd> [--js | --compare]
 ```
 
 ## ขั้นตอนการใช้งาน
@@ -36,9 +37,9 @@ npm test             # ทดสอบ solver: node tools/selftest.mjs <preset> 
 
 | เซลล์ | จำนวนเซลล์ | เวลาโดยประมาณ | ใช้เมื่อ |
 |---|---|---|---|
-| 0.50 ม. | ~36k | < 30 วินาที | ร่างผัง |
-| 0.35 ม. | ~100k | 1–2 นาที | เปรียบเทียบทางเลือก |
-| 0.25 ม. | ~280k | 4–7 นาที | สรุปผล |
+| 0.50 ม. | ~36k | < 15 วินาที | ร่างผัง |
+| 0.35 ม. | ~100k | 40 วินาที – 1.5 นาที | เปรียบเทียบทางเลือก |
+| 0.25 ม. | ~280k | 2.5–5 นาที | สรุปผล |
 
 ## แบบจำลองเชิงตัวเลข (`src/solver.js`)
 
@@ -49,6 +50,19 @@ npm test             # ทดสอบ solver: node tools/selftest.mjs <preset> 
 - CDU: หน้าคอยล์ (หลัง/ซ้าย/ขวา) ดูดลม, พัดลมด้านบนเป่าลม, ความร้อนทิ้งขึ้นกับ T ลมเข้าแบบป้อนกลับ
 - Louver: ตัวกลางพรุน K = (1/(Cd·φ) − 1)²
 - เกณฑ์ลู่เข้า: T ลมเข้าทุกเครื่องเปลี่ยน ≤ ±0.05 K ระหว่างช่วง 10 วินาที และสมดุลพลังงาน 95–105%
+
+### ความเร็วในการคำนวณ
+
+ลูปหนักทั้งหมด (advection, turbulence, diffusion, projection/SOR, การพาอุณหภูมิ) อยู่ใน `src/kernels.c`
+คอมไพล์เป็น WebAssembly และฝังไว้ใน `src/kernels-wasm.js` — เร็วกว่า JavaScript ราว 1.6–1.7 เท่า
+โดยใช้สมการ กริด และลำดับการคำนวณเดิมทุกอย่าง ผลจึงตรงกับเส้นทาง JavaScript ทุกบิต
+(`node tools/selftest.mjs rooftop 0.35 10 --compare` ตรวจให้) ถ้าเบราว์เซอร์โหลด WebAssembly ไม่ได้
+จะใช้ JavaScript ใน `src/solver.js` แทนโดยอัตโนมัติ
+
+นอกจากนี้ยังลดงานที่ไม่จำเป็นโดยไม่แตะความละเอียดของผล:
+- จำนวนสเต็ปย่อยของการพาอุณหภูมิไม่ถูกปัดขึ้นเพราะเศษทศนิยม (3.0001 → 4) อีกต่อไป
+- สลับบัฟเฟอร์แทนการคัดลอก, เก็บรายการหน้าที่กำหนดความเร็ว/louver ไว้ล่วงหน้าแทนการไล่ทั้งกริดทุกสเต็ป
+- ตัวสะสมฟลักซ์อุณหภูมิเป็น double (แม่นขึ้นเล็กน้อย)
 
 ตารางรุ่นใน `src/models.js` (kW, อัตราลม, ขนาด, ชุดผสม 8–78 HP) มาจาก catalog EDTRTH342529A
 ส่วน EER 3.5 และ capacity ลดลง 2 %/K เป็นค่าประมาณ แก้ได้ในโปรแกรม
@@ -65,10 +79,14 @@ src/scene.js          ข้อมูลฉาก, โดเมน, ตัวอ
 src/models.js         ตารางรุ่น VRV และสมการสมรรถนะ
 src/mesher.js         แปลงฉากเป็นกริด + เงื่อนไขขอบของ CDU
 src/solver.js         ตัวคำนวณ CFD
+src/kernels.c         ลูปหนักของ solver ในภาษา C → WebAssembly
+src/kernels-wasm.js   WebAssembly ที่คอมไพล์แล้ว (สร้างโดย tools/build-wasm.mjs)
+src/kernels.js        โหลด WebAssembly และจองหน่วยความจำให้ solver
 src/engine.js         ตัวเดินสเต็ป (ใช้ทั้งใน worker และ main thread)
 src/worker.js         Web Worker
 src/runner.js         เลือก worker / main thread อัตโนมัติ
 tools/build.mjs       รวมเป็นไฟล์เดียว dist/cdu-airflow-cfd.html
+tools/build-wasm.mjs  คอมไพล์ src/kernels.c เป็น src/kernels-wasm.js
 tools/selftest.mjs    ทดสอบ solver จาก command line
 vendor/three/         three.js r160
 ```
