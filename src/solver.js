@@ -838,7 +838,10 @@ export class Solver {
           wc[c] = 0.5 * (w[c] + w[c + sz]);
         }
       }
-    return { T: this.T.slice(), C: this.C.slice(), u: uc, v: vc, w: wc };
+    // ความดันเกจเทียบบรรยากาศ (Pa): projection แก้ u -= ∇φ จึงได้ φ = Δt·p/ρ
+    const P = new Float32Array(this.N), kp = this.rho / Math.max(1e-6, this.dt || 0.1);
+    for (let c = 0; c < this.N; c++) P[c] = this.type[c] === SOLID ? 0 : this.phi[c] * kp;
+    return { T: this.T.slice(), C: this.C.slice(), u: uc, v: vc, w: wc, P };
   }
 }
 
