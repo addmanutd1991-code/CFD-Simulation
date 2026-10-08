@@ -17,7 +17,7 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     if (withFields) {
       const f = solver.fields();
       msg.fields = f;
-      post(msg, [f.T.buffer, f.C.buffer, f.u.buffer, f.v.buffer, f.w.buffer]);
+      post(msg, [f.T.buffer, f.C.buffer, f.u.buffer, f.v.buffer, f.w.buffer, f.P.buffer]);
     } else post(msg);
   };
 

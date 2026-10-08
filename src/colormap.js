@@ -22,7 +22,16 @@ export function rgb(t) {
   return [l[1], l[2], l[3]];
 }
 
-export function cssGradient() {
+/** levels > 0 → แถบสีเป็นขั้น (ตรงกับภาพ contour) */
+export function cssGradient(levels = 0) {
+  if (levels > 0) {
+    const parts = [];
+    for (let i = 0; i < levels; i++) {
+      const c = rgb((i + 0.5) / levels).map(Math.round);
+      parts.push(`rgb(${c}) ${(i / levels * 100).toFixed(2)}%`, `rgb(${c}) ${((i + 1) / levels * 100).toFixed(2)}%`);
+    }
+    return `linear-gradient(90deg,${parts.join(',')})`;
+  }
   return 'linear-gradient(90deg,' + STOPS.map(s => `rgb(${s[1]},${s[2]},${s[3]}) ${s[0] * 100}%`).join(',') + ')';
 }
 
@@ -32,4 +41,5 @@ export const FIELDS = {
   dT: { label: 'อุณหภูมิเกินอากาศภายนอก', unit: 'K', digits: 1 },
   C: { label: 'สัดส่วนลมร้อนจาก CDU', unit: '%', digits: 0 },
   V: { label: 'ความเร็วลม', unit: 'm/s', digits: 2 },
+  P: { label: 'ความดันเทียบบรรยากาศ', unit: 'Pa', digits: 2 },
 };

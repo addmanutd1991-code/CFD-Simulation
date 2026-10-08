@@ -70,6 +70,7 @@
           </div>
           <div class="toolhint" id="toolhint" hidden></div>
           <div class="band-legend" id="band-legend" hidden></div>
+          <button class="play" id="btn-play" disabled title="เล่น / หยุดภาพเคลื่อนไหวของอนุภาคลมและ streamline">▶ เล่นภาพเคลื่อนไหว</button>
           <div class="empty-hint" id="empty-hint" hidden>
             <b>เริ่มต้นใช้งาน</b>
             <span>กด <kbd>+ CDU</kbd> แล้วคลิกบนพื้นเพื่อวางเครื่อง · <kbd>+ ผนัง / louver</kbd> เพื่อลากผนังรอบลาน · แล้วกด <kbd>▶ คำนวณ</kbd></span>
@@ -98,12 +99,20 @@
         <div class="card">
           <div class="card-h"><h3>การแสดงผล</h3></div>
           <div class="form">
-            <label class="row">ตัวแปร
+            <div class="row">รูปแบบกราฟิก
+              <div class="seg" id="d-mode">
+                <button data-v="contour" class="on" title="ระบายสีเป็นขั้นบนระนาบหน้าตัด">Contour</button>
+                <button data-v="stream" title="เส้นทางลมที่ผ่านระนาบหน้าตัด (ไปและกลับ) สีตามตัวแปร">Streamline</button>
+                <button data-v="vector" title="ลูกศรทิศและความเร็วลมบนระนาบหน้าตัด สีตามตัวแปร">Vector</button>
+              </div>
+            </div>
+            <label class="row">ตัวแปร (สี)
               <select id="d-field">
                 <option value="T">อุณหภูมิ (°C)</option>
                 <option value="dT">อุณหภูมิเกินอากาศภายนอก (K)</option>
-                <option value="C">สัดส่วนลมร้อนจาก CDU (%)</option>
                 <option value="V">ความเร็วลม (m/s)</option>
+                <option value="P">ความดันเทียบบรรยากาศ (Pa)</option>
+                <option value="C">สัดส่วนลมร้อนจาก CDU (%)</option>
               </select>
             </label>
             <div class="row">หน้าตัด
@@ -126,6 +135,12 @@
               <i class="chip chip-red"></i>&gt;<input type="number" id="b-red" step="0.5"></span>
             </div>
             <p class="note">เขียว ≤ เกณฑ์แรก · เหลือง ระหว่างสองเกณฑ์ · แดง &gt; เกณฑ์ที่สอง (ค่าเริ่มต้น 40 / 46 °C ที่อากาศภายนอก 35 °C)</p>
+            <label class="row">ความทึบของวัตถุ <span class="mono val" id="d-opacity-val">ทึบ 100%</span></label>
+            <div class="opacity-row">
+              <button class="mini" data-op="0.35" title="มองทะลุเครื่องและผนัง">โปร่ง</button>
+              <input type="range" id="d-opacity" min="0.1" max="1" step="0.05" value="1">
+              <button class="mini" data-op="1">ทึบ</button>
+            </div>
             <label class="row">ผิวลมร้อนที่ ΔT ≥ <span class="mono val" id="d-iso-val">2.0 K</span></label>
             <input type="range" id="d-iso-dt" min="0.5" max="8" step="0.5" value="2">
           </div>

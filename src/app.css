@@ -255,3 +255,31 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
 .criteria .chip { margin-right: 6px; }
 .remark p, .remark ol { margin: 4px 0; font-size: 12px; }
 .remark ol { padding-left: 18px; }
+
+/* ปุ่มเล่นภาพเคลื่อนไหว */
+.play {
+  position: absolute; right: 10px; bottom: 10px; z-index: 3; font-size: 12.5px; padding: 5px 12px;
+  background: rgba(14,24,32,.88); border: 1px solid var(--line-2); border-radius: 6px;
+}
+.play.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.play:disabled { opacity: .45; cursor: default; }
+.opacity-row { display: flex; align-items: center; gap: 8px; }
+.opacity-row input { flex: 1; }
+.opacity-row .mini { padding: 2px 8px; font-size: 12px; }
+
+/* ข้อมูล CDU เมื่อคลิกเลือก */
+.cdu-pop {
+  position: absolute; left: 0; top: 0; z-index: 5; min-width: 210px; max-width: 280px;
+  background: rgba(10,18,26,.94); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 7px 10px 8px; font-size: 12.5px; line-height: 1.45; box-shadow: 0 6px 18px rgba(0,0,0,.4);
+}
+.cdu-pop .pop-x {
+  position: absolute; top: 2px; right: 4px; padding: 0 6px; border: 0; background: transparent;
+  color: var(--muted); font-size: 16px; line-height: 1.2; cursor: pointer;
+}
+.cdu-pop .pop-x:hover { color: var(--text); }
+.cdu-pop .pop-h { font-size: 14px; margin: 0 18px 4px 0; padding-bottom: 3px; border-bottom: 1px solid var(--line-2); }
+.cdu-pop .pop-row { display: flex; justify-content: space-between; gap: 12px; }
+.cdu-pop .pop-big b { font-size: 15px; color: #fff; }
+.cdu-pop .pop-mods { display: flex; flex-direction: column; margin-top: 4px; padding-top: 3px; border-top: 1px solid var(--line-2); color: var(--muted); }
+.cdu-pop .pop-mods b { color: var(--text); }
