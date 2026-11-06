@@ -5,7 +5,7 @@
 import { MODELS, getModel, unitSize, status as unitStatus, MODULE_H, MODULE_D } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES } from './scene.js';
 import { buildMesh } from './mesher.js';
-import { Viewer } from './viewer.js';
+import { Viewer, CONTOUR_LEVELS } from './viewer.js';
 import { Runner } from './runner.js';
 import { cssGradient, FIELDS } from './colormap.js';
 
@@ -554,6 +554,7 @@ function unitsNow() {
 /* ───────── การแสดงผลลัพธ์ ───────── */
 
 function updateRunUI() {
+  updatePlayButton();
   const b = $('#btn-run');
   const st = $('.status');
   const r = run.report;
@@ -861,7 +862,16 @@ function syncSectionUI(pos) {
   $('#sec-info').textContent = name;
 }
 
+function updatePlayButton(on = viewer.display.playing) {
+  const b = $('#btn-play');
+  b.disabled = !run.fields || run.stale;
+  b.classList.toggle('on', on);
+  b.textContent = on ? '❚❚ หยุดภาพเคลื่อนไหว' : '▶ เล่นภาพเคลื่อนไหว';
+}
+
 function updateColorbar() {
+  updatePlayButton();
+  $('#cbar').style.background = cssGradient(viewer.display.mode === 'contour' ? CONTOUR_LEVELS : 0);
   const f = viewer.display.field;
   const rng = viewer.fieldRange();
   const meta = FIELDS[f];
@@ -877,6 +887,7 @@ function updateColorbar() {
     const v = lo + (hi - lo) * i / (n - 1);
     let txt = `${v.toFixed(meta.digits)}${meta.unit === '%' ? '%' : ''}`;
     if (i === 0 && f === 'T') txt = `${v.toFixed(1)} °C ambient`;
+    else if (f === 'P' && i < n - 1) txt = `${v >= 0 ? '+' : ''}${v.toFixed(meta.digits)}`;
     else if (i === n - 1) txt += meta.unit === '%' ? '+' : ` ${meta.unit}`;
     parts.push(`<span style="left:${i / (n - 1) * 100}%">${txt}</span>`);
   }
@@ -889,7 +900,8 @@ function showProbe(info) {
   const p = info.p;
   const at = `(${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
   if (info.solid) { el.textContent = `จุดบนระนาบ ${at}: ของแข็ง`; return; }
-  el.textContent = `จุดบนระนาบ ${at}: T ${info.T.toFixed(2)} °C · ΔT +${(info.T - scene.site.ambient).toFixed(2)} K · |V| ${info.V.toFixed(2)} m/s · ลมจาก CDU ${(info.C * 100).toFixed(0)}%`;
+  const P = info.P == null ? '' : ` · P ${info.P >= 0 ? '+' : ''}${info.P.toFixed(2)} Pa`;
+  el.textContent = `จุดบนระนาบ ${at}: T ${info.T.toFixed(2)} °C · ΔT +${(info.T - scene.site.ambient).toFixed(2)} K · |V| ${info.V.toFixed(2)} m/s${P} · ลมจาก CDU ${(info.C * 100).toFixed(0)}%`;
 }
 
 /* ───────── ไฟล์ / ส่งออก ───────── */
@@ -1058,6 +1070,21 @@ function bindUI() {
 
   // การแสดงผล
   $('#d-field').addEventListener('change', (e) => { viewer.setDisplay({ field: e.target.value }); updateColorbar(); });
+  $$('#d-mode button').forEach(b => b.addEventListener('click', () => {
+    $$('#d-mode button').forEach(x => x.classList.toggle('on', x === b));
+    viewer.setDisplay({ mode: b.dataset.v });
+    // เปลี่ยนรูปแบบกราฟิก → แสดงระนาบหน้าตัดด้วย ไม่เช่นนั้นจะไม่เห็นผล
+    if (!$('#d-section').checked) { $('#d-section').checked = true; viewer.setSection(viewer.section.axis, viewer.section.pos, true); }
+    updateColorbar();
+  }));
+  const setOpacity = (v) => {
+    $('#d-opacity').value = v;
+    $('#d-opacity-val').textContent = `${v >= 0.999 ? 'ทึบ' : 'โปร่ง'} ${Math.round(v * 100)}%`;
+    viewer.setDisplay({ objOpacity: v });
+  };
+  $('#d-opacity').addEventListener('input', (e) => setOpacity(parseFloat(e.target.value)));
+  $$('.opacity-row .mini').forEach(b => b.addEventListener('click', () => setOpacity(parseFloat(b.dataset.op))));
+  $('#btn-play').addEventListener('click', () => updatePlayButton(viewer.togglePlay()));
   $$('#d-axis button').forEach(b => b.addEventListener('click', () => {
     const d = domainOf(scene), ax = b.dataset.v;
     const mid = ax === 'x' ? d.ox + d.W / 2 : ax === 'z' ? d.oz + d.D / 2 : 1.2;

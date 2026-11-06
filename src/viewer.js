@@ -18,6 +18,8 @@ const ACCENT = 0x4fc3f7;
 export const BAND = { green: 0x3ecf6e, yellow: 0xf5c518, red: 0xe5433b };
 const SNAP = 0.1;
 const MAX_STREAKS = 3200;
+/** จำนวนขั้นสีของภาพ contour */
+export const CONTOUR_LEVELS = 16;
 
 export class Viewer {
   constructor(host, cb) {
@@ -31,7 +33,10 @@ export class Viewer {
     this.dom = null;
     this.results = null;
     this.section = { axis: 'x', pos: 0, show: true };
-    this.display = { field: 'T', particles: true, iso: true, isoDT: 2, labels: false, range: null };
+    // mode: รูปแบบกราฟิกบนระนาบหน้าตัด — 'contour' | 'stream' (streamline) | 'vector'
+    // playing: ภาพเคลื่อนไหว (อนุภาค / streamline) เดินเฉพาะเมื่อกดเล่น
+    this.display = { mode: 'contour', field: 'T', particles: true, iso: true, isoDT: 2, labels: false, objOpacity: 1, playing: false };
+    this.animT = 0;
 
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -72,7 +77,9 @@ export class Viewer {
     this.#initSection();
     this.#initStreaks();
     this.#initIso();
+    this.#initGlyphs();
     this.#initInput();
+    this.#initPopup();
 
     this.ray = new THREE.Raycaster();
     this.ndc = new THREE.Vector2();
@@ -162,9 +169,11 @@ export class Viewer {
   }
 
   setSelected(id) {
+    if (id !== this.selectedId) this.popupClosed = false;
     this.selectedId = id;
     for (const [oid, g] of this.meshes) if (g.userData.outline) g.userData.outline.visible = oid === id;
     this.#buildHandles();
+    this.#fillPopup();
   }
 
   #rebuildObjects() {
@@ -208,8 +217,25 @@ export class Viewer {
     g.userData.label = lbl;
     g.userData.anchor = g.localToWorld(new THREE.Vector3(ctr.x, box.max.y + 0.25, ctr.z));
     this.#fillLabel(o, lbl);
+    this.#applyOpacity(g);
     this.gObjects.add(g);
     this.meshes.set(o.id, g);
+  }
+
+  /** ความทึบของวัตถุ (1 = ทึบ) — คูณกับความโปร่งเดิมของวัสดุ เช่น louver */
+  #applyOpacity(g) {
+    const k = this.display.objOpacity;
+    g.traverse(m => {
+      if (!m.isMesh || m === g.userData.outline) return;
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+        const ud = mat.userData;
+        if (ud.op0 == null) { ud.op0 = mat.opacity; ud.tr0 = mat.transparent; ud.dw0 = mat.depthWrite; }
+        mat.opacity = ud.op0 * k;
+        mat.transparent = ud.tr0 || k < 0.999;
+        mat.depthWrite = k < 0.999 ? false : ud.dw0;
+        mat.needsUpdate = true;
+      }
+    });
   }
 
   #fillLabel(o, el) {
@@ -229,6 +255,7 @@ export class Viewer {
       const g = this.meshes.get(o.id);
       if (g) this.#fillLabel(o, g.userData.label);
     }
+    this.#fillPopup();
   }
 
   #cduMesh(o) {
@@ -518,6 +545,7 @@ export class Viewer {
     this.section = { axis, pos, show };
     this.#updateSectionGeometry();
     this.#updateSectionTexture();
+    this.glyphDirty = true;
   }
 
   #updateSectionGeometry() {
@@ -554,8 +582,11 @@ export class Viewer {
   /** res = { mesh, fields, units, amb, range } — null เพื่อล้างผล */
   setResults(res) {
     this.results = res;
+    if (res?.fields?.P) res.pRange = pressureRange(res.mesh, res.fields.P);
     this.#updateSectionTexture();
     this.#updateIso();
+    this.glyphDirty = true;
+    this.streakDirty = true;
     if (!res) this.streakCount = 0;
     this.refreshLabels();
     this.refreshCduColors();
@@ -565,7 +596,18 @@ export class Viewer {
     Object.assign(this.display, patch);
     this.#updateSectionTexture();
     if ('iso' in patch || 'isoDT' in patch) this.#updateIso();
+    if ('mode' in patch || 'field' in patch) this.glyphDirty = true;
+    if ('particles' in patch) this.streakDirty = true;
+    if ('objOpacity' in patch) for (const g of this.meshes.values()) this.#applyOpacity(g);
     this.labelLayer.classList.toggle('hidden', !this.display.labels);
+  }
+
+  /** เล่น / หยุดภาพเคลื่อนไหว — คืนค่าสถานะใหม่ */
+  togglePlay(on = !this.display.playing) {
+    this.display.playing = on;
+    this.clock.getDelta();   // ไม่ให้เฟรมแรกหลังกดเล่นกระโดด
+    this.streakDirty = true;
+    return on;
   }
 
   fieldRange() {
@@ -575,6 +617,7 @@ export class Viewer {
     if (f === 'T') return [r.amb, r.amb + r.dTmax];
     if (f === 'dT') return [0, r.dTmax];
     if (f === 'C') return [0, 50];
+    if (f === 'P') return r.pRange || [-1, 1];
     return [0, Math.max(0.5, Math.min(6, r.vmax))];
   }
 
@@ -583,15 +626,27 @@ export class Viewer {
     if (f === 'T') return F.T[c];
     if (f === 'dT') return F.T[c] - r.amb;
     if (f === 'C') return F.C[c] * 100;
+    if (f === 'P') return F.P ? F.P[c] : 0;
     return Math.hypot(F.u[c], F.v[c], F.w[c]);
+  }
+
+  /** ค่าตัวแปรที่เลือกที่จุดใด ๆ (trilinear) */
+  valueAt(x, y, z) {
+    const r = this.results, F = r.fields, f = this.display.field;
+    if (f === 'T') return this.sample(F.T, x, y, z);
+    if (f === 'dT') return this.sample(F.T, x, y, z) - r.amb;
+    if (f === 'C') return this.sample(F.C, x, y, z) * 100;
+    if (f === 'P') return F.P ? this.sample(F.P, x, y, z) : 0;
+    return Math.hypot(this.sample(F.u, x, y, z), this.sample(F.v, x, y, z), this.sample(F.w, x, y, z));
   }
 
   #updateSectionTexture() {
     const m = this.secMesh.material;
     const r = this.results;
-    if (!r || !this.dom) {
+    if (!r || !this.dom || this.display.mode !== 'contour') {
       if (m.map) { m.map.dispose(); m.map = null; }
-      m.color.set(0x3a8ee6); m.opacity = 0.32; m.needsUpdate = true;
+      // streamline / เวกเตอร์: ระนาบจาง ๆ พอให้เห็นตำแหน่งและจับลากได้
+      m.color.set(0x3a8ee6); m.opacity = r ? 0.07 : 0.32; m.needsUpdate = true;
       this.secEdge.material.color.set(0x6fb6ff);
       return;
     }
@@ -615,11 +670,13 @@ export class Viewer {
       for (let a = 0; a < cols; a++) {
         const c = idx(a, b), o = (a + b * cols) * 4;
         if (M.type[c] === 1) { buf[o] = 128; buf[o + 1] = 136; buf[o + 2] = 146; buf[o + 3] = 255; continue; }
-        const col = rgb((this.fieldValue(c) - lo) / span);
+        // contour: ปัดเป็นขั้นสี
+        const t = Math.min(CONTOUR_LEVELS - 1, Math.max(0, Math.floor((this.fieldValue(c) - lo) / span * CONTOUR_LEVELS)));
+        const col = rgb((t + 0.5) / CONTOUR_LEVELS);
         buf[o] = col[0]; buf[o + 1] = col[1]; buf[o + 2] = col[2]; buf[o + 3] = 238;
       }
     const tex = new THREE.DataTexture(buf, cols, rows, THREE.RGBAFormat);
-    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter;
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     if (m.map) m.map.dispose();
@@ -701,6 +758,17 @@ export class Viewer {
     const show = !!r && this.display.particles;
     this.streaks.visible = show;
     if (!show) return;
+    if (this.display.playing) { this.#advanceStreaks(dt); this.streakDirty = false; return; }
+    // หยุดอยู่: คำนวณภาพนิ่งเฉพาะเมื่อผลเปลี่ยน — รอบแรกเดินล่วงหน้าให้อนุภาคกระจายทั่วโดเมนก่อน
+    if (!this.streakDirty) return;
+    this.streakDirty = false;
+    const fresh = this.streakCount < MAX_STREAKS;
+    for (let s = fresh ? 60 : 0; s > 0; s--) this.#advanceStreaks(0.05);
+    this.#advanceStreaks(0);
+  }
+
+  #advanceStreaks(dt) {
+    const r = this.results;
     const d = this.dom, F = r.fields, M = r.mesh;
     const n = MAX_STREAKS;
     if (this.streakCount < n) { for (let i = this.streakCount; i < n; i++) this.#respawn(i); this.streakCount = n; }
@@ -715,7 +783,7 @@ export class Viewer {
       x += u * dt; y += v * dt; z += w * dt;
       this.pLife[i] -= dt;
       const out = x < d.ox || x > d.ox + d.W || z < d.oz || z > d.oz + d.D || y < 0 || y > d.H;
-      if (out || this.pLife[i] <= 0 || sp < 0.05 || M.type[this.cellAt(x, y, z)] === 1) { this.#respawn(i); continue; }
+      if (out || this.pLife[i] <= 0 || (dt > 0 && sp < 0.05) || M.type[this.cellAt(x, y, z)] === 1) { this.#respawn(i); continue; }
       p[o] = x; p[o + 1] = y; p[o + 2] = z;
       const L = Math.min(0.6, 0.12 + sp * 0.09) / Math.max(sp, 1e-3);
       const q = i * 6;
@@ -748,6 +816,210 @@ export class Viewer {
     const geo = surfaceNets(r.mesh, r.fields.T, r.amb + this.display.isoDT);
     this.isoMesh.geometry.dispose();
     this.isoMesh.geometry = geo;
+  }
+
+  /* ───────── streamline และเวกเตอร์บนระนาบหน้าตัด ───────── */
+
+  #initGlyphs() {
+    // streamline: เส้นต่อจุด พร้อมเวลาเดินทางของลมตามเส้น (tt) ใช้ทำแสงวิ่งตามทิศลมเมื่อกดเล่น
+    this.streamMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uAnim: { value: 0 } },
+      vertexShader: `attribute vec3 acol; attribute float tt; varying vec3 vC; varying float vT;
+        void main() { vC = acol; vT = tt; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform float uTime; uniform float uAnim; varying vec3 vC; varying float vT;
+        void main() {
+          float ph = fract((vT - uTime) * 0.7);
+          float a = mix(0.9, 0.18 + 0.82 * pow(ph, 5.0), uAnim);
+          gl_FragColor = vec4(vC, a);
+        }`,
+      transparent: true, depthWrite: false,
+    });
+    this.streamLines = new THREE.LineSegments(new THREE.BufferGeometry(), this.streamMat);
+    this.streamLines.frustumCulled = false;
+    this.streamLines.renderOrder = 5;
+    this.streamLines.raycast = () => {};
+    this.streamLines.visible = false;
+    this.scene3.add(this.streamLines);
+    // ลูกศรเวกเตอร์: ก้าน + หัว ยาว 1 หน่วยตามแกน +y (ปรับขนาดต่ออัน)
+    const shaft = new THREE.CylinderGeometry(0.045, 0.045, 0.68, 6, 1);
+    shaft.translate(0, 0.34, 0);
+    const head = new THREE.ConeGeometry(0.14, 0.32, 8, 1);
+    head.translate(0, 0.84, 0);
+    this.arrowGeo = mergeGeo(shaft, head);
+    this.arrowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.vectors = null;
+    this.glyphDirty = true;
+    this.glyphTime = 0;
+  }
+
+  /** จุดบนระนาบหน้าตัดเป็นกริด ระยะห่าง sp — คืน [{x,y,z}] และแกนของระนาบ */
+  #planeGrid(sp) {
+    const d = this.dom, { axis, pos } = this.section, pts = [];
+    const H = d.H, e = sp / 2;
+    if (axis === 'x') for (let b = e; b < H; b += sp) for (let a = d.oz + e; a < d.oz + d.D; a += sp) pts.push([pos, b, a]);
+    else if (axis === 'z') for (let b = e; b < H; b += sp) for (let a = d.ox + e; a < d.ox + d.W; a += sp) pts.push([a, b, pos]);
+    else for (let b = d.oz + e; b < d.oz + d.D; b += sp) for (let a = d.ox + e; a < d.ox + d.W; a += sp) pts.push([a, pos, b]);
+    return pts;
+  }
+
+  #planeArea() {
+    const d = this.dom, a = this.section.axis;
+    return a === 'x' ? d.D * d.H : a === 'z' ? d.W * d.H : d.W * d.D;
+  }
+
+  #updateGlyphs() {
+    const r = this.results, mode = this.display.mode;
+    const on = !!r && !!this.dom && this.section.show;
+    this.streamLines.visible = on && mode === 'stream';
+    if (this.vectors) this.vectors.visible = on && mode === 'vector';
+    if (!on || mode === 'contour') return;
+    if (mode === 'stream') this.#buildStreamlines(); else this.#buildVectors();
+  }
+
+  #buildVectors() {
+    const r = this.results, M = r.mesh, F = r.fields;
+    const sp = Math.max(M.h, Math.sqrt(this.#planeArea() / 1600));
+    const [lo, hi] = this.fieldRange(), span = Math.max(1e-6, hi - lo);
+    const vref = Math.max(0.5, Math.min(6, r.vmax));
+    const items = [];
+    for (const [x, y, z] of this.#planeGrid(sp)) {
+      if (M.type[this.cellAt(x, y, z)] === 1) continue;
+      const u = this.sample(F.u, x, y, z), v = this.sample(F.v, x, y, z), w = this.sample(F.w, x, y, z);
+      const s = Math.hypot(u, v, w);
+      if (s < vref * 0.02) continue;
+      items.push([x, y, z, u / s, v / s, w / s, s, this.valueAt(x, y, z)]);
+    }
+    if (this.vectors) { this.scene3.remove(this.vectors); this.vectors.dispose(); this.vectors = null; }
+    if (!items.length) return;
+    const im = new THREE.InstancedMesh(this.arrowGeo, this.arrowMat, items.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), dir = new THREE.Vector3();
+    const scl = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();
+    items.forEach(([x, y, z, ux, uy, uz, s, val], i) => {
+      const L = sp * (0.25 + 0.85 * Math.min(1, s / vref));
+      dir.set(ux, uy, uz);
+      q.setFromUnitVectors(up, dir);
+      scl.set(sp * 0.9, L, sp * 0.9);
+      // วางกึ่งกลางลูกศรที่จุดกริด
+      p.set(x, y, z).addScaledVector(dir, -L / 2);
+      im.setMatrixAt(i, m4.compose(p, q, scl));
+      const c = rgb((val - lo) / span);
+      im.setColorAt(i, col.setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace));
+    });
+    im.instanceMatrix.needsUpdate = true;
+    im.instanceColor.needsUpdate = true;
+    im.raycast = () => {};
+    im.renderOrder = 5;
+    im.frustumCulled = false;
+    this.vectors = im;
+    this.scene3.add(im);
+  }
+
+  #buildStreamlines() {
+    const r = this.results, M = r.mesh, F = r.fields, d = this.dom;
+    const seedSp = Math.max(M.h * 1.5, Math.sqrt(this.#planeArea() / 320));
+    const ds = Math.max(0.12, M.h * 0.5), maxSteps = Math.ceil(Math.min(120, 2.5 * Math.max(d.W, d.D, d.H)) / ds);
+    const [lo, hi] = this.fieldRange(), span = Math.max(1e-6, hi - lo);
+    const pos = [], col = [], tt = [];
+    const vel = (x, y, z, o) => { o[0] = this.sample(F.u, x, y, z); o[1] = this.sample(F.v, x, y, z); o[2] = this.sample(F.w, x, y, z); return Math.hypot(o[0], o[1], o[2]); };
+    const inside = (x, y, z) => x > d.ox && x < d.ox + d.W && z > d.oz && z < d.oz + d.D && y > 0 && y < d.H && M.type[this.cellAt(x, y, z)] !== 1;
+    const k1 = [0, 0, 0], k2 = [0, 0, 0];
+    // เดินตามสนามความเร็ว (RK2 ระยะทางคงที่) ทิศ sgn = +1 ตามลม, −1 ย้อนลม — คืนจุด [x,y,z,t]
+    const trace = (x, y, z, sgn) => {
+      const out = [];
+      let t = 0;
+      for (let n = 0; n < maxSteps; n++) {
+        const s1 = vel(x, y, z, k1);
+        if (s1 < 0.03) break;
+        const h1 = sgn * ds / s1;
+        const mx = x + k1[0] * h1 / 2, my = y + k1[1] * h1 / 2, mz = z + k1[2] * h1 / 2;
+        if (!inside(mx, my, mz)) break;
+        const s2 = vel(mx, my, mz, k2);
+        if (s2 < 0.03) break;
+        const h2 = sgn * ds / s2;
+        x += k2[0] * h2; y += k2[1] * h2; z += k2[2] * h2;
+        t += ds / s2;
+        if (!inside(x, y, z)) break;
+        out.push([x, y, z, sgn * t]);
+      }
+      return out;
+    };
+    for (const [x, y, z] of this.#planeGrid(seedSp)) {
+      if (!inside(x, y, z)) continue;
+      const line = [...trace(x, y, z, -1).reverse(), [x, y, z, 0], ...trace(x, y, z, 1)];
+      if (line.length < 3) continue;
+      // เลื่อนเฟสสุ่มต่อเส้น ไม่ให้แสงวิ่งพร้อมกันทุกเส้น
+      const ph = Math.random() * 4;
+      let prev = null;
+      for (const q of line) {
+        const c = rgb((this.valueAt(q[0], q[1], q[2]) - lo) / span);
+        const cur = [q[0], q[1], q[2], c[0] / 255, c[1] / 255, c[2] / 255, q[3] + ph];
+        if (prev) for (const v of [prev, cur]) { pos.push(v[0], v[1], v[2]); col.push(v[3], v[4], v[5]); tt.push(v[6]); }
+        prev = cur;
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('acol', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('tt', new THREE.Float32BufferAttribute(tt, 1));
+    this.streamLines.geometry.dispose();
+    this.streamLines.geometry = g;
+  }
+
+  /* ───────── ข้อมูล CDU เมื่อคลิกเลือก ───────── */
+
+  #initPopup() {
+    const el = this.popup = document.createElement('div');
+    el.className = 'cdu-pop';
+    el.hidden = true;
+    el.addEventListener('pointerdown', (e) => e.stopPropagation());
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.pop-x')) { this.popupClosed = true; el.hidden = true; }
+    });
+    this.host.appendChild(el);
+  }
+
+  #fillPopup() {
+    const el = this.popup;
+    if (!el) return;
+    const o = this.objects.find(q => q.id === this.selectedId);
+    if (!o || o.type !== 'cdu' || this.popupClosed) { el.hidden = true; return; }
+    const m = getModel(o.model);
+    const u = this.results?.units?.find(q => q.id === o.id);
+    const b = this.sceneData?.bands || { green: 40, red: 46 };
+    const band = t => (t <= b.green ? 'green' : t <= b.red ? 'yellow' : 'red');
+    const chip = t => `<i class="chip chip-${band(t)}"></i>`;
+    let html = `<button class="pop-x" title="ปิด">×</button>
+      <div class="pop-h"><span class="muted">No. CDU</span> <b>${esc(o.name)}</b></div>
+      <div class="pop-row"><span>รุ่นเครื่อง</span><b>${esc(m.id)}</b></div>
+      <div class="pop-row"><span>ขนาด</span><span class="mono">${m.hp} HP · ${m.kw.toFixed(1)} kW</span></div>`;
+    if (u) {
+      const tMax = Math.max(...u.modules.map(q => q.Tin));
+      html += `<div class="pop-row pop-big"><span>อุณหภูมิลมกลับ</span><b class="mono">${chip(tMax)}${u.Tin.toFixed(1)} °C</b></div>
+        <div class="pop-row"><span>จุดร้อนสุดหน้าคอยล์</span><span class="mono">${u.TinMax.toFixed(1)} °C</span></div>
+        <div class="pop-row"><span>สูงกว่าอากาศภายนอก</span><span class="mono st-${u.status.key}">+${u.dT.toFixed(2)} K</span></div>
+        <div class="pop-row"><span>capacity ที่ได้</span><span class="mono">${(u.capF * 100).toFixed(1)}%</span></div>`;
+      if (u.modules.length > 1)
+        html += `<div class="pop-mods">${u.modules.map((q, i) => `<span>${chip(q.Tin)}โมดูล ${i + 1}: <b class="mono">${q.Tin.toFixed(1)} °C</b></span>`).join('')}</div>`;
+    } else html += `<div class="pop-row muted">ยังไม่มีผล — กด ▶ คำนวณ เพื่อดูอุณหภูมิลมกลับ</div>`;
+    el.innerHTML = html;
+    el.hidden = false;
+  }
+
+  #placePopup() {
+    const el = this.popup;
+    if (!el || el.hidden) return;
+    const g = this.meshes.get(this.selectedId);
+    if (!g) { el.hidden = true; return; }
+    const v = g.userData.anchor.clone().project(this.camera);
+    const w = this.host.clientWidth, h = this.host.clientHeight;
+    const off = v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05;
+    el.style.visibility = off ? 'hidden' : '';
+    if (off) return;
+    // ไม่ให้หลุดขอบจอ
+    const pw = el.offsetWidth, ph = el.offsetHeight;
+    const x = Math.min(w - pw - 6, Math.max(6, (v.x * 0.5 + 0.5) * w - pw / 2));
+    const y = Math.min(h - ph - 6, Math.max(6, (-v.y * 0.5 + 0.5) * h - ph - 14));
+    el.style.transform = `translate(${x}px,${y}px)`;
   }
 
   /* ───────── ตัวจับลาก (handles) ───────── */
@@ -899,6 +1171,7 @@ export class Viewer {
         this.section.pos = v;
         this.#updateSectionGeometry();
         this.#updateSectionTexture();
+        this.glyphDirty = true;
         this.cb.onSectionMoved?.(v, false);
       }
       return;
@@ -1011,6 +1284,7 @@ export class Viewer {
     this.cb.onProbe?.({
       p, T: this.sample(F.T, p.x, p.y, p.z), C: this.sample(F.C, p.x, p.y, p.z),
       V: Math.hypot(this.sample(F.u, p.x, p.y, p.z), this.sample(F.v, p.x, p.y, p.z), this.sample(F.w, p.x, p.y, p.z)),
+      P: F.P ? this.sample(F.P, p.x, p.y, p.z) : null,
     });
   }
 
@@ -1019,12 +1293,23 @@ export class Viewer {
   #frame(dt) {
     this.controls.update();
     this.#updateStreaks(dt);
+    if (this.display.playing) this.animT += dt;
+    this.streamMat.uniforms.uTime.value = this.animT;
+    this.streamMat.uniforms.uAnim.value = this.display.playing ? 1 : 0;
+    // สร้าง streamline / เวกเตอร์ใหม่เมื่อผลหรือระนาบเปลี่ยน (เว้นช่วงระหว่างลากระนาบ)
+    const now = performance.now();
+    if (this.glyphDirty && now - this.glyphTime > 120) {
+      this.glyphDirty = false;
+      this.glyphTime = now;
+      this.#updateGlyphs();
+    }
     // ปุ่มระนาบหน้าตัดมีขนาดคงที่บนจอ
     const k = this.camera.isOrthographicCamera ? (this.ortho.top - this.ortho.bottom) / this.ortho.zoom / 40
       : this.camera.position.distanceTo(this.secKnob.getWorldPosition(new THREE.Vector3())) / 45;
     this.secKnob.scale.setScalar(Math.max(0.4, k));
     this.renderer.render(this.scene3, this.camera);
     this.#placeLabels();
+    this.#placePopup();
   }
 
   #placeLabels() {
@@ -1054,6 +1339,33 @@ export class Viewer {
 function clampI(v, a, b) { return v < a ? a : v > b ? b : v; }
 function fmt(v) { return (Math.round(v * 100) / 100).toString(); }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/** ช่วงสเกลความดัน: จากเปอร์เซ็นไทล์ 1 และ 99.5 ของเซลล์อากาศ (ตัดค่าโดดใกล้พัดลม) */
+function pressureRange(M, P) {
+  const step = Math.max(1, Math.floor(M.N / 60000)), vals = [];
+  for (let c = 0; c < M.N; c += step) if (M.type[c] === 0) vals.push(P[c]);
+  if (!vals.length) return [-1, 1];
+  vals.sort((a, b) => a - b);
+  // สเกลสมมาตรรอบ 0 Pa: สีกลางแถบ = ความดันบรรยากาศ
+  const m = Math.max(0.01, -vals[Math.floor(vals.length * 0.01)], vals[Math.floor(vals.length * 0.995)]);
+  return [-m, m];
+}
+
+/** รวม BufferGeometry แบบมี index สองชิ้น (position + normal) */
+function mergeGeo(a, b) {
+  const pa = a.attributes.position, pb = b.attributes.position;
+  const pos = new Float32Array((pa.count + pb.count) * 3);
+  pos.set(pa.array); pos.set(pb.array, pa.count * 3);
+  const nor = new Float32Array(pos.length);
+  nor.set(a.attributes.normal.array); nor.set(b.attributes.normal.array, pa.count * 3);
+  const idx = [...a.index.array, ...Array.from(b.index.array, i => i + pa.count)];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  a.dispose(); b.dispose();
+  return g;
+}
 
 function disposeGroup(g) {
   g.traverse(o => {
