@@ -359,13 +359,20 @@ function bindBands() {
 /** ต้องมีขอบเปิดอย่างน้อยหนึ่งด้าน มิฉะนั้นความร้อนออกจากโดเมนไม่ได้และผลไม่มีวันนิ่ง */
 function hasOpenFace() { return BC_FACES.some(f => scene.bc[f].type === 'open'); }
 
+/** หน่วยความจำของ solver ≈ 112 ไบต์ต่อเซลล์ (รวมเซลล์ขอบ) — ดู Solver.memoryBytes */
+const meshBytes = d => (d.nx + 2) * (d.ny + 2) * (d.nz + 2) * 112;
+/** WebAssembly 32 บิตจองได้สูงสุด 4 GiB เผื่อสแตก/ส่วนอื่นไว้ 128 MiB */
+const MAX_MESH_BYTES = 4 * 1024 ** 3 - 128 * 1024 ** 2;
+const fmtGB = b => (b / 1024 ** 3).toFixed(1);
+
 function updateEstimate() {
   const d = domainOf(scene);
   // โดยทั่วไปลู่เข้าในช่วง 60–150 วินาทีจำลอง — ประมาณที่ 120 s
   const steps = 120 / (0.25 * d.h);
   const sec = d.cells * 0.4e-6 * steps;   // ≈0.4 µs ต่อเซลล์ต่อสเต็ป (WebAssembly)
   const el = $('#mesh-info');
-  el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์`;
+  el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์ · หน่วยความจำ ≈ ${fmtGB(meshBytes(d))} GB`
+    + (meshBytes(d) > MAX_MESH_BYTES ? ' — เกิน 4 GB คำนวณไม่ได้ ลดระยะเผื่อโดเมนหรือเพิ่มขนาดเซลล์' : '');
   el.classList.toggle('warn', d.cells > 1.2e6);
   if (run.state !== 'running') $('#estimate').textContent = scene.objects.some(o => o.type === 'cdu')
     ? `${fmtK(d.cells)} เซลล์ · ประมาณ ${fmtDur(sec)}` : '';
@@ -394,7 +401,10 @@ function startOrToggle() {
   if (!scene.objects.some(o => o.type === 'cdu')) { toast('ยังไม่มี CDU ในฉาก — กด + CDU แล้ววางเครื่องก่อน'); return; }
   if (!hasOpenFace()) { toast('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน ไม่เช่นนั้นลมร้อนออกไม่ได้และผลจะไม่ลู่เข้า', 5000); return; }
   const d = domainOf(scene);
-  if (d.cells > 3.5e6) { toast(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์) — เพิ่มขนาดเซลล์หรือลดระยะเผื่อ`); return; }
+  if (meshBytes(d) > MAX_MESH_BYTES) {
+    toast(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์ ≈ ${fmtGB(meshBytes(d))} GB เกินหน่วยความจำสูงสุด 4 GB ของ WebAssembly) — เพิ่มขนาดเซลล์ หรือลดระยะเผื่อขอบโดเมน`, 6000);
+    return;
+  }
   if (d.cells > 1.2e6 && !confirm(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`)) return;
 
   const mesh = buildMesh(scene);
