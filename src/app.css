@@ -327,3 +327,7 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
 .cap-item input { width: 100%; font-size: 12.5px; padding: 3px 6px; }
 .cap-item .cap-row { display: flex; gap: 4px; justify-content: space-between; align-items: center; font-size: 12px; }
 .cap-item .cap-row button { padding: 2px 8px; font-size: 12px; }
+
+/* ปุ่มคำสั่งแก้ไขแบบ AutoCAD — กะทัดรัด ให้แถบเครื่องมืออยู่บรรทัดเดียว */
+.toolbar .tool.cmd { padding-left: 8px; padding-right: 8px; font-size: 12.5px; }
+.toolbar #btn-ortho { padding-left: 8px; padding-right: 8px; font-size: 12.5px; }

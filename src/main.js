@@ -35,6 +35,7 @@ const viewer = new Viewer($('#viewport'), {
   onPickWhileTool: (id) => { setTool('select'); select(id); },
   onMoveCommit: (id, dx, dz) => moveObject(id, dx, dz),
   onOffset: (id, dx, dz) => offsetObject(id, dx, dz),
+  onTransform: (id, q, copy) => applyTransform(id, q, copy),
   onToolDone: () => setTool('select'),
   onBeginEdit: () => pushUndo(),
   onObjectEdited: () => afterChange(true),
@@ -226,6 +227,25 @@ function offsetObject(id, dx, dz) {
   });
 }
 
+/** Copy / Mirror / Rotate: q = วัตถุผลลัพธ์จากมุมมอง 3D · copy = สร้างวัตถุใหม่ (ต้นฉบับคงเดิม) */
+function applyTransform(id, q, copy) {
+  const o = scene.objects.find(x => x.id === id);
+  if (!o) return;
+  edit(() => {
+    if (copy) {
+      const c = makeObject(scene, o.type, { ...q, id: undefined, name: undefined });
+      reseatCdu(c, o);
+      scene.objects.push(c);
+      selectedId = c.id;
+    } else {
+      const from = { ...o };
+      Object.assign(o, q, { id: o.id, name: o.name });
+      reseatCdu(o, from);
+      if (o.type === 'cdu') lastUsed.rot = o.rot;
+    }
+  });
+}
+
 /** Tab / Shift+Tab: เลือกวัตถุถัดไป/ก่อนหน้า (ช่วยเลือกวัตถุที่ถูกบังหรือซ้อนกัน) */
 function cycleSelection(dir) {
   const list = scene.objects;
@@ -265,6 +285,9 @@ const TOOL_HINT = {
   wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้ ภายในกริดแกน) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · F8 Ortho / Shift ล็อกแนวแกน · คลิกกลางผนังเดิม = เลือก · ดับเบิลคลิก/Esc เพื่อจบ',
   slab: 'คลิกมุมหนึ่งของแผ่นพื้น/หลังคา แล้วคลิกมุมตรงข้าม · ตั้งระดับความสูงที่แผงด้านขวา · Esc เพื่อจบ',
   move: 'Move: เลือกวัตถุ → จุดฐาน → จุดที่สอง หรือพิมพ์ระยะ + Enter · F8 Ortho · Esc ยกเลิก',
+  copy: 'Copy: เลือกวัตถุ → จุดฐาน → คลิกวางสำเนาได้หลายครั้ง หรือพิมพ์ระยะ + Enter · F8 Ortho · Esc จบ',
+  mirror: 'Mirror: เลือกวัตถุ → คลิกจุดแรกและจุดที่สองของเส้นสะท้อน (ได้สำเนา ต้นฉบับคงเดิม) · F8 Ortho · Esc ยกเลิก',
+  rotate: 'Rotate: เลือกวัตถุ → จุดฐาน → พิมพ์มุม (องศา, + ทวนเข็ม / − ตามเข็ม) + Enter หรือคลิก · CDU ทีละ 90° · Esc ยกเลิก',
   offset: 'Offset: พิมพ์ระยะ + Enter → คลิกวัตถุ → คลิกฝั่ง (CDU/อาคาร = ช่องว่างระหว่างขอบ) · Esc จบ',
   building: 'คลิกมุมหนึ่งของอาคาร แล้วคลิกมุมตรงข้าม · Esc เพื่อจบ',
 };
@@ -1412,6 +1435,7 @@ function bindUI() {
       : /^(Digit|Numpad)\d$/.test(c) ? c.slice(-1)
       : c === 'Period' || c === 'NumpadDecimal' ? '.'
       : c === 'Slash' && e.shiftKey ? '?'
+      : c === 'Minus' || c === 'NumpadSubtract' ? '-'
       : e.key.toLowerCase();
     // ระหว่างลากผนัง: พิมพ์ตัวเลขความยาวแล้วกด Enter
     const typed = /^[0-9.]$/.test(k) ? k : e.key;
@@ -1432,6 +1456,9 @@ function bindUI() {
       if (tool !== 'select' && viewer.cancelDraw()) return;
       if (tool !== 'select') setTool('select'); else select(null);
     }
+    else if (e.shiftKey && k === 'c') setTool('copy');
+    else if (e.shiftKey && k === 'm') setTool('mirror');
+    else if (e.shiftKey && k === 'r') setTool('rotate');
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSelected(); }
     else if (k === 'r') rotateSelected();
     else if (k === 'v') setTool('select');
