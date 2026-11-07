@@ -969,7 +969,7 @@ function updateColorbar() {
 /* ───────── Capture ภาพหลายมุมสำหรับรายงาน ───────── */
 
 const captures = [];   // { url, caption }
-const VIEW_NAME = { '3d': '3D', px: 'มุมมอง +X', nx: 'มุมมอง −X', py: 'มุมมอง +Y (บน)', ny: 'มุมมอง −Y (ล่าง)', pz: 'มุมมอง +Z', nz: 'มุมมอง −Z' };
+const VIEW_NAME = { '3d': 'มุมมอง 3D', n: '3D จากทิศเหนือ', s: '3D จากทิศใต้', e: '3D จากทิศตะวันออก', w: '3D จากทิศตะวันตก', top: 'มุมมองด้านบน (Top)', px: 'มุมมอง +X', nx: 'มุมมอง −X', py: 'มุมมองด้านบน (Top)', ny: 'มุมมอง −Y (ล่าง)', pz: 'มุมมอง +Z', nz: 'มุมมอง −Z' };
 const MODE_NAME = { contour: 'Contour', stream: 'Streamline', vector: 'Vector' };
 
 /** ภาพจากมุมมองปัจจุบัน + หัวเรื่องและแถบสี วาดรวมเป็น PNG เดียว */
@@ -1063,10 +1063,16 @@ function downloadURL(url, name) {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
+function setViewUI(v) {
+  viewer.setView(v);
+  $$('.vt').forEach(x => x.classList.toggle('on', x.dataset.view === viewer.view));
+}
+
+/** เต็มจอทั้งพื้นที่ทำงาน (แถบเครื่องมือ + ภาพ + แผงแก้วัตถุ) เพื่อให้แก้โมเดลต่อได้ */
 function toggleFullscreen() {
-  const st = $('.stage');
+  const ws = $('#workspace');
   if (document.fullscreenElement) document.exitFullscreen?.();
-  else st.requestFullscreen?.().catch(() => toast('เบราว์เซอร์ไม่อนุญาตโหมดเต็มจอ'));
+  else ws.requestFullscreen?.().catch(() => toast('เบราว์เซอร์ไม่อนุญาตโหมดเต็มจอ'));
 }
 
 function showProbe(info) {
@@ -1212,7 +1218,10 @@ function bindUI() {
   $('#btn-capture').addEventListener('click', captureView);
   $('#btn-full').addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', () => {
-    $('#btn-full').textContent = document.fullscreenElement ? '✕ ออกเต็มจอ' : '⛶ เต็มจอ';
+    const fs = document.fullscreenElement;
+    $('#btn-full').textContent = fs ? '✕ ออกเต็มจอ' : '⛶ เต็มจอ';
+    // toast ต้องอยู่ใน element ที่เต็มจอ ไม่เช่นนั้นจะมองไม่เห็น
+    (fs || document.body).appendChild($('#toast'));
     setTimeout(() => viewer.resize(), 60);
   });
   $('#btn-cap-all').addEventListener('click', () => captures.forEach((c, i) =>
@@ -1220,10 +1229,7 @@ function bindUI() {
   $('#btn-cap-clear').addEventListener('click', () => {
     if (confirm(`ลบภาพที่บันทึกไว้ทั้งหมด ${captures.length} ภาพ?`)) { captures.length = 0; renderCaptures(); }
   });
-  $$('.vt').forEach(b => b.addEventListener('click', () => {
-    $$('.vt').forEach(x => x.classList.toggle('on', x === b));
-    viewer.setView(b.dataset.view);
-  }));
+  $$('.vt').forEach(b => b.addEventListener('click', () => setViewUI(b.dataset.view)));
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-redo').addEventListener('click', redo);
   $('#btn-run').addEventListener('click', startOrToggle);
@@ -1319,6 +1325,7 @@ function bindUI() {
     else if (k === 'b') setTool('building');
     else if (k === 'f') setTool('slab');
     else if (k === 'p') captureView();
+    else if (k >= '1' && k <= '6') setViewUI(['3d', 'n', 's', 'e', 'w', 'top'][+k - 1]);
     else if (k === ' ') { e.preventDefault(); startOrToggle(); }
     else if (k.startsWith('arrow') && selected()) {
       e.preventDefault();
