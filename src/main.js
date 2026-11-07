@@ -152,9 +152,9 @@ function rotateSelected() {
     if (o.type === 'cdu') { o.rot = (o.rot + 90) % 360; lastUsed.rot = o.rot; }
     else if (o.type === 'building' || o.type === 'slab') o.rot = (o.rot + 90) % 360;
     else {
-      // หมุนผนังรอบจุดกึ่งกลาง 90°
+      // หมุนผนังรอบจุดกึ่งกลาง 90° ทวนเข็ม (มุมมอง Top) — ทิศเดียวกับ CDU/อาคาร และคำสั่ง Rotate
       const cx = (o.x1 + o.x2) / 2, cz = (o.z1 + o.z2) / 2;
-      const r = (x, z) => [cx - (z - cz), cz + (x - cx)];
+      const r = (x, z) => [round3(cx + (z - cz)), round3(cz - (x - cx))];
       [o.x1, o.z1] = r(o.x1, o.z1); [o.x2, o.z2] = r(o.x2, o.z2);
     }
   });
@@ -392,7 +392,7 @@ function renderProps() {
   html += `</div>
     <div class="props-actions">
       <button data-act="dup" title="Ctrl+D">ทำสำเนา</button>
-      <button data-act="rot" title="R">หมุน 90°</button>
+      <button data-act="rot" title="หมุน 90° ทวนเข็ม (R)">หมุน 90°</button>
       <button data-act="del" class="danger" title="Delete">ลบ</button>
       <span class="spacer"></span>
       <button data-act="close" class="ghost" title="Esc">ปิด</button>
