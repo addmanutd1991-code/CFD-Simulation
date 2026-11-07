@@ -109,7 +109,7 @@ kbd {
   display: flex; flex-direction: column; align-items: center;
 }
 .lbl.sel { border-color: var(--accent); }
-.lbl-wall, .lbl-building { color: #c7d5df; }
+.lbl-wall, .lbl-building, .lbl-slab { color: #c7d5df; }
 .lbl-res { font-family: var(--mono); font-size: 11px; margin-top: 1px; }
 .st-ok { color: var(--ok); } .st-watch { color: var(--watch); } .st-bad { color: var(--bad); } .st-trip { color: var(--trip); }
 .dimlabel {
@@ -283,3 +283,22 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
 .cdu-pop .pop-big b { font-size: 15px; color: #fff; }
 .cdu-pop .pop-mods { display: flex; flex-direction: column; margin-top: 4px; padding-top: 3px; border-top: 1px solid var(--line-2); color: var(--muted); }
 .cdu-pop .pop-mods b { color: var(--text); }
+
+/* ปุ่มมุมมองตามแกน / Capture / เต็มจอ */
+.vtabs { flex-wrap: wrap; right: 220px; }
+.vsep { width: 6px; }
+.vact { padding: 4px 10px; font-size: 13px; background: rgba(20,34,48,.85); }
+.stage:fullscreen { display: flex; flex-direction: column; border-radius: 0; padding: 10px; overflow: auto; }
+.stage:fullscreen .viewport { flex: 1; height: auto; min-height: 0; }
+.capture-flash { position: absolute; inset: 0; background: #fff; opacity: .55; pointer-events: none; z-index: 5; transition: opacity .35s; }
+
+/* แกลเลอรีภาพสำหรับรายงาน */
+.captures { margin-bottom: 12px; }
+.cap-actions { display: flex; gap: 6px; }
+.cap-actions .mini { padding: 3px 9px; font-size: 12px; }
+.cap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.cap-item { background: var(--panel-2, rgba(255,255,255,.03)); border: 1px solid var(--line); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
+.cap-item img { width: 100%; border-radius: 4px; display: block; cursor: zoom-in; }
+.cap-item input { width: 100%; font-size: 12.5px; padding: 3px 6px; }
+.cap-item .cap-row { display: flex; gap: 4px; justify-content: space-between; align-items: center; font-size: 12px; }
+.cap-item .cap-row button { padding: 2px 8px; font-size: 12px; }

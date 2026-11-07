@@ -2,17 +2,18 @@
  * scene.js — ข้อมูลแบบจำลอง: วัตถุในฉาก ค่าตั้งต้น ขอบเขตโดเมน ตัวอย่างสำเร็จรูป
  *
  * พิกัดโลก (เมตร): +x = ทิศตะวันออก, +z = ทิศใต้, +y = ขึ้น (ทิศเหนือคือ −z)
- * วัตถุมี 3 ชนิด
+ * วัตถุมี 4 ชนิด
  *   cdu      {x, z, rot, elev, model, duct, airflow}   — rot เป็นพหุคูณของ 90°, ด้านหน้าเครื่องหันไป +z เมื่อ rot = 0
  *   wall     {x1, z1, x2, z2, height, thick, louver, gap} — louver = % พื้นที่เปิด (0 = ผนังทึบ)
  *   building {x, z, w, d, h, rot}
+ *   slab     {x, z, w, d, y, thick, rot, open}         — แผ่นพื้นยก/หลังคา: y = ระดับผิวบน, open = % ช่องเปิด (0 = ทึบ)
  */
 
 import { DEFAULT_PERF, unitSize } from './models.js';
 
 export const DEFAULTS = {
   site: { ambient: 35, windSpeed: 0, windDir: 0 },
-  sim: { cell: 0.25, tMax: 1800 },
+  sim: { cell: 0.1, tMax: 1800 },
   // เกณฑ์สี CDU ตาม T ลมเข้ารายโมดูล (°C) ที่อากาศภายนอก 35 °C: ≤ green เขียว, ≤ red เหลือง, > red แดง
   bands: { green: 40, red: 46 },
   bc: {
@@ -53,7 +54,7 @@ export function nextId(scene) {
 }
 
 export function nextName(scene, type) {
-  const prefix = type === 'cdu' ? 'CDU-' : type === 'wall' ? 'ผนัง-' : 'อาคาร-';
+  const prefix = type === 'cdu' ? 'CDU-' : type === 'wall' ? 'ผนัง-' : type === 'slab' ? 'พื้น-' : 'อาคาร-';
   let n = 1;
   const names = new Set(scene.objects.map(o => o.name));
   while (names.has(prefix + n)) n++;
@@ -64,6 +65,7 @@ export function makeObject(scene, type, props = {}) {
   const base = { id: nextId(scene), type, name: nextName(scene, type) };
   if (type === 'cdu') return { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, airflow: null, ...props };
   if (type === 'wall') return { ...base, x1: 0, z1: 0, x2: 4, z2: 0, height: 2.4, thick: 0.15, louver: 50, gap: 0, ...props };
+  if (type === 'slab') return { ...base, x: 0, z: 0, w: 5, d: 4, y: 3, thick: 0.2, rot: 0, open: 0, ...props };
   return { ...base, x: 0, z: 0, w: 5, d: 4, h: 4.5, rot: 0, ...props };
 }
 
@@ -90,7 +92,21 @@ export function objectBounds(o) {
   }
   const r = o.rot * Math.PI / 180, c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
   const hx = (o.w * c + o.d * s) / 2, hz = (o.w * s + o.d * c) / 2;
-  return { x0: o.x - hx, x1: o.x + hx, z0: o.z - hz, z1: o.z + hz, top: o.h };
+  return { x0: o.x - hx, x1: o.x + hx, z0: o.z - hz, z1: o.z + hz, top: o.type === 'slab' ? o.y : o.h };
+}
+
+/** ช่วงความสูงของแผ่นพื้น/หลังคา: ผิวบนที่ y หนาลงมา thick (ไม่ต่ำกว่าพื้นดิน) */
+export function slabRange(o) {
+  const y1 = Math.max(0, o.y), y0 = Math.max(0, y1 - Math.max(0.01, o.thick));
+  return { y0, y1 };
+}
+
+/** จุด (x, z) อยู่ในรอยเท้าของวัตถุสี่เหลี่ยมหมุนได้ (อาคาร/แผ่นพื้น) หรือไม่ */
+export function insideRect(o, x, z) {
+  const r = o.rot * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  const dx = x - o.x, dz = z - o.z;
+  const lx = dx * c - dz * s, lz = dx * s + dz * c;
+  return Math.abs(lx) <= o.w / 2 && Math.abs(lz) <= o.d / 2;
 }
 
 /**
@@ -237,7 +253,7 @@ export function normalizeScene(raw) {
   const objs = Array.isArray(raw.objects) ? raw.objects : [];
   let id = 1;
   for (const o of objs) {
-    if (!o || !['cdu', 'wall', 'building'].includes(o.type)) continue;
+    if (!o || !['cdu', 'wall', 'building', 'slab'].includes(o.type)) continue;
     const t = makeObject({ objects: s.objects }, o.type, o);
     t.id = id++;
     s.objects.push(t);
