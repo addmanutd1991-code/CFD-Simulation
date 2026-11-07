@@ -27,7 +27,9 @@ export class Viewer {
     this.cb = cb;
     this.tool = 'select';
     this.selectedId = null;
-    this.orthoMode = false;   // ล็อกผนังตามแนวแกน X/Z (F8) — กด Shift เพื่อสลับชั่วคราว
+    this.orthoMode = false;
+    this.cmd = null;          // สถานะคำสั่ง Move / Offset
+    this.offsetDist = 1.0;    // ระยะ Offset ล่าสุด (ม.)   // ล็อกผนังตามแนวแกน X/Z (F8) — กด Shift เพื่อสลับชั่วคราว
     this.cursor = null;       // จุดบนพื้นใต้เมาส์ล่าสุด (ใช้วางวัตถุที่คัดลอก)
     this.scene3 = new THREE.Scene();
     this.objects = [];
@@ -1131,6 +1133,9 @@ export class Viewer {
   setTool(tool) {
     this.tool = tool;
     this.draw = null;
+    this.cmd = tool === 'move' || tool === 'offset'
+      ? { id: this.objects?.some(q => q.id === this.selectedId) ? this.selectedId : null, base: null, typed: '' }
+      : null;
     this.#clearPreview();
     this.renderer.domElement.style.cursor = tool === 'select' ? '' : 'crosshair';
   }
@@ -1140,6 +1145,7 @@ export class Viewer {
    * คืน true ถ้าใช้ปุ่มนี้ไปแล้ว (ไม่ต้องส่งต่อเป็นคีย์ลัด)
    */
   typeLength(key) {
+    if (this.cmd) return this.#cmdType(key);
     if (this.tool !== 'wall' || !this.draw) return false;
     const d = this.draw;
     if (/^[0-9.]$/.test(key)) {
@@ -1269,6 +1275,7 @@ export class Viewer {
   #initInput() {
     const el = this.renderer.domElement;
     const snap = (v, e) => e.altKey ? Math.round(v * 100) / 100 : Math.round(v / SNAP) * SNAP;
+    this.snapFn = snap;
     let drag = null, down = null;
 
     this.dimLabel = document.createElement('div');
@@ -1415,6 +1422,7 @@ export class Viewer {
   }
 
   #toolHover(e, snap) {
+    if (this.cmd) { this.#cmdHover(e, snap); return; }
     const g = this.#ground(e);
     this.#clearPreview();
     if (!g) return;
@@ -1463,6 +1471,7 @@ export class Viewer {
   }
 
   #toolClick(e, snap) {
+    if (this.cmd) { this.#cmdClick(e, snap); return; }
     const g = this.#ground(e);
     if (!g) return;
     let x = snap(g.x, e), z = snap(g.z, e);
@@ -1487,6 +1496,148 @@ export class Viewer {
       this.draw = null;
       this.#clearPreview();
     }
+  }
+
+  /* ───────── คำสั่ง Move / Offset แบบ AutoCAD ───────── */
+
+  #cmdObj() {
+    return this.cmd?.id != null ? this.objects.find(q => q.id === this.cmd.id) || null : null;
+  }
+
+  /** สำเนาวัตถุที่เลื่อนไป (dx, dz) แล้วดึงให้อยู่ในกริดแกน — ใช้แสดงภาพตัวอย่าง */
+  #shifted(o, dx, dz) {
+    const c = { ...o };
+    if (c.type === 'wall') { c.x1 += dx; c.x2 += dx; c.z1 += dz; c.z2 += dz; } else { c.x += dx; c.z += dz; }
+    this.#keepInside(c);
+    return c;
+  }
+
+  /** ภาพเงาโปร่งสีฟ้าของวัตถุ (ไม่รับการคลิก) */
+  #ghost(o) {
+    const g = o.type === 'cdu' ? this.#cduMesh(o) : o.type === 'wall' ? this.#wallMesh(o)
+      : o.type === 'slab' ? this.#slabMesh(o) : this.#buildingMesh(o);
+    const mm = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.35, depthWrite: false });
+    const lm = new THREE.LineBasicMaterial({ color: ACCENT });
+    g.traverse(m => {
+      if (!m.isMesh && !m.isLine) return;
+      for (const x of Array.isArray(m.material) ? m.material : [m.material]) x?.dispose?.();
+      m.material = m.isMesh ? mm : lm;
+      m.raycast = () => {};
+    });
+    this.gPreview.add(g);
+  }
+
+  #previewLine(a, b) {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute([a.x, 0.05, a.z, b.x, 0.05, b.z], 3));
+    this.gPreview.add(new THREE.Line(lg, new THREE.LineDashedMaterial({ color: ACCENT, dashSize: 0.3, gapSize: 0.2 })).computeLineDistances());
+  }
+
+  /** ล็อกจุด p ให้อยู่แนวแกนเดียวกับจุดฐาน (Ortho) */
+  #lockTo(base, p, lock) {
+    if (!lock) return p;
+    return Math.abs(p.x - base.x) > Math.abs(p.z - base.z) ? { x: p.x, z: base.z } : { x: base.x, z: p.z };
+  }
+
+  /**
+   * ระยะเลื่อนของ Offset ไปฝั่งที่เมาส์ชี้
+   *   ผนัง: สำเนาขนานห่างตั้งฉาก dist
+   *   CDU/อาคาร/พื้น: สำเนาเว้นช่องว่างระหว่างขอบ dist ตามแกนที่เมาส์อยู่ (เช่น ระยะ service ระหว่างเครื่อง)
+   */
+  #offsetDelta(o, p, dist) {
+    if (o.type === 'wall') {
+      const L = Math.hypot(o.x2 - o.x1, o.z2 - o.z1) || 1;
+      const nx = -(o.z2 - o.z1) / L, nz = (o.x2 - o.x1) / L;
+      const side = ((p.x - (o.x1 + o.x2) / 2) * nx + (p.z - (o.z1 + o.z2) / 2) * nz) < 0 ? -1 : 1;
+      return { dx: nx * side * dist, dz: nz * side * dist };
+    }
+    const b = objectBounds(o);
+    const w = b.x1 - b.x0, d = b.z1 - b.z0;
+    const rx = (p.x - o.x) / Math.max(0.01, w / 2), rz = (p.z - o.z) / Math.max(0.01, d / 2);
+    if (Math.abs(rx) >= Math.abs(rz)) return { dx: Math.sign(rx || 1) * (w + dist), dz: 0 };
+    return { dx: 0, dz: Math.sign(rz || 1) * (d + dist) };
+  }
+
+  #cmdPoint(e, snap) {
+    const g = this.#ground(e);
+    if (!g) return null;
+    return this.#clampXZ(snap(g.x, e), snap(g.z, e));
+  }
+
+  #cmdHover(e, snap) {
+    this.lastEvt = e;
+    this.#clearPreview();
+    const c = this.cmd, o = this.#cmdObj();
+    const p = this.#cmdPoint(e, snap);
+    if (!p) return;
+    this.hover = { ...p, lock: this.#lock(e) };
+    const typed = c.typed ? ` · ${c.typed} m ↵` : '';
+    if (!o) {
+      this.#showDim(e, this.tool === 'move' ? 'Move: คลิกเลือกวัตถุที่จะย้าย'
+        : `Offset ${fmt(this.offsetDist)} m: คลิกเลือกวัตถุ · พิมพ์ระยะใหม่ + Enter${typed}`);
+      return;
+    }
+    if (this.tool === 'move') {
+      if (!c.base) { this.#showDim(e, `Move ${o.name}: คลิกจุดฐาน (base point)`); return; }
+      const q = this.#lockTo(c.base, p, this.hover.lock);
+      this.#ghost(this.#shifted(o, q.x - c.base.x, q.z - c.base.z));
+      this.#previewLine(c.base, q);
+      this.#showDim(e, c.typed ? `ระยะ ${c.typed} m ↵` : `จุดที่สอง · ${fmt(Math.hypot(q.x - c.base.x, q.z - c.base.z))} m · พิมพ์ระยะได้`);
+    } else {
+      const d = this.#offsetDelta(o, p, this.offsetDist);
+      this.#ghost(this.#shifted(o, d.dx, d.dz));
+      this.#showDim(e, `Offset ${fmt(this.offsetDist)} m: คลิกฝั่งที่ต้องการ${typed}`);
+    }
+  }
+
+  #cmdClick(e, snap) {
+    const c = this.cmd;
+    let o = this.#cmdObj();
+    if (!o) {
+      const h = this.#hitObject(e);
+      if (h) { c.id = h.id; c.base = null; this.cb.onSelect(h.id); this.#cmdHover(e, snap); }
+      return;
+    }
+    const p = this.#cmdPoint(e, snap);
+    if (!p) return;
+    if (this.tool === 'move') {
+      if (!c.base) { c.base = p; this.#cmdHover(e, snap); return; }
+      const q = this.#lockTo(c.base, p, this.#lock(e));
+      this.#commitMove(o, q.x - c.base.x, q.z - c.base.z);
+    } else {
+      const d = this.#offsetDelta(o, p, this.offsetDist);
+      c.id = null;   // แบบ AutoCAD: ทำต่อได้ — เลือกวัตถุถัดไป
+      this.#clearPreview();
+      this.cb.onOffset?.(o.id, d.dx, d.dz);
+    }
+  }
+
+  #commitMove(o, dx, dz) {
+    this.cmd = null;
+    this.#clearPreview();
+    if (Math.hypot(dx, dz) > 1e-6) this.cb.onMoveCommit?.(o.id, dx, dz);
+    this.cb.onToolDone?.();
+  }
+
+  /** พิมพ์ระยะระหว่างคำสั่ง: Move = ระยะตามทิศเมาส์ · Offset = ระยะ offset */
+  #cmdType(key) {
+    const c = this.cmd, o = this.#cmdObj();
+    const active = this.tool === 'offset' || (o && c.base);
+    if (!active) return false;
+    if (/^[0-9.]$/.test(key)) c.typed += key;
+    else if (key === 'Backspace' && c.typed) c.typed = c.typed.slice(0, -1);
+    else if (key === 'Enter' && c.typed) {
+      const L = parseFloat(c.typed);
+      c.typed = '';
+      if (this.tool === 'offset') { if (L > 0) this.offsetDist = L; }
+      else if (L > 0 && this.hover) {
+        const q = this.#lockTo(c.base, this.hover, this.hover.lock);
+        const ux = q.x - c.base.x, uz = q.z - c.base.z, n = Math.hypot(ux, uz);
+        if (n > 1e-6) { this.#commitMove(o, ux / n * L, uz / n * L); return true; }
+      }
+    } else return false;
+    if (this.lastEvt) this.#cmdHover(this.lastEvt, this.snapFn);
+    return true;
   }
 
   #probe(e) {

@@ -33,6 +33,9 @@ const viewer = new Viewer($('#viewport'), {
   onSelect: (id) => select(id),
   // คลิกโดนวัตถุเดิมขณะถือเครื่องมือวาง → กลับโหมดเลือกแล้วเลือกวัตถุนั้น (ไม่วางซ้ำทับ)
   onPickWhileTool: (id) => { setTool('select'); select(id); },
+  onMoveCommit: (id, dx, dz) => moveObject(id, dx, dz),
+  onOffset: (id, dx, dz) => offsetObject(id, dx, dz),
+  onToolDone: () => setTool('select'),
   onBeginEdit: () => pushUndo(),
   onObjectEdited: () => afterChange(true),
   onCreate: (type, props) => createObject(type, props),
@@ -184,11 +187,40 @@ function pasteClipboard() {
   const dx = p.x - r.x, dz = p.z - r.z;
   edit(() => {
     const c = makeObject(scene, src.type, { ...src, id: undefined, name: undefined });
-    if (c.type === 'wall') { c.x1 = round3(c.x1 + dx); c.x2 = round3(c.x2 + dx); c.z1 = round3(c.z1 + dz); c.z2 = round3(c.z2 + dz); }
-    else { c.x = round3(c.x + dx); c.z = round3(c.z + dz); }
-    viewer.keepInside(c);
-    // CDU: คงระยะฐานเหนือพื้นรองรับ (ย้ายจากหลังคาลงพื้นหรือกลับกันได้ถูกต้อง)
-    if (c.type === 'cdu') c.elev = round2(Math.max(0, src.elev - supportAt(src.x, src.z)) + supportAt(c.x, c.z));
+    translateObj(c, dx, dz);
+    reseatCdu(c, src);
+    scene.objects.push(c);
+    selectedId = c.id;
+  });
+}
+
+/* ───────── Move / Offset (แบบ AutoCAD) ───────── */
+
+function translateObj(o, dx, dz) {
+  if (o.type === 'wall') { o.x1 = round3(o.x1 + dx); o.x2 = round3(o.x2 + dx); o.z1 = round3(o.z1 + dz); o.z2 = round3(o.z2 + dz); }
+  else { o.x = round3(o.x + dx); o.z = round3(o.z + dz); }
+  viewer.keepInside(o);
+}
+
+/** CDU: คงระยะฐานเหนือพื้นรองรับเมื่อย้ายข้ามแผ่นพื้น/หลังคา */
+function reseatCdu(c, from) {
+  if (c.type === 'cdu') c.elev = round2(Math.max(0, from.elev - supportAt(from.x, from.z)) + supportAt(c.x, c.z));
+}
+
+function moveObject(id, dx, dz) {
+  const o = scene.objects.find(q => q.id === id);
+  if (!o) return;
+  edit(() => { const from = { ...o }; translateObj(o, dx, dz); reseatCdu(o, from); });
+  toast(`ย้าย ${o.name} ${fmt(Math.hypot(dx, dz))} m`, 1800);
+}
+
+function offsetObject(id, dx, dz) {
+  const o = scene.objects.find(q => q.id === id);
+  if (!o) return;
+  edit(() => {
+    const c = makeObject(scene, o.type, { ...o, id: undefined, name: undefined });
+    translateObj(c, dx, dz);
+    reseatCdu(c, o);
     scene.objects.push(c);
     selectedId = c.id;
   });
@@ -209,7 +241,7 @@ function setOrtho(on) {
   ortho = on;
   viewer.setOrtho(on);
   $('#btn-ortho').classList.toggle('on', on);
-  toast(on ? 'Ortho เปิด — ผนังล็อกตามแนวแกน X/Z (Shift = ปลดชั่วคราว)' : 'Ortho ปิด', 1600);
+  toast(on ? 'Ortho เปิด — ผนัง/Move ล็อกตามแนวแกน X/Z (Shift = ปลดชั่วคราว)' : 'Ortho ปิด', 1600);
 }
 
 function toggleKeys(show) {
@@ -232,6 +264,8 @@ const TOOL_HINT = {
   cdu: 'คลิกบนพื้นภายในกริดแกนเพื่อวาง CDU · วางต่อได้หลายตัว · คลิกโดนวัตถุเดิม = เลือกเพื่อแก้ไข · Esc เพื่อจบ',
   wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้ ภายในกริดแกน) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · F8 Ortho / Shift ล็อกแนวแกน · คลิกกลางผนังเดิม = เลือก · ดับเบิลคลิก/Esc เพื่อจบ',
   slab: 'คลิกมุมหนึ่งของแผ่นพื้น/หลังคา แล้วคลิกมุมตรงข้าม · ตั้งระดับความสูงที่แผงด้านขวา · Esc เพื่อจบ',
+  move: 'Move: เลือกวัตถุ → จุดฐาน → จุดที่สอง หรือพิมพ์ระยะ + Enter · F8 Ortho · Esc ยกเลิก',
+  offset: 'Offset: พิมพ์ระยะ + Enter → คลิกวัตถุ → คลิกฝั่ง (CDU/อาคาร = ช่องว่างระหว่างขอบ) · Esc จบ',
   building: 'คลิกมุมหนึ่งของอาคาร แล้วคลิกมุมตรงข้าม · Esc เพื่อจบ',
 };
 
@@ -1403,7 +1437,8 @@ function bindUI() {
     else if (k === 'v') setTool('select');
     else if (k === 'c') setTool('cdu');
     else if (k === 'w' || k === 'l') setTool('wall');
-    else if (k === 'o') setOrtho(!ortho);
+    else if (k === 'm') setTool('move');
+    else if (k === 'o') setTool('offset');
     else if (k === '?') toggleKeys();
     else if (k === 'tab' && (e.target === document.body || e.target.tagName === 'CANVAS')) { e.preventDefault(); cycleSelection(e.shiftKey ? -1 : 1); }
     else if (k === 'b') setTool('building');
