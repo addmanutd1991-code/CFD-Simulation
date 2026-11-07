@@ -13,7 +13,7 @@ import { DEFAULT_PERF, unitSize } from './models.js';
 
 export const DEFAULTS = {
   site: { ambient: 35, windSpeed: 0, windDir: 0 },
-  sim: { cell: 0.25, tMax: 1800 },
+  sim: { cell: 0.1, tMax: 1800 },
   // เกณฑ์สี CDU ตาม T ลมเข้ารายโมดูล (°C) ที่อากาศภายนอก 35 °C: ≤ green เขียว, ≤ red เหลือง, > red แดง
   bands: { green: 40, red: 46 },
   bc: {
