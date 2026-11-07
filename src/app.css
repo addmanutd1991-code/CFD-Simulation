@@ -109,7 +109,7 @@ kbd {
   display: flex; flex-direction: column; align-items: center;
 }
 .lbl.sel { border-color: var(--accent); }
-.lbl-wall, .lbl-building { color: #c7d5df; }
+.lbl-wall, .lbl-building, .lbl-slab { color: #c7d5df; }
 .lbl-res { font-family: var(--mono); font-size: 11px; margin-top: 1px; }
 .st-ok { color: var(--ok); } .st-watch { color: var(--watch); } .st-bad { color: var(--bad); } .st-trip { color: var(--trip); }
 .dimlabel {

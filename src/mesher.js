@@ -14,7 +14,7 @@
  */
 
 import { unitModules, unitSize, FAN_AREA } from './models.js';
-import { domainOf, cloneBC } from './scene.js';
+import { domainOf, cloneBC, slabRange, insideRect } from './scene.js';
 
 export const FLUID = 0, SOLID = 1, OPEN = 2;
 
@@ -80,6 +80,26 @@ export function buildMesh(scene) {
     });
   }
 
+  // ── แผ่นพื้นยก / หลังคา ──
+  // บางกว่าเซลล์ก็ยังได้อย่างน้อยหนึ่งชั้นเซลล์ (กันลมรั่วผ่านแผ่น)
+  for (const o of scene.objects) {
+    if (o.type !== 'slab') continue;
+    const free = o.open ?? 0;
+    if (free >= 100) continue;
+    const { y0, y1 } = slabRange(o);
+    const yc = Math.max((y0 + y1) / 2, 0.5 * h), hy = Math.max((y1 - y0) / 2, 0.5 * h);
+    const solid = free <= 0;
+    const kk = solid ? 0 : louverK(free) / (2 * hy);
+    const r = o.rot * Math.PI / 180, c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
+    const ex = (o.w * c + o.d * s) / 2, ez = (o.w * s + o.d * c) / 2;
+    forBox(o.x - ex, o.x + ex, yc - hy, yc + hy, o.z - ez, o.z + ez, (i, j, k, x, y, z, id) => {
+      if (y < yc - hy || y > yc + hy || !insideRect(o, x, z)) return;
+      if (type[id] === SOLID) return;
+      if (solid) { type[id] = SOLID; kp[id] = 0; }
+      else kp[id] = Math.max(kp[id], kk);
+    });
+  }
+
   // ── ผนัง / louver ──
   for (const o of scene.objects) {
     if (o.type !== 'wall') continue;
@@ -123,12 +143,16 @@ export function buildMesh(scene) {
     const hw = sz0.w / 2, hd = sz0.d / 2;
     const ex = Math.abs(hw * c) + Math.abs(hd * s), ez = Math.abs(hw * s) + Math.abs(hd * c);
     const yb = o.elev || 0, yt = yb + sz0.h;
+    // ฐานเครื่องเริ่มจากผิวแผ่นพื้นที่รองรับ (ถ้าวางบนพื้นยก/หลังคา) ไม่เช่นนั้นเริ่มจากพื้นดิน
+    let ySup = 0;
+    for (const s of scene.objects)
+      if (s.type === 'slab' && s.y <= yb + 1e-6 && insideRect(s, o.x, o.z)) ySup = Math.max(ySup, slabRange(s).y0);
     const gBase = modules.length;
     unitBoxes.push({ ui, gBase, n: mods.length });
 
     // ฐาน (ทึบ) และตัวเครื่อง — ทั้งชุดทึบรวมช่องว่างระหว่างโมดูล
-    forBox(o.x - ex, o.x + ex, 0, yt, o.z - ez, o.z + ez, (i, j, k, x, y, z, id) => {
-      if (y > yt) return;
+    forBox(o.x - ex, o.x + ex, ySup, yt, o.z - ez, o.z + ez, (i, j, k, x, y, z, id) => {
+      if (y > yt || y < ySup) return;
       const [lx, lz] = toL(x - o.x, z - o.z);
       if (Math.abs(lx) > hw || Math.abs(lz) > hd) return;
       type[id] = SOLID; kp[id] = 0;

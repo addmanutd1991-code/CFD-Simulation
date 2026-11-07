@@ -3,7 +3,7 @@
  */
 
 import { MODELS, getModel, unitSize, status as unitStatus, MODULE_H, MODULE_D } from './models.js';
-import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES } from './scene.js';
+import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import { buildMesh } from './mesher.js';
 import { Viewer, CONTOUR_LEVELS } from './viewer.js';
 import { Runner } from './runner.js';
@@ -96,8 +96,14 @@ function updateUndoButtons() {
 function createObject(type, props) {
   pushUndo();
   let o;
-  if (type === 'cdu') o = makeObject(scene, 'cdu', { ...props, model: lastUsed.model, rot: lastUsed.rot });
+  if (type === 'cdu') {
+    // วางบนแผ่นพื้นยก/หลังคา → ยกฐานเครื่องขึ้นไปบนผิวแผ่น
+    const sup = scene.objects.filter(s => s.type === 'slab' && insideRect(s, props.x, props.z))
+      .reduce((m, s) => Math.max(m, s.y), 0);
+    o = makeObject(scene, 'cdu', { ...props, model: lastUsed.model, rot: lastUsed.rot, ...(sup > 0 ? { elev: round2(sup + 0.2) } : {}) });
+  }
   else if (type === 'wall') o = makeObject(scene, 'wall', { ...props, height: lastUsed.wallHeight, louver: lastUsed.louver });
+  else if (type === 'slab') o = makeObject(scene, 'slab', props);
   else o = makeObject(scene, 'building', props);
   scene.objects.push(o);
   selectedId = o.id;
@@ -137,7 +143,7 @@ function rotateSelected() {
   if (!o) return;
   edit(() => {
     if (o.type === 'cdu') { o.rot = (o.rot + 90) % 360; lastUsed.rot = o.rot; }
-    else if (o.type === 'building') o.rot = (o.rot + 90) % 360;
+    else if (o.type === 'building' || o.type === 'slab') o.rot = (o.rot + 90) % 360;
     else {
       // หมุนผนังรอบจุดกึ่งกลาง 90°
       const cx = (o.x1 + o.x2) / 2, cz = (o.z1 + o.z2) / 2;
@@ -160,7 +166,8 @@ function nudge(dx, dz) {
 
 const TOOL_HINT = {
   cdu: 'คลิกบนพื้นเพื่อวาง CDU · วางต่อได้หลายตัว · Esc เพื่อจบ',
-  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้) · Shift ล็อกแนวตรง · ดับเบิลคลิก/Esc เพื่อจบ · คลิกจุดแรกเพื่อปิดรอบ',
+  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · Shift ล็อกแนวตรง · ดับเบิลคลิก/Esc เพื่อจบ',
+  slab: 'คลิกมุมหนึ่งของแผ่นพื้น/หลังคา แล้วคลิกมุมตรงข้าม · ตั้งระดับความสูงที่แผงด้านขวา · Esc เพื่อจบ',
   building: 'คลิกมุมหนึ่งของอาคาร แล้วคลิกมุมตรงข้าม · Esc เพื่อจบ',
 };
 
@@ -175,7 +182,8 @@ function setTool(t) {
 
 /* ───────── แผงคุณสมบัติ ───────── */
 
-const TYPE_ICON = { cdu: 'CDU', wall: 'W', building: 'B' };
+const TYPE_ICON = { cdu: 'CDU', wall: 'W', building: 'B', slab: 'F' };
+const TYPE_TITLE = { cdu: 'คอยล์ร้อน (CDU)', wall: 'ผนัง / louver', building: 'อาคาร', slab: 'พื้น / หลังคา' };
 
 function renderProps() {
   const box = $('#props');
@@ -183,20 +191,20 @@ function renderProps() {
   if (!o) {
     $('#props-title').textContent = `วัตถุในฉาก (${scene.objects.length})`;
     if (!scene.objects.length) {
-      box.innerHTML = '<p class="muted small">ยังไม่มีวัตถุ — ใช้ปุ่ม + CDU / + ผนัง / + อาคาร ด้านบน</p>';
+      box.innerHTML = '<p class="muted small">ยังไม่มีวัตถุ — ใช้ปุ่ม + CDU / + ผนัง / + อาคาร / + พื้น ด้านบน</p>';
       return;
     }
-    const order = { cdu: 0, wall: 1, building: 2 };
+    const order = { cdu: 0, wall: 1, building: 2, slab: 3 };
     const items = [...scene.objects].sort((a, b) => order[a.type] - order[b.type] || a.id - b.id);
     box.innerHTML = `<ul class="obj-list">${items.map(q => `
       <li data-id="${q.id}"><span class="ico">${TYPE_ICON[q.type]}</span>${esc(q.name)}
-      <span class="sub">${q.type === 'cdu' ? esc(q.model) : q.type === 'wall' ? (q.louver > 0 ? 'louver ' + q.louver + '%' : 'ทึบ') : fmt(q.h) + ' m'}</span></li>`).join('')}</ul>
+      <span class="sub">${q.type === 'cdu' ? esc(q.model) : q.type === 'wall' ? (q.louver > 0 ? 'louver ' + q.louver + '%' : 'ทึบ') : q.type === 'slab' ? '+' + fmt(q.y) + ' m' + (q.open > 0 ? ' · เปิด ' + q.open + '%' : '') : fmt(q.h) + ' m'}</span></li>`).join('')}</ul>
       <p class="muted small" style="margin:8px 2px 0">คลิกรายการหรือคลิกวัตถุใน 3D เพื่อแก้ไข</p>`;
     $$('li', box).forEach(li => li.addEventListener('click', () => select(Number(li.dataset.id))));
     return;
   }
 
-  $('#props-title').textContent = o.type === 'cdu' ? 'คอยล์ร้อน (CDU)' : o.type === 'wall' ? 'ผนัง / louver' : 'อาคาร';
+  $('#props-title').textContent = TYPE_TITLE[o.type];
   let html = `<div class="form">
     <label class="row">ชื่อ <input type="text" data-k="name" value="${esc(o.name)}"></label>`;
   if (o.type === 'cdu') {
@@ -210,7 +218,7 @@ function renderProps() {
       <div class="row">ด้านหน้าเครื่องหันไป <div class="seg" data-seg="rot">
         ${[[0, 'ใต้'], [90, 'ตอ.'], [180, 'เหนือ'], [270, 'ตต.']].map(([v, l]) => `<button data-v="${v}" class="${o.rot === v ? 'on' : ''}">${l}</button>`).join('')}
       </div></div>
-      <label class="row">ความสูงฐาน (ม.) <input type="number" step="0.05" min="0" max="3" data-k="elev" value="${fmt(o.elev)}"></label>
+      <label class="row">ความสูงฐาน (ม.) <input type="number" step="0.05" min="0" max="60" data-k="elev" value="${fmt(o.elev)}"></label>
       <label class="row">ท่อเป่าลมเหนือพัดลม (ม.) <input type="number" step="0.1" min="0" max="3" data-k="duct" value="${fmt(o.duct || 0)}"></label>
       <label class="row">อัตราลม (m³/min) <input type="number" step="1" min="30" max="2000" data-k="airflow" value="${fmt(o.airflow || m.cmm)}"></label>
       <div class="spec">
@@ -229,13 +237,30 @@ function renderProps() {
     html += `
       <div class="row">จุดเริ่ม x, z <span class="xz"><input type="number" step="0.1" data-k="x1" value="${fmt(o.x1)}"><input type="number" step="0.1" data-k="z1" value="${fmt(o.z1)}"></span></div>
       <div class="row">จุดปลาย x, z <span class="xz"><input type="number" step="0.1" data-k="x2" value="${fmt(o.x2)}"><input type="number" step="0.1" data-k="z2" value="${fmt(o.z2)}"></span></div>
-      <div class="row">ความยาว <span class="mono">${fmt(L)} ม.</span></div>
+      <label class="row">ความยาว (ม.) <input type="number" step="0.1" min="0.1" data-wall="len" value="${fmt(L)}"></label>
+      <label class="row">มุมแนวผนัง (°) <input type="number" step="15" data-wall="ang" value="${fmt(wallAngle(o))}"></label>
+      <div class="row">ยืดความยาวจาก <div class="seg" data-seg="anchor">
+        ${[['start', 'จุดเริ่ม'], ['mid', 'กึ่งกลาง'], ['end', 'จุดปลาย']].map(([v, l]) => `<button data-v="${v}" class="${wallAnchor === v ? 'on' : ''}">${l}</button>`).join('')}
+      </div></div>
       <label class="row">ความสูง (ม.) <input type="number" step="0.1" min="0.2" max="30" data-k="height" value="${fmt(o.height)}"></label>
       <label class="row">ความหนา (ม.) <input type="number" step="0.05" min="0.05" max="1" data-k="thick" value="${fmt(o.thick)}"></label>
       <label class="row">ช่องว่างใต้ผนัง (ม.) <input type="number" step="0.1" min="0" max="5" data-k="gap" value="${fmt(o.gap || 0)}"></label>
       <label class="row">พื้นที่เปิด louver <span class="mono val">${o.louver > 0 ? o.louver + '%' : 'ทึบ'}</span></label>
       <input type="range" min="0" max="95" step="5" data-k="louver" value="${o.louver}">
-      <p class="note">0% = ผนังทึบ · louver ทั่วไปมีพื้นที่เปิด 40–60% · ลากปุ่มกลมที่ปลายผนังเพื่อปรับแนว</p>`;
+      <p class="note">0% = ผนังทึบ · louver ทั่วไปมีพื้นที่เปิด 40–60% · พิมพ์ความยาว/มุมได้โดยตรง หรือลากปุ่มกลมที่ปลายผนัง
+        · มุม 0° = ไปทางตะวันออก (+x), 90° = ไปทางใต้ (+z)</p>`;
+  } else if (o.type === 'slab') {
+    html += `
+      <div class="row">ศูนย์กลาง x, z <span class="xz"><input type="number" step="0.1" data-k="x" value="${fmt(o.x)}"><input type="number" step="0.1" data-k="z" value="${fmt(o.z)}"></span></div>
+      <div class="row">กว้าง × ยาว (ม.) <span class="xz"><input type="number" step="0.1" min="0.3" data-k="w" value="${fmt(o.w)}"><input type="number" step="0.1" min="0.3" data-k="d" value="${fmt(o.d)}"></span></div>
+      <label class="row">ระดับผิวบน (ม.) <input type="number" step="0.1" min="0" max="60" data-k="y" value="${fmt(o.y)}"></label>
+      <label class="row">ความหนา (ม.) <input type="number" step="0.05" min="0.05" max="2" data-k="thick" value="${fmt(o.thick)}"></label>
+      <label class="row">มุมหมุน (°) <input type="number" step="15" data-k="rot" value="${fmt(o.rot)}"></label>
+      <label class="row">ช่องเปิด (ตะแกรง) <span class="mono val">${o.open > 0 ? o.open + '%' : 'ทึบ'}</span></label>
+      <input type="range" min="0" max="95" step="5" data-k="open" value="${o.open || 0}">
+      <p class="note">ใช้เป็นพื้นยก (ชั้นลอย/แท่นวางเครื่อง) หรือหลังคาคลุมลาน · ผิวบนอยู่ที่ระดับที่ตั้ง หนาลงด้านล่าง
+        · 0% = แผ่นทึบ (คอนกรีต/หลังคา) · ตะแกรงเหล็ก (grating) ทั่วไปเปิด 60–80%
+        · CDU ที่วางบนแผ่นนี้จะยกฐานขึ้นไปบนผิวแผ่นอัตโนมัติ</p>`;
   } else {
     html += `
       <div class="row">ศูนย์กลาง x, z <span class="xz"><input type="number" step="0.1" data-k="x" value="${fmt(o.x)}"><input type="number" step="0.1" data-k="z" value="${fmt(o.z)}"></span></div>
@@ -253,7 +278,7 @@ function renderProps() {
     </div>`;
   box.innerHTML = html;
 
-  const NUM = new Set(['x', 'z', 'elev', 'duct', 'airflow', 'x1', 'z1', 'x2', 'z2', 'height', 'thick', 'gap', 'louver', 'w', 'd', 'h', 'rot']);
+  const NUM = new Set(['x', 'z', 'elev', 'duct', 'airflow', 'x1', 'z1', 'x2', 'z2', 'height', 'thick', 'gap', 'louver', 'w', 'd', 'h', 'rot', 'y', 'open']);
   $$('[data-k]', box).forEach(inp => {
     const k = inp.dataset.k;
     const ev = inp.type === 'range' ? 'input' : 'change';
@@ -262,14 +287,14 @@ function renderProps() {
       if (NUM.has(k)) {
         v = parseFloat(v);
         if (!isFinite(v)) { renderProps(); return; }
-        if (k === 'elev' || k === 'duct' || k === 'gap') v = Math.max(0, v);
+        if (k === 'elev' || k === 'duct' || k === 'gap' || k === 'y') v = Math.max(0, v);
         if (k === 'height' || k === 'h' || k === 'w' || k === 'd' || k === 'thick') v = Math.max(0.05, v);
       }
       if (inp.type === 'range') {
         // เลื่อนแถบ: บันทึก undo ครั้งเดียวต่อการลาก
         if (!inp._pushed) { pushUndo(); inp._pushed = true; }
         o[k] = v;
-        lastUsed.louver = v;
+        if (k === 'louver') lastUsed.louver = v;
         inp.previousElementSibling?.querySelector('.val') && (inp.previousElementSibling.querySelector('.val').textContent = v > 0 ? v + '%' : 'ทึบ');
         viewer.refreshObject(o);
         invalidate();
@@ -285,6 +310,18 @@ function renderProps() {
     });
     if (inp.type === 'range') inp.addEventListener('change', () => { inp._pushed = false; afterChange(true); });
   });
+  // ผนัง: แก้ความยาว/มุมโดยพิมพ์ค่า — คงตำแหน่งจุดยึดที่เลือกไว้
+  $$('[data-wall]', box).forEach(inp => inp.addEventListener('change', () => {
+    const v = parseFloat(inp.value);
+    if (!isFinite(v)) { renderProps(); return; }
+    const L = inp.dataset.wall === 'len' ? Math.max(0.1, v) : Math.hypot(o.x2 - o.x1, o.z2 - o.z1);
+    const a = (inp.dataset.wall === 'ang' ? v : wallAngle(o)) * Math.PI / 180;
+    edit(() => setWallGeometry(o, L, a, wallAnchor));
+  }));
+  $$('[data-seg="anchor"] button', box).forEach(b => b.addEventListener('click', () => {
+    wallAnchor = b.dataset.v;
+    $$('[data-seg="anchor"] button', box).forEach(q => q.classList.toggle('on', q === b));
+  }));
   $$('[data-seg="rot"] button', box).forEach(b => b.addEventListener('click', () => {
     edit(() => { o.rot = Number(b.dataset.v); lastUsed.rot = o.rot; });
   }));
@@ -293,6 +330,24 @@ function renderProps() {
   $('[data-act="rot"]', box).addEventListener('click', rotateSelected);
   $('[data-act="del"]', box).addEventListener('click', deleteSelected);
   $('[data-act="close"]', box).addEventListener('click', () => select(null));
+}
+
+let wallAnchor = 'start';
+
+/** มุมแนวผนัง (องศา) จากจุดเริ่มไปจุดปลาย: 0° = +x (ตะวันออก), 90° = +z (ใต้) */
+function wallAngle(o) {
+  return Math.round(Math.atan2(o.z2 - o.z1, o.x2 - o.x1) * 180 / Math.PI * 100) / 100;
+}
+
+/** ตั้งความยาว L และมุม a (เรเดียน) ของผนัง โดยคงจุดยึด (จุดเริ่ม / กึ่งกลาง / จุดปลาย) ไว้ที่เดิม */
+function setWallGeometry(o, L, a, anchor) {
+  const dx = Math.cos(a) * L, dz = Math.sin(a) * L;
+  let ax, az;
+  if (anchor === 'end') { ax = o.x2 - dx; az = o.z2 - dz; }
+  else if (anchor === 'mid') { ax = (o.x1 + o.x2) / 2 - dx / 2; az = (o.z1 + o.z2) / 2 - dz / 2; }
+  else { ax = o.x1; az = o.z1; }
+  const r3 = v => Math.round(v * 1000) / 1000;
+  o.x1 = r3(ax); o.z1 = r3(az); o.x2 = r3(ax + dx); o.z2 = r3(az + dz);
 }
 
 /* ───────── ค่าตั้งสภาพแวดล้อม ───────── */
@@ -1122,6 +1177,8 @@ function bindUI() {
   window.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    // ระหว่างลากผนัง: พิมพ์ตัวเลขความยาวแล้วกด Enter
+    if (!(e.ctrlKey || e.metaKey) && viewer.typeLength(e.key)) { e.preventDefault(); return; }
     const ctrl = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
@@ -1139,6 +1196,7 @@ function bindUI() {
     else if (k === 'c') setTool('cdu');
     else if (k === 'w') setTool('wall');
     else if (k === 'b') setTool('building');
+    else if (k === 'f') setTool('slab');
     else if (k === ' ') { e.preventDefault(); startOrToggle(); }
     else if (k.startsWith('arrow') && selected()) {
       e.preventDefault();

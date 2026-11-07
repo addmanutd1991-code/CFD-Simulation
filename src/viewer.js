@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { unitModules, unitSize, getModel } from './models.js';
-import { cduFootprint } from './scene.js';
+import { cduFootprint, slabRange, insideRect } from './scene.js';
 import { rgb } from './colormap.js';
 
 const ACCENT = 0x4fc3f7;
@@ -193,7 +193,8 @@ export class Viewer {
   }
 
   #addObjectMesh(o) {
-    const g = o.type === 'cdu' ? this.#cduMesh(o) : o.type === 'wall' ? this.#wallMesh(o) : this.#buildingMesh(o);
+    const g = o.type === 'cdu' ? this.#cduMesh(o) : o.type === 'wall' ? this.#wallMesh(o)
+      : o.type === 'slab' ? this.#slabMesh(o) : this.#buildingMesh(o);
     g.userData.objId = o.id;
     g.traverse(m => { if (m.isMesh) { m.userData.objId = o.id; } });
     // เส้นกรอบเมื่อถูกเลือก — วัดขนาดในพิกัดเฉพาะตัวของกลุ่ม (ปิดการหมุน/เลื่อนชั่วคราว)
@@ -246,6 +247,8 @@ export class Viewer {
       if (r) html += `<span class="lbl-res st-${r.status.key}">${r.Tin.toFixed(1)} °C · +${r.dT.toFixed(1)} K</span>`;
     } else if (o.type === 'wall') {
       html = `${esc(o.name)} · ${fmt(o.height)} m · ${o.louver > 0 ? 'louver ' + o.louver + '%' : 'ทึบ'}`;
+    } else if (o.type === 'slab') {
+      html = `${esc(o.name)} · +${fmt(o.y)} m${o.open > 0 ? ' · เปิด ' + o.open + '%' : ''}`;
     } else html = `${esc(o.name)} · ${fmt(o.h)} m`;
     el.innerHTML = html;
   }
@@ -263,10 +266,14 @@ export class Viewer {
     const sz = unitSize(o), mods = unitModules(o);
     const T = this.textures;
     const yb = o.elev || 0;
-    if (yb > 0.01) {
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(sz.w + 0.1, yb, sz.d + 0.1),
+    // ฐานเริ่มจากผิวแผ่นพื้น/หลังคาที่รองรับ (ถ้ามี)
+    let ySup = 0;
+    for (const s of this.objects || [])
+      if (s.type === 'slab' && s.y <= yb + 1e-6 && insideRect(s, o.x, o.z)) ySup = Math.max(ySup, slabRange(s).y1);
+    if (yb - ySup > 0.01) {
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(sz.w + 0.1, yb - ySup, sz.d + 0.1),
         new THREE.MeshStandardMaterial({ color: 0x9aa1a8, roughness: 0.95 }));
-      pad.position.y = yb / 2;
+      pad.position.y = (yb + ySup) / 2;
       pad.castShadow = pad.receiveShadow = true;
       g.add(pad);
     }
@@ -388,6 +395,39 @@ export class Viewer {
     e.position.copy(b.position);
     e.raycast = () => {};
     g.add(e);
+    g.position.set(o.x, 0, o.z);
+    g.rotation.y = o.rot * Math.PI / 180;
+    return g;
+  }
+
+  #slabMesh(o) {
+    const g = new THREE.Group();
+    const { y0, y1 } = slabRange(o);
+    const t = Math.max(0.02, y1 - y0);
+    const open = o.open || 0;
+    const mat = new THREE.MeshStandardMaterial({
+      color: open > 0 ? 0x8f9aa5 : 0xc9cdd2, roughness: 0.85, metalness: open > 0 ? 0.35 : 0,
+      transparent: open > 0, opacity: open > 0 ? Math.max(0.3, 1 - open / 100 * 0.8) : 1,
+    });
+    const b = new THREE.Mesh(new THREE.BoxGeometry(o.w, t, o.d), mat);
+    b.position.y = y0 + t / 2;
+    b.castShadow = b.receiveShadow = true;
+    g.add(b);
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(b.geometry),
+      new THREE.LineBasicMaterial({ color: 0x6d757d }));
+    e.position.copy(b.position);
+    e.raycast = () => {};
+    g.add(e);
+    // เสาที่มุมแผ่น (แสดงผลเท่านั้น ไม่ใช้ในการคำนวณ) ให้เห็นว่าเป็นพื้นยก/หลังคา
+    if (y0 > 0.3) {
+      const pm = new THREE.MeshStandardMaterial({ color: 0xa4abb2, roughness: 0.9, transparent: true, opacity: 0.35 });
+      for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(0.08, y0, 0.08), pm);
+        p.position.set(sx * (o.w / 2 - 0.04), y0 / 2, sz * (o.d / 2 - 0.04));
+        p.raycast = () => {};
+        g.add(p);
+      }
+    }
     g.position.set(o.x, 0, o.z);
     g.rotation.y = o.rot * Math.PI / 180;
     return g;
@@ -1046,6 +1086,41 @@ export class Viewer {
     this.renderer.domElement.style.cursor = tool === 'select' ? '' : 'crosshair';
   }
 
+  /**
+   * พิมพ์ความยาวระหว่างลากผนัง: ตัวเลข/จุด สะสมไว้, Backspace ลบ, Enter สร้างช่วงผนังตามทิศเมาส์
+   * คืน true ถ้าใช้ปุ่มนี้ไปแล้ว (ไม่ต้องส่งต่อเป็นคีย์ลัด)
+   */
+  typeLength(key) {
+    if (this.tool !== 'wall' || !this.draw) return false;
+    const d = this.draw;
+    if (/^[0-9.]$/.test(key)) {
+      d.typed = (d.typed || '') + key;
+    } else if (key === 'Backspace' && d.typed) {
+      d.typed = d.typed.slice(0, -1);
+    } else if (key === 'Enter' && d.typed) {
+      const L = parseFloat(d.typed);
+      d.typed = '';
+      const hv = this.hover || { x: d.x + 1, z: d.z };
+      let ux = hv.x - d.x, uz = hv.z - d.z;
+      if (hv.lock) { if (Math.abs(ux) > Math.abs(uz)) uz = 0; else ux = 0; }
+      const n = Math.hypot(ux, uz);
+      if (!(L > 0.05) || n < 1e-6) return true;
+      const r3 = v => Math.round(v * 1000) / 1000;
+      const x = r3(d.x + ux / n * L), z = r3(d.z + uz / n * L);
+      this.cb.onCreate('wall', { x1: d.x, z1: d.z, x2: x, z2: z });
+      this.draw = { ...d, x, z, n: d.n + 1, typed: '' };
+    } else return false;
+    this.#lengthHint();
+    return true;
+  }
+
+  #lengthHint() {
+    const l = this.dimLabel;
+    if (!l || !this.draw) return;
+    l.textContent = this.draw.typed ? `ความยาว ${this.draw.typed} m ↵` : 'พิมพ์ความยาว (ม.) แล้วกด Enter';
+    l.style.display = 'block';
+  }
+
   cancelDraw() {
     const had = !!this.draw;
     this.draw = null;
@@ -1107,7 +1182,10 @@ export class Viewer {
       // 2) วัตถุ
       const hits = ray.intersectObjects(this.gObjects.children, true);
       if (hits.length) {
-        const id = hits[0].object.userData.objId;
+        // หลังคา/แผ่นพื้นบังวัตถุด้านล่าง → ให้วัตถุอื่นที่ถูกชี้ (CDU ผนัง) ได้รับการเลือกก่อน
+        const isSlab = (h) => this.objects.find(q => q.id === h.object.userData.objId)?.type === 'slab';
+        const hit = hits.find(h => h.object.userData.objId != null && !isSlab(h)) || hits[0];
+        const id = hit.object.userData.objId;
         if (id != null) {
           e.stopPropagation();
           this.cb.onSelect(id);
@@ -1212,6 +1290,7 @@ export class Viewer {
     this.#clearPreview();
     if (!g) return;
     const x = snap(g.x, e), z = snap(g.z, e);
+    this.hover = { x, z, lock: e.shiftKey };
     const ghost = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.35, depthWrite: false });
     const line = new THREE.LineBasicMaterial({ color: ACCENT });
     if (this.tool === 'cdu') {
@@ -1233,14 +1312,15 @@ export class Viewer {
         m.position.set((ex + this.draw.x) / 2, hgt / 2, (ez + this.draw.z) / 2);
         m.rotation.y = -Math.atan2(ez - this.draw.z, ex - this.draw.x);
         this.gPreview.add(m);
-        this.#showDim(e, `${fmt(L)} m`);
+        this.#showDim(e, this.draw.typed ? `ความยาว ${this.draw.typed} m ↵` : `${fmt(L)} m · พิมพ์ค่าได้`);
       } else this.#showDim(e, `x ${fmt(x)} · z ${fmt(z)}`);
-    } else if (this.tool === 'building') {
+    } else if (this.tool === 'building' || this.tool === 'slab') {
       if (this.draw) {
         const w = Math.abs(x - this.draw.x), dd = Math.abs(z - this.draw.z);
-        const hgt = 4.5;
+        const slab = this.tool === 'slab';
+        const hgt = slab ? 0.2 : 4.5, yc = slab ? 3 - 0.1 : hgt / 2;
         const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01, w), hgt, Math.max(0.01, dd)), ghost);
-        m.position.set((x + this.draw.x) / 2, hgt / 2, (z + this.draw.z) / 2);
+        m.position.set((x + this.draw.x) / 2, yc, (z + this.draw.z) / 2);
         this.gPreview.add(m);
         const pts = [this.draw.x, 0.02, this.draw.z, x, 0.02, this.draw.z, x, 0.02, z, this.draw.x, 0.02, z, this.draw.x, 0.02, this.draw.z];
         const lg = new THREE.BufferGeometry();
@@ -1265,11 +1345,11 @@ export class Viewer {
       const closed = this.draw.n >= 1 && Math.hypot(x - this.draw.sx, z - this.draw.sz) < 0.25;
       if (closed) { this.draw = null; this.#clearPreview(); }
       else this.draw = { ...this.draw, x, z, n: this.draw.n + 1 };
-    } else if (this.tool === 'building') {
+    } else if (this.tool === 'building' || this.tool === 'slab') {
       if (!this.draw) { this.draw = { x, z }; return; }
       const w = Math.abs(x - this.draw.x), d = Math.abs(z - this.draw.z);
       if (w < 0.3 || d < 0.3) return;
-      this.cb.onCreate('building', { x: (x + this.draw.x) / 2, z: (z + this.draw.z) / 2, w, d });
+      this.cb.onCreate(this.tool, { x: (x + this.draw.x) / 2, z: (z + this.draw.z) / 2, w, d });
       this.draw = null;
       this.#clearPreview();
     }
