@@ -114,18 +114,20 @@ export class Viewer {
   }
 
   setView(view) {
-    if (view === 'top') view = 'py';
-    if (view === 'side') view = 'pz';
+    if (view === 'py') view = 'top';
+    if (view === 'side') view = 's';
+    if (!COMPASS_VIEWS[view] && !AXIS_VIEWS[view] && view !== 'top') view = '3d';
     this.view = view;
+    const axis = view === 'top' ? 'py' : view;
     const d = this.dom;
     if (!d) return;
     const cx = d.ox + d.W / 2, cz = d.oz + d.D / 2, cy = Math.min(d.H / 3, 3);
     const c = this.controls;
     c.maxPolarAngle = Math.PI * 0.495;
     this.gGround.visible = view !== 'ny';   // มองจากใต้พื้น: ซ่อนพื้นไม่ให้บังโมเดล
-    if (AXIS_VIEWS[view]) {
+    if (AXIS_VIEWS[axis]) {
       // มองตามแกน (ภาพฉายตั้งฉาก) — ยังหมุนต่อได้ด้วยการลากซ้าย
-      const [dx, dy, dz] = AXIS_VIEWS[view];
+      const [dx, dy, dz] = AXIS_VIEWS[axis];
       this.camera = this.ortho;
       c.object = this.ortho;
       const w = this.host.clientWidth || 1, h = this.host.clientHeight || 1, a = h / w;
@@ -146,11 +148,21 @@ export class Viewer {
       c.update();
       return;
     }
-    // มุมมอง 3 มิติ (perspective)
+    // มุมมอง 3 มิติ (perspective) — '3d' มุมเฉียง หรือมองจากทิศ เหนือ/ใต้/ออก/ตก
     this.camera = this.persp;
     c.object = this.persp;
     const R = Math.max(d.W, d.D, d.H * 1.6) * 0.95;
-    this.persp.position.set(cx - R * 0.55, R * 0.62, cz + R * 0.95);
+    const cmp = COMPASS_VIEWS[view];
+    if (cmp) {
+      // กล้องอยู่ฝั่งทิศนั้น เงยขึ้นราว 35° มองเข้าหากลางลาน (+X = ตะวันออก, −Z = เหนือ)
+      const [dx, dz] = cmp, aspect = this.persp.aspect || 1.6;
+      const span = dx ? d.D : d.W, depth = dx ? d.W : d.D;
+      const Rc = Math.max(span * 1.6 / Math.max(1, aspect), span * 0.9, d.H * 1.6) + depth * 0.5;
+      this.persp.position.set(cx + dx * Rc, Rc * 0.7, cz + dz * Rc);
+    } else {
+      this.persp.position.set(cx - R * 0.55, R * 0.62, cz + R * 0.95);
+    }
+    this.persp.up.set(0, 1, 0);
     c.target.set(cx, cy, cz);
     c.enableRotate = true;
     c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
@@ -1452,6 +1464,9 @@ export class Viewer {
 /* ───────── เครื่องมือช่วย ───────── */
 
 /** มุมมองตามแกน: ทิศจากเป้าหมายไปหากล้อง (เช่น 'px' = มองจากด้าน +X เข้าหา −X) */
+/** มุมมอง 3D จากทิศ: [dx, dz] ทิศจากกลางลานไปหากล้อง (−Z = เหนือ, +X = ตะวันออก) */
+export const COMPASS_VIEWS = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
+
 export const AXIS_VIEWS = {
   px: [1, 0, 0], nx: [-1, 0, 0], py: [0, 1, 0], ny: [0, -1, 0], pz: [0, 0, 1], nz: [0, 0, -1],
 };

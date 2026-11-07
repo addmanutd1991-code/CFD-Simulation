@@ -39,6 +39,7 @@
 
   <!-- ═════════════ เครื่องมือ ═════════════ -->
   <section id="tab-tool" class="tabpage">
+   <div class="workspace" id="workspace">
     <div class="toolbar">
       <div class="grp">
         <button class="tool on" data-tool="select" title="เลือกและลากย้ายวัตถุ (V)">เลือก / ย้าย</button>
@@ -61,16 +62,15 @@
       <div class="stage">
         <div id="viewport" class="viewport">
           <div class="vtabs">
-            <button class="vt on" data-view="3d" title="มุมมอง 3 มิติ">3D</button>
-            <button class="vt" data-view="px" title="มองจากด้าน +X (ตะวันออก) เข้าหา −X">+X</button>
-            <button class="vt" data-view="nx" title="มองจากด้าน −X (ตะวันตก) เข้าหา +X">−X</button>
-            <button class="vt" data-view="py" title="มองจากด้านบน (+Y) ลงมา — ทิศเหนืออยู่บน">+Y</button>
-            <button class="vt" data-view="ny" title="มองจากใต้พื้น (−Y) ขึ้นไป">−Y</button>
-            <button class="vt" data-view="pz" title="มองจากด้าน +Z (ใต้) เข้าหา −Z">+Z</button>
-            <button class="vt" data-view="nz" title="มองจากด้าน −Z (เหนือ) เข้าหา +Z">−Z</button>
+            <button class="vt on" data-view="3d" title="มุมมอง 3 มิติแบบเฉียง (1)">3D</button>
+            <button class="vt" data-view="n" title="3 มิติ มองจากทิศเหนือ (2)">เหนือ</button>
+            <button class="vt" data-view="s" title="3 มิติ มองจากทิศใต้ (3)">ใต้</button>
+            <button class="vt" data-view="e" title="3 มิติ มองจากทิศตะวันออก (4)">ออก</button>
+            <button class="vt" data-view="w" title="3 มิติ มองจากทิศตะวันตก (5)">ตก</button>
+            <button class="vt" data-view="top" title="มองจากด้านบน (ภาพฉาย) — ทิศเหนืออยู่บน (6)">Top</button>
             <span class="vsep"></span>
             <button class="vact" id="btn-capture" title="บันทึกภาพมุมมองนี้ (พร้อมแถบสี) ไว้ใส่รายงาน — กดได้หลายมุม (P)">📷 Capture</button>
-            <button class="vact" id="btn-full" title="ดูโมเดลเต็มจอ (Esc เพื่อออก)">⛶ เต็มจอ</button>
+            <button class="vact" id="btn-full" title="เต็มจอพร้อมเครื่องมือแก้โมเดล (Esc เพื่อออก)">⛶ เต็มจอ</button>
           </div>
           <div class="status">
             <div><span id="st-text">พร้อมคำนวณ</span> · <span id="st-time" class="mono">t 0.0/180 s</span></div>
@@ -210,6 +210,7 @@
         </div>
       </aside>
     </div>
+   </div>
 
     <!-- ── ผลลัพธ์ ── -->
     <div class="results" id="results">

@@ -288,8 +288,21 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
 .vtabs { flex-wrap: wrap; right: 220px; }
 .vsep { width: 6px; }
 .vact { padding: 4px 10px; font-size: 13px; background: rgba(20,34,48,.85); }
-.stage:fullscreen { display: flex; flex-direction: column; border-radius: 0; padding: 10px; overflow: auto; }
-.stage:fullscreen .viewport { flex: 1; height: auto; min-height: 0; }
+/* เต็มจอ: แถบเครื่องมือ (+CDU/ผนัง/หลังคา) ด้านบน · ภาพตรงกลาง · แผงแก้วัตถุด้านขวา */
+.workspace:fullscreen {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: var(--bg, #0e1820); color: var(--text); overflow: hidden;
+}
+.workspace:fullscreen .toolbar { margin-bottom: 0; flex: none; }
+.workspace:fullscreen .work { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 340px; }
+.workspace:fullscreen .stage { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.workspace:fullscreen .viewport { flex: 1; height: auto; min-height: 0; }
+.workspace:fullscreen .side { overflow-y: auto; min-height: 0; padding-right: 2px; }
+@media (max-width: 900px) {
+  .workspace:fullscreen { overflow: auto; }
+  .workspace:fullscreen .work { grid-template-columns: 1fr; }
+  .workspace:fullscreen .viewport { min-height: 60vh; }
+}
 .capture-flash { position: absolute; inset: 0; background: #fff; opacity: .55; pointer-events: none; z-index: 5; transition: opacity .35s; }
 
 /* แกลเลอรีภาพสำหรับรายงาน */
