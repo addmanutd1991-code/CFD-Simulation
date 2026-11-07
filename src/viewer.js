@@ -10,13 +10,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { unitModules, unitSize, getModel } from './models.js';
-import { cduFootprint, slabRange, insideRect } from './scene.js';
+import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
 
 const ACCENT = 0x4fc3f7;
 /** สีสถานะ CDU ตามอุณหภูมิลมเข้า */
 export const BAND = { green: 0x3ecf6e, yellow: 0xf5c518, red: 0xe5433b };
 const SNAP = 0.1;
+/** คำสั่งแก้ไขแบบ AutoCAD ที่ทำงานกับวัตถุที่เลือก */
+const CMD_TOOLS = ['move', 'copy', 'offset', 'mirror', 'rotate'];
+const norm360 = a => Math.round((((a % 360) + 360) % 360) * 10) / 10 % 360;
 const MAX_STREAKS = 3200;
 /** จำนวนขั้นสีของภาพ contour */
 export const CONTOUR_LEVELS = 16;
@@ -27,6 +30,10 @@ export class Viewer {
     this.cb = cb;
     this.tool = 'select';
     this.selectedId = null;
+    this.orthoMode = false;
+    this.cmd = null;          // สถานะคำสั่ง Move / Offset
+    this.offsetDist = 1.0;    // ระยะ Offset ล่าสุด (ม.)   // ล็อกผนังตามแนวแกน X/Z (F8) — กด Shift เพื่อสลับชั่วคราว
+    this.cursor = null;       // จุดบนพื้นใต้เมาส์ล่าสุด (ใช้วางวัตถุที่คัดลอก)
     this.scene3 = new THREE.Scene();
     this.objects = [];
     this.meshes = new Map();
@@ -1129,6 +1136,9 @@ export class Viewer {
   setTool(tool) {
     this.tool = tool;
     this.draw = null;
+    this.cmd = CMD_TOOLS.includes(tool)
+      ? { id: this.objects?.some(q => q.id === this.selectedId) ? this.selectedId : null, base: null, typed: '' }
+      : null;
     this.#clearPreview();
     this.renderer.domElement.style.cursor = tool === 'select' ? '' : 'crosshair';
   }
@@ -1138,6 +1148,7 @@ export class Viewer {
    * คืน true ถ้าใช้ปุ่มนี้ไปแล้ว (ไม่ต้องส่งต่อเป็นคีย์ลัด)
    */
   typeLength(key) {
+    if (this.cmd) return this.#cmdType(key);
     if (this.tool !== 'wall' || !this.draw) return false;
     const d = this.draw;
     if (/^[0-9.]$/.test(key)) {
@@ -1153,7 +1164,8 @@ export class Viewer {
       const n = Math.hypot(ux, uz);
       if (!(L > 0.05) || n < 1e-6) return true;
       const r3 = v => Math.round(v * 1000) / 1000;
-      const x = r3(d.x + ux / n * L), z = r3(d.z + uz / n * L);
+      const { x, z } = this.#clampXZ(r3(d.x + ux / n * L), r3(d.z + uz / n * L));
+      if (Math.hypot(x - d.x, z - d.z) < 0.05) return true;
       this.cb.onCreate('wall', { x1: d.x, z1: d.z, x2: x, z2: z });
       this.draw = { ...d, x, z, n: d.n + 1, typed: '' };
     } else return false;
@@ -1193,9 +1205,80 @@ export class Viewer {
     return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), pt) ? pt : null;
   }
 
+  /** ล็อกแนวแกน: โหมด Ortho (F8) หรือกด Shift — กด Shift ขณะเปิด Ortho = ปลดล็อกชั่วคราว */
+  #lock(e) { return e.shiftKey !== this.orthoMode; }
+
+  setOrtho(on) { this.orthoMode = !!on; }
+
+  /** จุดบนพื้นใต้เมาส์ (ปัด 0.1 ม. และอยู่ในกริดแกน) หรือ null ถ้าเมาส์ไม่อยู่บนมุมมอง */
+  cursorPoint() {
+    if (!this.cursor) return null;
+    const r = v => Math.round(v / SNAP) * SNAP;
+    return this.#clampXZ(r(this.cursor.x), r(this.cursor.z));
+  }
+
+  /** ให้วัตถุอยู่ในกริดแกน (ใช้หลังวางวัตถุที่คัดลอก) */
+  keepInside(o) { this.#keepInside(o); }
+
+  /** บีบจุด (x, z) ให้อยู่ในพื้นที่แกน (กริดพื้นของโดเมน) — inset = ระยะเว้นจากขอบ */
+  #clampXZ(x, z, ix = 0, iz = 0) {
+    const d = this.dom;
+    if (!d) return { x, z };
+    const cl = (v, a, b) => (a > b ? (a + b) / 2 : Math.min(b, Math.max(a, v)));
+    const r = v => Math.round(v * 1000) / 1000;
+    return { x: r(cl(x, d.ox + ix, d.ox + d.W - ix)), z: r(cl(z, d.oz + iz, d.oz + d.D - iz)) };
+  }
+
+  /** เลื่อนวัตถุทั้งชิ้นกลับเข้ามาในพื้นที่แกน ถ้ามีส่วนใดล้นขอบ */
+  #keepInside(o) {
+    const d = this.dom;
+    if (!d) return;
+    const b = objectBounds(o);
+    const shift = (lo, hi, a, w) => (hi - lo > w ? a + w / 2 - (lo + hi) / 2 : lo < a ? a - lo : hi > a + w ? a + w - hi : 0);
+    const dx = shift(b.x0, b.x1, d.ox, d.W), dz = shift(b.z0, b.z1, d.oz, d.D);
+    if (!dx && !dz) return;
+    const r = v => Math.round(v * 1000) / 1000;
+    if (o.type === 'wall') { o.x1 = r(o.x1 + dx); o.x2 = r(o.x2 + dx); o.z1 = r(o.z1 + dz); o.z2 = r(o.z2 + dz); }
+    else { o.x = r(o.x + dx); o.z = r(o.z + dz); }
+  }
+
+  /** ระยะครึ่งรอยเท้าของ CDU ใหม่ (ใช้เว้นขอบตอนวาง) */
+  #newCduHalf() {
+    const fp = cduFootprint({ model: this.cb.newCduModel?.() || 'RXQ16BY1S', rot: this.cb.newCduRot?.() || 0 });
+    return { hx: fp.sx / 2, hz: fp.sz / 2 };
+  }
+
+  /** วัตถุที่ถูกชี้ (ให้ CDU/ผนังมาก่อนแผ่นพื้นที่บังอยู่ด้านบน) */
+  #hitObject(e) {
+    const hits = this.#pick(e).intersectObjects(this.gObjects.children, true);
+    if (!hits.length) return null;
+    const isSlab = (h) => this.objects.find(q => q.id === h.object.userData.objId)?.type === 'slab';
+    const hit = hits.find(h => h.object.userData.objId != null && !isSlab(h)) || hits[0];
+    return hit.object.userData.objId != null ? this.objects.find(q => q.id === hit.object.userData.objId) || null : null;
+  }
+
+  /**
+   * ขณะใช้เครื่องมือวาง (CDU/ผนัง) แล้วคลิกโดนวัตถุที่มีอยู่ → เลือกวัตถุนั้นแทนการวางซ้ำทับ
+   * (ผนัง: ถ้าคลิกใกล้ปลายผนังเดิม ยังเริ่มลากผนังต่อจากมุมได้ตามปกติ)
+   */
+  #pickInsteadOfCreate(e, snap) {
+    if (this.draw || (this.tool !== 'cdu' && this.tool !== 'wall')) return null;
+    const o = this.#hitObject(e);
+    if (!o || o.type === 'slab' || o.type === 'building') return null;
+    if (this.tool === 'wall' && o.type === 'wall') {
+      const g = this.#ground(e);
+      if (g) {
+        const x = snap(g.x, e), z = snap(g.z, e);
+        if (Math.hypot(x - o.x1, z - o.z1) < 0.35 || Math.hypot(x - o.x2, z - o.z2) < 0.35) return null;
+      }
+    }
+    return o;
+  }
+
   #initInput() {
     const el = this.renderer.domElement;
     const snap = (v, e) => e.altKey ? Math.round(v * 100) / 100 : Math.round(v / SNAP) * SNAP;
+    this.snapFn = snap;
     let drag = null, down = null;
 
     this.dimLabel = document.createElement('div');
@@ -1209,6 +1292,12 @@ export class Viewer {
       if (e.button !== 0) return;
       if (this.tool !== 'select') {
         e.stopPropagation();
+        const o = this.#pickInsteadOfCreate(e, snap);
+        if (o) {
+          this.#clearPreview();
+          this.cb.onPickWhileTool ? this.cb.onPickWhileTool(o.id) : this.cb.onSelect(o.id);
+          return;
+        }
         this.#toolClick(e, snap);
         return;
       }
@@ -1248,6 +1337,7 @@ export class Viewer {
     }, { capture: true });
 
     el.addEventListener('pointermove', (e) => {
+      this.cursor = this.#ground(e);
       if (drag) { this.#dragMove(e, drag, snap); return; }
       if (this.tool !== 'select') { this.#toolHover(e, snap); return; }
       this.#probe(e);
@@ -1272,7 +1362,7 @@ export class Viewer {
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
-    el.addEventListener('pointerleave', () => this.cb.onProbe?.(null));
+    el.addEventListener('pointerleave', () => { this.cursor = null; this.cb.onProbe?.(null); });
     el.addEventListener('dblclick', () => { if (this.tool === 'wall') this.cancelDraw(); });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -1306,17 +1396,19 @@ export class Viewer {
     if (!o || !g) return;
     if (!d.moved) { this.cb.onBeginEdit?.(); d.moved = true; }
     if (d.kind === 'end') {
-      let x = snap(g.x, e), z = snap(g.z, e);
+      let { x, z } = this.#clampXZ(snap(g.x, e), snap(g.z, e));
       const ox2 = o[d.end === 1 ? 'x2' : 'x1'], oz2 = o[d.end === 1 ? 'z2' : 'z1'];
-      if (e.shiftKey) { if (Math.abs(x - ox2) > Math.abs(z - oz2)) z = oz2; else x = ox2; }
+      if (this.#lock(e)) { if (Math.abs(x - ox2) > Math.abs(z - oz2)) z = oz2; else x = ox2; }
       o['x' + d.end] = x; o['z' + d.end] = z;
       this.#showDim(e, `${fmt(Math.hypot(o.x2 - o.x1, o.z2 - o.z1))} m`);
     } else if (o.type === 'wall') {
       const nx = snap(g.x + d.off.x, e), nz = snap(g.z + d.off.z, e);
       const dx = nx - o.x1, dz = nz - o.z1;
       o.x1 += dx; o.x2 += dx; o.z1 += dz; o.z2 += dz;
+      this.#keepInside(o);
     } else {
       o.x = snap(g.x + d.off.x, e); o.z = snap(g.z + d.off.z, e);
+      this.#keepInside(o);
       this.#showDim(e, `x ${fmt(o.x)} · z ${fmt(o.z)}`);
     }
     this.refreshObject(o);
@@ -1333,15 +1425,18 @@ export class Viewer {
   }
 
   #toolHover(e, snap) {
+    if (this.cmd) { this.#cmdHover(e, snap); return; }
     const g = this.#ground(e);
     this.#clearPreview();
     if (!g) return;
-    const x = snap(g.x, e), z = snap(g.z, e);
-    this.hover = { x, z, lock: e.shiftKey };
+    let x = snap(g.x, e), z = snap(g.z, e);
+    if (this.tool === 'cdu') { const h = this.#newCduHalf(); ({ x, z } = this.#clampXZ(x, z, h.hx, h.hz)); }
+    else ({ x, z } = this.#clampXZ(x, z));
+    this.hover = { x, z, lock: this.#lock(e) };
     const ghost = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.35, depthWrite: false });
     const line = new THREE.LineBasicMaterial({ color: ACCENT });
     if (this.tool === 'cdu') {
-      const fp = cduFootprint({ model: this.cb.newCduModel?.() || 'RXQ16BY1S', rot: 0 });
+      const fp = cduFootprint({ model: this.cb.newCduModel?.() || 'RXQ16BY1S', rot: this.cb.newCduRot?.() || 0 });
       const m = new THREE.Mesh(new THREE.BoxGeometry(fp.sx, fp.h, fp.sz), ghost);
       m.position.set(x, fp.h / 2 + 0.2, z);
       this.gPreview.add(m);
@@ -1352,7 +1447,7 @@ export class Viewer {
       this.gPreview.add(dot);
       if (this.draw) {
         let ex = x, ez = z;
-        if (e.shiftKey) { if (Math.abs(ex - this.draw.x) > Math.abs(ez - this.draw.z)) ez = this.draw.z; else ex = this.draw.x; }
+        if (this.#lock(e)) { if (Math.abs(ex - this.draw.x) > Math.abs(ez - this.draw.z)) ez = this.draw.z; else ex = this.draw.x; }
         const L = Math.hypot(ex - this.draw.x, ez - this.draw.z);
         const hgt = this.cb.newWallHeight?.() || 2.4;
         const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01, L), hgt, 0.15), ghost);
@@ -1379,14 +1474,18 @@ export class Viewer {
   }
 
   #toolClick(e, snap) {
+    if (this.cmd) { this.#cmdClick(e, snap); return; }
     const g = this.#ground(e);
     if (!g) return;
     let x = snap(g.x, e), z = snap(g.z, e);
+    // วางได้เฉพาะในพื้นที่แกน (กริดพื้นของโดเมน) — คลิกนอกขอบจะถูกดึงเข้ามาที่ขอบ
+    if (this.tool === 'cdu') { const h = this.#newCduHalf(); ({ x, z } = this.#clampXZ(x, z, h.hx, h.hz)); }
+    else ({ x, z } = this.#clampXZ(x, z));
     if (this.tool === 'cdu') {
       this.cb.onCreate('cdu', { x, z });
     } else if (this.tool === 'wall') {
       if (!this.draw) { this.draw = { x, z, sx: x, sz: z, n: 0 }; return; }
-      if (e.shiftKey) { if (Math.abs(x - this.draw.x) > Math.abs(z - this.draw.z)) z = this.draw.z; else x = this.draw.x; }
+      if (this.#lock(e)) { if (Math.abs(x - this.draw.x) > Math.abs(z - this.draw.z)) z = this.draw.z; else x = this.draw.x; }
       if (Math.hypot(x - this.draw.x, z - this.draw.z) < 0.2) return;
       this.cb.onCreate('wall', { x1: this.draw.x, z1: this.draw.z, x2: x, z2: z });
       const closed = this.draw.n >= 1 && Math.hypot(x - this.draw.sx, z - this.draw.sz) < 0.25;
@@ -1400,6 +1499,244 @@ export class Viewer {
       this.draw = null;
       this.#clearPreview();
     }
+  }
+
+  /* ───────── คำสั่ง Move / Offset แบบ AutoCAD ───────── */
+
+  #cmdObj() {
+    return this.cmd?.id != null ? this.objects.find(q => q.id === this.cmd.id) || null : null;
+  }
+
+  /** สำเนาวัตถุที่เลื่อนไป (dx, dz) แล้วดึงให้อยู่ในกริดแกน — ใช้แสดงภาพตัวอย่าง */
+  #shifted(o, dx, dz) {
+    const c = { ...o };
+    if (c.type === 'wall') { c.x1 += dx; c.x2 += dx; c.z1 += dz; c.z2 += dz; } else { c.x += dx; c.z += dz; }
+    this.#keepInside(c);
+    return c;
+  }
+
+  /** ภาพเงาโปร่งสีฟ้าของวัตถุ (ไม่รับการคลิก) */
+  #ghost(o) {
+    const g = o.type === 'cdu' ? this.#cduMesh(o) : o.type === 'wall' ? this.#wallMesh(o)
+      : o.type === 'slab' ? this.#slabMesh(o) : this.#buildingMesh(o);
+    const mm = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.35, depthWrite: false });
+    const lm = new THREE.LineBasicMaterial({ color: ACCENT });
+    g.traverse(m => {
+      if (!m.isMesh && !m.isLine) return;
+      for (const x of Array.isArray(m.material) ? m.material : [m.material]) x?.dispose?.();
+      m.material = m.isMesh ? mm : lm;
+      m.raycast = () => {};
+    });
+    this.gPreview.add(g);
+  }
+
+  #previewLine(a, b) {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute([a.x, 0.05, a.z, b.x, 0.05, b.z], 3));
+    this.gPreview.add(new THREE.Line(lg, new THREE.LineDashedMaterial({ color: ACCENT, dashSize: 0.3, gapSize: 0.2 })).computeLineDistances());
+  }
+
+  /** ล็อกจุด p ให้อยู่แนวแกนเดียวกับจุดฐาน (Ortho) */
+  #lockTo(base, p, lock) {
+    if (!lock) return p;
+    return Math.abs(p.x - base.x) > Math.abs(p.z - base.z) ? { x: p.x, z: base.z } : { x: base.x, z: p.z };
+  }
+
+  /**
+   * ระยะเลื่อนของ Offset ไปฝั่งที่เมาส์ชี้
+   *   ผนัง: สำเนาขนานห่างตั้งฉาก dist
+   *   CDU/อาคาร/พื้น: สำเนาเว้นช่องว่างระหว่างขอบ dist ตามแกนที่เมาส์อยู่ (เช่น ระยะ service ระหว่างเครื่อง)
+   */
+  #offsetDelta(o, p, dist) {
+    if (o.type === 'wall') {
+      const L = Math.hypot(o.x2 - o.x1, o.z2 - o.z1) || 1;
+      const nx = -(o.z2 - o.z1) / L, nz = (o.x2 - o.x1) / L;
+      const side = ((p.x - (o.x1 + o.x2) / 2) * nx + (p.z - (o.z1 + o.z2) / 2) * nz) < 0 ? -1 : 1;
+      return { dx: nx * side * dist, dz: nz * side * dist };
+    }
+    const b = objectBounds(o);
+    const w = b.x1 - b.x0, d = b.z1 - b.z0;
+    const rx = (p.x - o.x) / Math.max(0.01, w / 2), rz = (p.z - o.z) / Math.max(0.01, d / 2);
+    if (Math.abs(rx) >= Math.abs(rz)) return { dx: Math.sign(rx || 1) * (w + dist), dz: 0 };
+    return { dx: 0, dz: Math.sign(rz || 1) * (d + dist) };
+  }
+
+  #cmdPoint(e, snap) {
+    const g = this.#ground(e);
+    if (!g) return null;
+    return this.#clampXZ(snap(g.x, e), snap(g.z, e));
+  }
+
+  /** หมุนวัตถุรอบจุดฐาน b ด้วยมุม th (องศา, บวก = ทวนเข็มเมื่อมองจากด้านบน — เหมือน AutoCAD) */
+  #rotated(o, b, th) {
+    const r = th * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+    const rp = (x, z) => [b.x + (x - b.x) * c + (z - b.z) * s, b.z - (x - b.x) * s + (z - b.z) * c];
+    const q = { ...o };
+    if (q.type === 'wall') { [q.x1, q.z1] = rp(o.x1, o.z1); [q.x2, q.z2] = rp(o.x2, o.z2); }
+    else { [q.x, q.z] = rp(o.x, o.z); q.rot = norm360(o.rot + th); }
+    return this.#tidy(q);
+  }
+
+  /** สะท้อนวัตถุกับเส้น a→b (Mirror) */
+  #mirrored(o, a, b) {
+    const L = Math.hypot(b.x - a.x, b.z - a.z) || 1, dx = (b.x - a.x) / L, dz = (b.z - a.z) / L;
+    const rp = (x, z) => { const vx = x - a.x, vz = z - a.z, t = vx * dx + vz * dz; return [a.x + 2 * t * dx - vx, a.z + 2 * t * dz - vz]; };
+    const rv = (x, z) => { const t = x * dx + z * dz; return [2 * t * dx - x, 2 * t * dz - z]; };
+    const q = { ...o };
+    if (q.type === 'wall') { [q.x1, q.z1] = rp(o.x1, o.z1); [q.x2, q.z2] = rp(o.x2, o.z2); return this.#tidy(q); }
+    [q.x, q.z] = rp(o.x, o.z);
+    const r = o.rot * Math.PI / 180;
+    if (q.type === 'cdu') {
+      // ทิศหน้าเครื่อง (sin r, cos r) สะท้อนแล้วปัดเป็นทีละ 90°
+      const [fx, fz] = rv(Math.sin(r), Math.cos(r));
+      q.rot = norm360(Math.round(Math.atan2(fx, fz) * 180 / Math.PI / 90) * 90);
+    } else {
+      const [ux, uz] = rv(Math.cos(r), -Math.sin(r));
+      q.rot = norm360(Math.atan2(-uz, ux) * 180 / Math.PI);
+    }
+    return this.#tidy(q);
+  }
+
+  #tidy(q) {
+    const r = v => Math.round(v * 1000) / 1000;
+    for (const k of ['x', 'z', 'x1', 'z1', 'x2', 'z2']) if (q[k] != null) q[k] = r(q[k]);
+    this.#keepInside(q);
+    return q;
+  }
+
+  /** มุมจากจุดฐานไปเมาส์ (องศา, 0 = ตะวันออก +x, ทวนเข็มบนภาพ Top) ปัดตาม Ortho / CDU */
+  #angleTo(o, b, p, lock) {
+    let a = Math.atan2(-(p.z - b.z), p.x - b.x) * 180 / Math.PI;
+    const step = o.type === 'cdu' || lock ? 90 : 1;
+    a = Math.round(a / step) * step;
+    return a > 180 ? a - 360 : a;
+  }
+
+  #snapAngle(o, a) { return o.type === 'cdu' ? Math.round(a / 90) * 90 : a; }
+
+  #cmdHover(e, snap) {
+    this.lastEvt = e;
+    this.#clearPreview();
+    const c = this.cmd, o = this.#cmdObj(), t = this.tool;
+    const p = this.#cmdPoint(e, snap);
+    if (!p) return;
+    this.hover = { ...p, lock: this.#lock(e) };
+    const typed = c.typed ? ` · ${c.typed} ↵` : '';
+    const NAME = { move: 'Move', copy: 'Copy', offset: 'Offset', mirror: 'Mirror', rotate: 'Rotate' }[t];
+    if (!o) {
+      this.#showDim(e, t === 'offset' ? `Offset ${fmt(this.offsetDist)} m: คลิกเลือกวัตถุ · พิมพ์ระยะใหม่ + Enter${typed}`
+        : `${NAME}: คลิกเลือกวัตถุ`);
+      return;
+    }
+    if (t === 'offset') {
+      const d = this.#offsetDelta(o, p, this.offsetDist);
+      this.#ghost(this.#shifted(o, d.dx, d.dz));
+      this.#showDim(e, `Offset ${fmt(this.offsetDist)} m: คลิกฝั่งที่ต้องการ${typed}`);
+      return;
+    }
+    if (!c.base) {
+      this.#showDim(e, t === 'mirror' ? `Mirror ${o.name}: คลิกจุดแรกของเส้นสะท้อน`
+        : `${NAME} ${o.name}: คลิกจุดฐาน (base point)`);
+      return;
+    }
+    if (t === 'move' || t === 'copy') {
+      const q = this.#lockTo(c.base, p, this.hover.lock);
+      this.#ghost(this.#shifted(o, q.x - c.base.x, q.z - c.base.z));
+      this.#previewLine(c.base, q);
+      this.#showDim(e, c.typed ? `ระยะ ${c.typed} m ↵` : `${NAME} · จุดที่สอง · ${fmt(Math.hypot(q.x - c.base.x, q.z - c.base.z))} m · พิมพ์ระยะได้`);
+    } else if (t === 'mirror') {
+      const q = this.#lockTo(c.base, p, this.hover.lock);
+      this.#previewLine(c.base, q);
+      if (Math.hypot(q.x - c.base.x, q.z - c.base.z) > 0.05) this.#ghost(this.#mirrored(o, c.base, q));
+      this.#showDim(e, 'Mirror: คลิกจุดที่สองของเส้นสะท้อน (F8 Ortho)');
+    } else if (t === 'rotate') {
+      const a = this.#angleTo(o, c.base, p, this.hover.lock);
+      this.#previewLine(c.base, p);
+      this.#ghost(this.#rotated(o, c.base, a));
+      this.#showDim(e, c.typed ? `มุม ${c.typed}° ↵` : `Rotate ${fmt(a)}° · คลิก หรือพิมพ์มุม + Enter (ทวนเข็ม +)${o.type === 'cdu' ? ' · CDU ทีละ 90°' : ''}`);
+    }
+  }
+
+  #cmdClick(e, snap) {
+    const c = this.cmd, t = this.tool;
+    const o = this.#cmdObj();
+    if (!o) {
+      const h = this.#hitObject(e);
+      if (h) { c.id = h.id; c.base = null; this.cb.onSelect(h.id); this.#cmdHover(e, snap); }
+      return;
+    }
+    const p = this.#cmdPoint(e, snap);
+    if (!p) return;
+    if (t === 'offset') {
+      const d = this.#offsetDelta(o, p, this.offsetDist);
+      c.id = null;   // แบบ AutoCAD: ทำต่อได้ — เลือกวัตถุถัดไป
+      this.#clearPreview();
+      this.cb.onOffset?.(o.id, d.dx, d.dz);
+      return;
+    }
+    if (!c.base) { c.base = p; this.#cmdHover(e, snap); return; }
+    const lock = this.#lock(e);
+    if (t === 'move') {
+      const q = this.#lockTo(c.base, p, lock);
+      this.#commitMove(o, q.x - c.base.x, q.z - c.base.z);
+    } else if (t === 'copy') {
+      const q = this.#lockTo(c.base, p, lock);
+      this.#commitCopy(o, q.x - c.base.x, q.z - c.base.z);
+    } else if (t === 'mirror') {
+      const q = this.#lockTo(c.base, p, lock);
+      if (Math.hypot(q.x - c.base.x, q.z - c.base.z) < 0.05) return;
+      this.#finish(o.id, this.#mirrored(o, c.base, q), true);
+    } else if (t === 'rotate') {
+      this.#finish(o.id, this.#rotated(o, c.base, this.#angleTo(o, c.base, p, lock)), false);
+    }
+  }
+
+  /** จบคำสั่ง: copy = สร้างวัตถุใหม่จาก q, ไม่ใช่ = แทนที่วัตถุเดิม */
+  #finish(id, q, copy) {
+    this.cmd = null;
+    this.#clearPreview();
+    this.cb.onTransform?.(id, q, copy);
+    this.cb.onToolDone?.();
+  }
+
+  /** Copy แบบ AutoCAD: วางสำเนาได้หลายครั้งจากจุดฐานเดิมจนกด Esc */
+  #commitCopy(o, dx, dz) {
+    if (Math.hypot(dx, dz) < 1e-6) return;
+    this.#clearPreview();
+    this.cb.onTransform?.(o.id, this.#shifted(o, dx, dz), true, true);
+  }
+
+  #commitMove(o, dx, dz) {
+    this.cmd = null;
+    this.#clearPreview();
+    if (Math.hypot(dx, dz) > 1e-6) this.cb.onMoveCommit?.(o.id, dx, dz);
+    this.cb.onToolDone?.();
+  }
+
+  /** พิมพ์ค่าระหว่างคำสั่ง: Move/Copy = ระยะตามทิศเมาส์ · Offset = ระยะ · Rotate = มุม (องศา, ลบ = ตามเข็ม) */
+  #cmdType(key) {
+    const c = this.cmd, o = this.#cmdObj(), t = this.tool;
+    const active = t === 'offset' || (o && c.base && t !== 'mirror');
+    if (!active) return false;
+    if (/^[0-9.]$/.test(key) || (key === '-' && t === 'rotate' && !c.typed)) c.typed += key;
+    else if (key === 'Backspace' && c.typed) c.typed = c.typed.slice(0, -1);
+    else if (key === 'Enter' && c.typed) {
+      const L = parseFloat(c.typed);
+      c.typed = '';
+      if (!Number.isFinite(L)) return true;
+      if (t === 'offset') { if (L > 0) this.offsetDist = L; }
+      else if (t === 'rotate') { this.#finish(o.id, this.#rotated(o, c.base, this.#snapAngle(o, L)), false); return true; }
+      else if (L > 0 && this.hover) {
+        const q = this.#lockTo(c.base, this.hover, this.hover.lock);
+        const ux = q.x - c.base.x, uz = q.z - c.base.z, n = Math.hypot(ux, uz);
+        if (n > 1e-6) {
+          if (t === 'move') { this.#commitMove(o, ux / n * L, uz / n * L); return true; }
+          this.#commitCopy(o, ux / n * L, uz / n * L);
+        }
+      }
+    } else return false;
+    if (this.lastEvt && this.cmd) this.#cmdHover(this.lastEvt, this.snapFn);
+    return true;
   }
 
   #probe(e) {

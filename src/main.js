@@ -31,12 +31,19 @@ const compare = [];
 
 const viewer = new Viewer($('#viewport'), {
   onSelect: (id) => select(id),
+  // คลิกโดนวัตถุเดิมขณะถือเครื่องมือวาง → กลับโหมดเลือกแล้วเลือกวัตถุนั้น (ไม่วางซ้ำทับ)
+  onPickWhileTool: (id) => { setTool('select'); select(id); },
+  onMoveCommit: (id, dx, dz) => moveObject(id, dx, dz),
+  onOffset: (id, dx, dz) => offsetObject(id, dx, dz),
+  onTransform: (id, q, copy) => applyTransform(id, q, copy),
+  onToolDone: () => setTool('select'),
   onBeginEdit: () => pushUndo(),
   onObjectEdited: () => afterChange(true),
   onCreate: (type, props) => createObject(type, props),
   onSectionMoved: (pos) => syncSectionUI(pos),
   onProbe: (info) => showProbe(info),
   newCduModel: () => lastUsed.model,
+  newCduRot: () => lastUsed.rot,
   newWallHeight: () => lastUsed.wallHeight,
 });
 
@@ -145,12 +152,121 @@ function rotateSelected() {
     if (o.type === 'cdu') { o.rot = (o.rot + 90) % 360; lastUsed.rot = o.rot; }
     else if (o.type === 'building' || o.type === 'slab') o.rot = (o.rot + 90) % 360;
     else {
-      // หมุนผนังรอบจุดกึ่งกลาง 90°
+      // หมุนผนังรอบจุดกึ่งกลาง 90° ทวนเข็ม (มุมมอง Top) — ทิศเดียวกับ CDU/อาคาร และคำสั่ง Rotate
       const cx = (o.x1 + o.x2) / 2, cz = (o.z1 + o.z2) / 2;
-      const r = (x, z) => [cx - (z - cz), cz + (x - cx)];
+      const r = (x, z) => [round3(cx + (z - cz)), round3(cz - (x - cx))];
       [o.x1, o.z1] = r(o.x1, o.z1); [o.x2, o.z2] = r(o.x2, o.z2);
     }
   });
+}
+
+/* ───────── คัดลอก / ตัด / วาง (Ctrl+C / X / V) ───────── */
+
+let clipboard = null, pasteN = 0;
+
+function copySelected(cut = false) {
+  const o = selected();
+  if (!o) { toast('เลือกวัตถุก่อน แล้วกด Ctrl+C'); return; }
+  clipboard = JSON.parse(JSON.stringify(o));
+  pasteN = 0;
+  if (cut) {
+    edit(() => { scene.objects = scene.objects.filter(q => q.id !== o.id); selectedId = null; });
+    toast(`ตัด ${o.name} แล้ว — ชี้เมาส์ตรงจุดที่ต้องการแล้วกด Ctrl+V`);
+  } else toast(`คัดลอก ${o.name} แล้ว — ชี้เมาส์ตรงจุดที่ต้องการแล้วกด Ctrl+V (วางซ้ำได้)`);
+}
+
+const refPoint = o => (o.type === 'wall' ? { x: (o.x1 + o.x2) / 2, z: (o.z1 + o.z2) / 2 } : { x: o.x, z: o.z });
+/** ระดับผิวแผ่นพื้น/หลังคาที่รองรับ ณ จุด (x, z) */
+const supportAt = (x, z) => scene.objects.filter(s => s.type === 'slab' && insideRect(s, x, z)).reduce((m, s) => Math.max(m, s.y), 0);
+
+function pasteClipboard() {
+  if (!clipboard) { toast('ยังไม่ได้คัดลอก — เลือกวัตถุแล้วกด Ctrl+C ก่อน'); return; }
+  const src = clipboard, r = refPoint(src);
+  // วาง ณ ตำแหน่งเมาส์บนพื้น — ถ้าเมาส์ไม่อยู่บนมุมมอง วางเยื้องจากต้นฉบับทีละ 1 ม.
+  let p = viewer.cursorPoint();
+  if (!p) { pasteN++; p = { x: r.x + pasteN, z: r.z + pasteN }; }
+  const dx = p.x - r.x, dz = p.z - r.z;
+  edit(() => {
+    const c = makeObject(scene, src.type, { ...src, id: undefined, name: undefined });
+    translateObj(c, dx, dz);
+    reseatCdu(c, src);
+    scene.objects.push(c);
+    selectedId = c.id;
+  });
+}
+
+/* ───────── Move / Offset (แบบ AutoCAD) ───────── */
+
+function translateObj(o, dx, dz) {
+  if (o.type === 'wall') { o.x1 = round3(o.x1 + dx); o.x2 = round3(o.x2 + dx); o.z1 = round3(o.z1 + dz); o.z2 = round3(o.z2 + dz); }
+  else { o.x = round3(o.x + dx); o.z = round3(o.z + dz); }
+  viewer.keepInside(o);
+}
+
+/** CDU: คงระยะฐานเหนือพื้นรองรับเมื่อย้ายข้ามแผ่นพื้น/หลังคา */
+function reseatCdu(c, from) {
+  if (c.type === 'cdu') c.elev = round2(Math.max(0, from.elev - supportAt(from.x, from.z)) + supportAt(c.x, c.z));
+}
+
+function moveObject(id, dx, dz) {
+  const o = scene.objects.find(q => q.id === id);
+  if (!o) return;
+  edit(() => { const from = { ...o }; translateObj(o, dx, dz); reseatCdu(o, from); });
+  toast(`ย้าย ${o.name} ${fmt(Math.hypot(dx, dz))} m`, 1800);
+}
+
+function offsetObject(id, dx, dz) {
+  const o = scene.objects.find(q => q.id === id);
+  if (!o) return;
+  edit(() => {
+    const c = makeObject(scene, o.type, { ...o, id: undefined, name: undefined });
+    translateObj(c, dx, dz);
+    reseatCdu(c, o);
+    scene.objects.push(c);
+    selectedId = c.id;
+  });
+}
+
+/** Copy / Mirror / Rotate: q = วัตถุผลลัพธ์จากมุมมอง 3D · copy = สร้างวัตถุใหม่ (ต้นฉบับคงเดิม) */
+function applyTransform(id, q, copy) {
+  const o = scene.objects.find(x => x.id === id);
+  if (!o) return;
+  edit(() => {
+    if (copy) {
+      const c = makeObject(scene, o.type, { ...q, id: undefined, name: undefined });
+      reseatCdu(c, o);
+      scene.objects.push(c);
+      selectedId = c.id;
+    } else {
+      const from = { ...o };
+      Object.assign(o, q, { id: o.id, name: o.name });
+      reseatCdu(o, from);
+      if (o.type === 'cdu') lastUsed.rot = o.rot;
+    }
+  });
+}
+
+/** Tab / Shift+Tab: เลือกวัตถุถัดไป/ก่อนหน้า (ช่วยเลือกวัตถุที่ถูกบังหรือซ้อนกัน) */
+function cycleSelection(dir) {
+  const list = scene.objects;
+  if (!list.length) return;
+  const i = list.findIndex(o => o.id === selectedId);
+  const n = i < 0 ? (dir > 0 ? 0 : list.length - 1) : (i + dir + list.length) % list.length;
+  if (tool !== 'select') setTool('select');
+  select(list[n].id);
+}
+
+let ortho = false;
+function setOrtho(on) {
+  ortho = on;
+  viewer.setOrtho(on);
+  $('#btn-ortho').classList.toggle('on', on);
+  toast(on ? 'Ortho เปิด — ผนัง/Move ล็อกตามแนวแกน X/Z (Shift = ปลดชั่วคราว)' : 'Ortho ปิด', 1600);
+}
+
+function toggleKeys(show) {
+  const el = $('#keys-pop');
+  el.hidden = show === undefined ? !el.hidden : !show;
 }
 
 function nudge(dx, dz) {
@@ -165,9 +281,14 @@ function nudge(dx, dz) {
 /* ───────── เครื่องมือ ───────── */
 
 const TOOL_HINT = {
-  cdu: 'คลิกบนพื้นเพื่อวาง CDU · วางต่อได้หลายตัว · Esc เพื่อจบ',
-  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · Shift ล็อกแนวตรง · ดับเบิลคลิก/Esc เพื่อจบ',
+  cdu: 'คลิกบนพื้นภายในกริดแกนเพื่อวาง CDU · วางต่อได้หลายตัว · คลิกโดนวัตถุเดิม = เลือกเพื่อแก้ไข · Esc เพื่อจบ',
+  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้ ภายในกริดแกน) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · F8 Ortho / Shift ล็อกแนวแกน · คลิกกลางผนังเดิม = เลือก · ดับเบิลคลิก/Esc เพื่อจบ',
   slab: 'คลิกมุมหนึ่งของแผ่นพื้น/หลังคา แล้วคลิกมุมตรงข้าม · ตั้งระดับความสูงที่แผงด้านขวา · Esc เพื่อจบ',
+  move: 'Move: เลือกวัตถุ → จุดฐาน → จุดที่สอง หรือพิมพ์ระยะ + Enter · F8 Ortho · Esc ยกเลิก',
+  copy: 'Copy: เลือกวัตถุ → จุดฐาน → คลิกวางสำเนาได้หลายครั้ง หรือพิมพ์ระยะ + Enter · F8 Ortho · Esc จบ',
+  mirror: 'Mirror: เลือกวัตถุ → คลิกจุดแรกและจุดที่สองของเส้นสะท้อน (ได้สำเนา ต้นฉบับคงเดิม) · F8 Ortho · Esc ยกเลิก',
+  rotate: 'Rotate: เลือกวัตถุ → จุดฐาน → พิมพ์มุม (องศา, + ทวนเข็ม / − ตามเข็ม) + Enter หรือคลิก · CDU ทีละ 90° · Esc ยกเลิก',
+  offset: 'Offset: พิมพ์ระยะ + Enter → คลิกวัตถุ → คลิกฝั่ง (CDU/อาคาร = ช่องว่างระหว่างขอบ) · Esc จบ',
   building: 'คลิกมุมหนึ่งของอาคาร แล้วคลิกมุมตรงข้าม · Esc เพื่อจบ',
 };
 
@@ -271,7 +392,7 @@ function renderProps() {
   html += `</div>
     <div class="props-actions">
       <button data-act="dup" title="Ctrl+D">ทำสำเนา</button>
-      <button data-act="rot" title="R">หมุน 90°</button>
+      <button data-act="rot" title="หมุน 90° ทวนเข็ม (R)">หมุน 90°</button>
       <button data-act="del" class="danger" title="Delete">ลบ</button>
       <span class="spacer"></span>
       <button data-act="close" class="ghost" title="Esc">ปิด</button>
@@ -1180,6 +1301,7 @@ function toast(text, ms = 3200) {
 
 function fmt(v) { return String(Math.round(v * 100) / 100); }
 function round2(v) { return Math.round(v * 100) / 100; }
+function round3(v) { return Math.round(v * 1000) / 1000; }
 function fmtK(n) { return n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n); }
 function fmtDur(s) {
   if (!isFinite(s)) return '–';
@@ -1231,6 +1353,9 @@ function bindUI() {
   });
   $$('.vt').forEach(b => b.addEventListener('click', () => setViewUI(b.dataset.view)));
   $('#btn-undo').addEventListener('click', undo);
+  $('#btn-ortho').addEventListener('click', () => setOrtho(!ortho));
+  $('#btn-keys').addEventListener('click', () => toggleKeys());
+  $('#keys-pop .keys-x').addEventListener('click', () => toggleKeys(false));
   $('#btn-redo').addEventListener('click', redo);
   $('#btn-run').addEventListener('click', startOrToggle);
   $('#btn-reset').addEventListener('click', resetResults);
@@ -1304,11 +1429,25 @@ function bindUI() {
   window.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    // ใช้ปุ่มจริงบนคีย์บอร์ด (e.code) ให้คีย์ลัดทำงานแม้เปิดแป้นพิมพ์ภาษาไทยอยู่
+    const c = e.code || '';
+    const k = c.startsWith('Key') ? c.slice(3).toLowerCase()
+      : /^(Digit|Numpad)\d$/.test(c) ? c.slice(-1)
+      : c === 'Period' || c === 'NumpadDecimal' ? '.'
+      : c === 'Slash' && e.shiftKey ? '?'
+      : c === 'Minus' || c === 'NumpadSubtract' ? '-'
+      : e.key.toLowerCase();
     // ระหว่างลากผนัง: พิมพ์ตัวเลขความยาวแล้วกด Enter
-    if (!(e.ctrlKey || e.metaKey) && viewer.typeLength(e.key)) { e.preventDefault(); return; }
+    const typed = /^[0-9.]$/.test(k) ? k : e.key;
+    if (!(e.ctrlKey || e.metaKey) && viewer.typeLength(typed)) { e.preventDefault(); return; }
     const ctrl = e.ctrlKey || e.metaKey;
-    const k = e.key.toLowerCase();
+    if (!$('#keys-pop').hidden && (k === 'escape' || k === '?')) { toggleKeys(false); return; }
+    if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (ctrl && k === 'c') { if (selected()) { e.preventDefault(); copySelected(); } }
+    else if (ctrl && k === 'x') { if (selected()) { e.preventDefault(); copySelected(true); } }
+    else if (ctrl && k === 'v') { e.preventDefault(); pasteClipboard(); }
+    else if (ctrl && k === 'l') { e.preventDefault(); setTool('wall'); }
     else if (ctrl && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
     else if (ctrl && k === 'd') { e.preventDefault(); duplicateSelected(); }
     else if (ctrl && k === 's') { e.preventDefault(); saveProject(); }
@@ -1317,11 +1456,18 @@ function bindUI() {
       if (tool !== 'select' && viewer.cancelDraw()) return;
       if (tool !== 'select') setTool('select'); else select(null);
     }
+    else if (e.shiftKey && k === 'c') setTool('copy');
+    else if (e.shiftKey && k === 'm') setTool('mirror');
+    else if (e.shiftKey && k === 'r') setTool('rotate');
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSelected(); }
     else if (k === 'r') rotateSelected();
     else if (k === 'v') setTool('select');
     else if (k === 'c') setTool('cdu');
-    else if (k === 'w') setTool('wall');
+    else if (k === 'w' || k === 'l') setTool('wall');
+    else if (k === 'm') setTool('move');
+    else if (k === 'o') setTool('offset');
+    else if (k === '?') toggleKeys();
+    else if (k === 'tab' && (e.target === document.body || e.target.tagName === 'CANVAS')) { e.preventDefault(); cycleSelection(e.shiftKey ? -1 : 1); }
     else if (k === 'b') setTool('building');
     else if (k === 'f') setTool('slab');
     else if (k === 'p') captureView();

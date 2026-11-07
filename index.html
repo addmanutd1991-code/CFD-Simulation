@@ -40,17 +40,65 @@
   <!-- ═════════════ เครื่องมือ ═════════════ -->
   <section id="tab-tool" class="tabpage">
    <div class="workspace" id="workspace">
+    <div class="keys-pop" id="keys-pop" hidden>
+      <button class="keys-x" title="ปิด (Esc)">×</button>
+      <h3>คีย์ลัด</h3>
+      <div class="keys-grid">
+        <b>วาง / เครื่องมือ</b>
+        <span><kbd>V</kbd> เลือก / ย้าย</span>
+        <span><kbd>C</kbd> + CDU</span>
+        <span><kbd>W</kbd> <kbd>L</kbd> <kbd>Ctrl+L</kbd> + ผนัง (Line)</span>
+        <span><kbd>B</kbd> + อาคาร</span>
+        <span><kbd>F</kbd> + พื้น / หลังคา</span>
+        <span><kbd>M</kbd> Move — จุดฐาน → จุดที่สอง / พิมพ์ระยะ</span>
+        <span><kbd>O</kbd> Offset — ระยะ ↵ → วัตถุ → ฝั่ง</span>
+        <span><kbd>Shift+C</kbd> Copy — จุดฐาน → วางหลายครั้ง</span>
+        <span><kbd>Shift+M</kbd> Mirror — สองจุดของเส้นสะท้อน</span>
+        <span><kbd>Shift+R</kbd> Rotate — จุดฐาน → มุม ↵</span>
+        <span><kbd>F8</kbd> Ortho ล็อกแนวแกน</span>
+        <span><kbd>Shift</kbd> สลับ Ortho ชั่วคราว</span>
+        <span>ระหว่างลากผนัง พิมพ์ความยาว + <kbd>Enter</kbd></span>
+        <span><kbd>Esc</kbd> จบเส้น / ออกจากเครื่องมือ</span>
+        <b>แก้ไข</b>
+        <span><kbd>Ctrl+C</kbd> คัดลอก</span>
+        <span><kbd>Ctrl+X</kbd> ตัด</span>
+        <span><kbd>Ctrl+V</kbd> วาง ณ ตำแหน่งเมาส์</span>
+        <span><kbd>Ctrl+D</kbd> ทำสำเนา</span>
+        <span><kbd>R</kbd> หมุน 90° ทวนเข็ม</span>
+        <span><kbd>Delete</kbd> ลบ</span>
+        <span>ลูกศร ขยับ 0.1 ม. (<kbd>Shift</kbd> 1 ม.)</span>
+        <span><kbd>Tab</kbd> เลือกวัตถุถัดไป</span>
+        <span><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> เลิกทำ / ทำซ้ำ</span>
+        <b>มุมมอง / คำนวณ</b>
+        <span><kbd>1</kbd>–<kbd>6</kbd> 3D เหนือ ใต้ ออก ตก Top</span>
+        <span><kbd>P</kbd> Capture ภาพ</span>
+        <span><kbd>Space</kbd> คำนวณ / หยุด</span>
+        <span><kbd>Ctrl+S</kbd> บันทึก</span>
+        <span><kbd>?</kbd> เปิด/ปิดหน้านี้</span>
+      </div>
+    </div>
     <div class="toolbar">
       <div class="grp">
         <button class="tool on" data-tool="select" title="เลือกและลากย้ายวัตถุ (V)">เลือก / ย้าย</button>
         <button class="tool" data-tool="cdu" title="คลิกบนพื้นเพื่อวาง CDU (C)">+ CDU</button>
-        <button class="tool" data-tool="wall" title="คลิกจุดเริ่ม แล้วคลิกจุดถัดไปเพื่อลากผนังต่อเนื่อง (W)">+ ผนัง / louver</button>
+        <button class="tool" data-tool="wall" title="คลิกจุดเริ่ม แล้วคลิกจุดถัดไปเพื่อลากผนังต่อเนื่อง (W / L / Ctrl+L)">+ ผนัง / louver</button>
         <button class="tool" data-tool="building" title="คลิกมุมหนึ่ง แล้วคลิกมุมตรงข้าม (B)">+ อาคาร</button>
         <button class="tool" data-tool="slab" title="แผ่นพื้นยก / หลังคา / ตะแกรง: คลิกมุมหนึ่ง แล้วคลิกมุมตรงข้าม (F)">+ พื้น / หลังคา</button>
       </div>
       <div class="grp">
+        <button class="tool cmd" data-tool="move" title="Move: จุดฐาน → จุดที่สอง หรือพิมพ์ระยะ + Enter (M)">Move</button>
+        <button class="tool cmd" data-tool="copy" title="Copy: จุดฐาน → คลิกวางสำเนาได้หลายครั้ง หรือพิมพ์ระยะ + Enter (Shift+C)">Copy</button>
+        <button class="tool cmd" data-tool="offset" title="Offset: พิมพ์ระยะ + Enter → คลิกวัตถุ → คลิกฝั่ง (O)">Offset</button>
+        <button class="tool cmd" data-tool="mirror" title="Mirror: คลิกสองจุดของเส้นสะท้อน — ได้สำเนา (Shift+M)">Mirror</button>
+        <button class="tool cmd" data-tool="rotate" title="Rotate: จุดฐาน → พิมพ์มุม + Enter (Shift+R)">Rotate</button>
+      </div>
+      <div class="grp">
         <button id="btn-undo" class="icon" title="เลิกทำ (Ctrl+Z)">↶</button>
         <button id="btn-redo" class="icon" title="ทำซ้ำ (Ctrl+Y)">↷</button>
+      </div>
+      <div class="grp">
+        <button id="btn-ortho" title="Ortho: ล็อกผนังตามแนวแกน X/Z (F8) — กด Shift ค้างเพื่อสลับชั่วคราว">Ortho</button>
+        <button id="btn-keys" class="icon" title="คีย์ลัดทั้งหมด (?)">⌨</button>
       </div>
       <div class="spacer"></div>
       <span class="estimate mono" id="estimate"></span>
@@ -316,7 +364,8 @@
           เลื่อนระนาบหน้าตัดโดยลากปุ่มกลมบนขอบระนาบ ชี้เมาส์บนระนาบเพื่ออ่านค่า ณ จุดนั้น</li>
         <li><b>เปรียบเทียบ</b> — แก้แบบ (เช่น เพิ่มท่อเป่าลม เปิด louver กว้างขึ้น ขยับเครื่อง) แล้วคำนวณใหม่ ตารางเปรียบเทียบจะเก็บผลทุกรอบไว้</li>
       </ol>
-      <p class="kbd-list"><b>คีย์ลัด</b> <kbd>V</kbd> เลือก · <kbd>C</kbd> CDU · <kbd>W</kbd> ผนัง · <kbd>B</kbd> อาคาร · <kbd>F</kbd> พื้น/หลังคา · <kbd>R</kbd> หมุน 90° · <kbd>P</kbd> Capture ภาพ ·
+      <p class="kbd-list"><b>คีย์ลัด</b> <kbd>V</kbd> เลือก · <kbd>C</kbd> CDU · <kbd>W</kbd>/<kbd>L</kbd>/<kbd>Ctrl+L</kbd> ผนัง · <kbd>B</kbd> อาคาร · <kbd>F</kbd> พื้น/หลังคา · <kbd>R</kbd> หมุน 90° ทวนเข็ม · <kbd>P</kbd> Capture ภาพ ·
+        <kbd>M</kbd> Move · <kbd>O</kbd> Offset · <kbd>Shift+C</kbd> Copy · <kbd>Shift+M</kbd> Mirror · <kbd>Shift+R</kbd> Rotate · <kbd>F8</kbd> Ortho ล็อกผนังตามแกน · <kbd>Ctrl+C</kbd>/<kbd>Ctrl+X</kbd>/<kbd>Ctrl+V</kbd> คัดลอก/ตัด/วาง ณ ตำแหน่งเมาส์ · <kbd>Tab</kbd> เลือกวัตถุถัดไป · <kbd>?</kbd> ตารางคีย์ลัด ·
         <kbd>Delete</kbd> ลบ · <kbd>Ctrl+D</kbd> ทำสำเนา · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> เลิกทำ/ทำซ้ำ · ลูกศร ขยับ 0.1 ม. (<kbd>Shift</kbd> 1 ม.) ·
         <kbd>Space</kbd> คำนวณ/หยุด · <kbd>Ctrl+S</kbd> บันทึก</p>
 
