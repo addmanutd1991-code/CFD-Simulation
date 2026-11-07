@@ -7,7 +7,7 @@ import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, B
 import { buildMesh } from './mesher.js';
 import { Viewer, CONTOUR_LEVELS } from './viewer.js';
 import { Runner } from './runner.js';
-import { cssGradient, FIELDS } from './colormap.js';
+import { cssGradient, FIELDS, rgb } from './colormap.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -228,7 +228,7 @@ function renderProps() {
       </div>`;
     const ur = unitsNow()?.find(u => u.id === o.id);
     if (ur) {
-      html += `<div class="unit-res st-${ur.status.key}">T ลมเข้า <span>${ur.Tin.toFixed(1)} °C</span> (ΔT <span>+${ur.dT.toFixed(2)} K</span>)
+      html += `<div class="unit-res st-${ur.status.key}">T ลมเข้า <span>${ur.Tin.toFixed(1)} °C</span> (ΔT <span>+${ur.dT.toFixed(2)} °C</span>)
         · ลมวนกลับ <span>${(ur.Cin * 100).toFixed(1)}%</span><br>capacity <span>${(ur.capF * 100).toFixed(1)}%</span>
         = <span>${ur.kwAvail.toFixed(1)}</span> / ${ur.kwRated.toFixed(1)} kW · <b class="st-${ur.status.key}">${ur.status.label}</b></div>`;
     }
@@ -647,7 +647,7 @@ function updateRunUI() {
   $('#st-time').textContent = r ? `t ${t.toFixed(1)} s · เกณฑ์ ${r.converged ? nAll : nPass}/${nAll}` : 't 0.0 s';
   $('#st-bar').style.width = `${Math.min(100, prog * 100)}%`;
   if (run.state === 'running' && r) $('#estimate').textContent = isFinite(r.drift)
-    ? `ΔT ลมเข้าเปลี่ยน ±${r.drift.toFixed(3)} K (เป้า ≤ ${r.conv.drift})` : 'กำลังสะสมข้อมูลเพื่อตรวจการลู่เข้า…';
+    ? `ΔT ลมเข้าเปลี่ยน ±${r.drift.toFixed(3)} °C (เป้า ≤ ${r.conv.drift})` : 'กำลังสะสมข้อมูลเพื่อตรวจการลู่เข้า…';
   else updateEstimate();
 
   const badge = $('#res-badge');
@@ -699,10 +699,10 @@ function renderResults() {
   const avgDT = units.reduce((s, u) => s + u.dT * u.cmm, 0) / units.reduce((s, u) => s + u.cmm, 0);
   const nIssue = units.filter(u => u.status.key !== 'ok').length;
   $('#kpis').innerHTML = [
-    kpi('ΔT สูงสุด', `+${worst.dT.toFixed(2)} K`, `${esc(worst.name)} · T ลมเข้า ${worst.Tin.toFixed(1)} °C`, worst.status.key),
-    kpi('ΔT เฉลี่ย (ถ่วงอัตราลม)', `+${avgDT.toFixed(2)} K`, `อากาศภายนอก ${scene.site.ambient} °C`),
+    kpi('ΔT สูงสุด', `+${worst.dT.toFixed(2)} °C`, `${esc(worst.name)} · T ลมเข้า ${worst.Tin.toFixed(1)} °C`, worst.status.key),
+    kpi('ΔT เฉลี่ย (ถ่วงอัตราลม)', `+${avgDT.toFixed(2)} °C`, `อากาศภายนอก ${scene.site.ambient} °C`),
     kpi('Capacity รวม', `${(kwA / kwR * 100).toFixed(1)}%`, `${kwA.toFixed(1)} จาก ${kwR.toFixed(1)} kW (หาย ${(kwR - kwA).toFixed(1)} kW)`),
-    kpi('เครื่องที่ต้องดูแล', `${nIssue} / ${units.length}`, nIssue ? 'ΔT ≥ 1 K' : 'ทุกเครื่อง ΔT < 1 K', nIssue ? 'watch' : 'ok'),
+    kpi('เครื่องที่ต้องดูแล', `${nIssue} / ${units.length}`, nIssue ? 'ΔT ≥ 1 °C' : 'ทุกเครื่อง ΔT < 1 °C', nIssue ? 'watch' : 'ok'),
   ].join('');
 
   renderQuality();
@@ -730,7 +730,7 @@ function renderQuality() {
   const bal = r.balance.ratio;
   q.push(['<b>เกณฑ์ลู่เข้า</b>', r.converged ? '<b>ผ่านครบ ✓</b>' : `ผ่านต่อเนื่อง ${r.hold}/${C.hold} ครั้ง`, r.converged ? 'good' : '']);
   q.push([`${mark(ck.time)}เวลาจำลอง ≥ ${C.tMin} s`, `${r.time.toFixed(1)} s`, cls(ck.time)]);
-  q.push([`${mark(ck.drift)}T ลมเข้าเปลี่ยน ≤ ±${C.drift} K`, isFinite(r.drift) ? `±${r.drift.toFixed(3)} K` : 'รอข้อมูล 20 s', cls(ck.drift)]);
+  q.push([`${mark(ck.drift)}T ลมเข้าเปลี่ยน ≤ ±${C.drift} °C`, isFinite(r.drift) ? `±${r.drift.toFixed(3)} °C` : 'รอข้อมูล 20 s', cls(ck.drift)]);
   q.push([`${mark(ck.balance)}สมดุลพลังงาน ${C.balLo * 100}–${C.balHi * 100}%`, isFinite(bal) ? `${(bal * 100).toFixed(1)}%` : '–', cls(ck.balance)]);
   q.push([`${mark(ck.mass)}ความคลาดเคลื่อนมวล ≤ ${C.mass * 100}%`, `${(r.divErr * 100).toFixed(2)}%`, cls(ck.mass)]);
   q.push(['ความร้อนจาก CDU', `${(r.balance.qIn / 1000).toFixed(1)} kW`]);
@@ -764,10 +764,10 @@ function renderAdvice(units) {
     if (solidNear.length) tips.push(`ผนังทึบใกล้เครื่อง (${solidNear.map(w => esc(w.name)).join(', ')}) — เปลี่ยนเป็น louver หรือเว้นระยะมากขึ้น`);
     if (u.blockedPct > 20) tips.push(`หน้าคอยล์ถูกบัง ${u.blockedPct.toFixed(0)}% — เพิ่มระยะจากผนัง/เครื่องข้างเคียง`);
     if (!tips.length) tips.push('ขยับให้ห่างจากเครื่องที่อยู่ต้นลม หรือเพิ่มระยะระหว่างแถว');
-    out.push(`<li><b class="st-${u.status.key}">${esc(u.name)}</b> ΔT +${u.dT.toFixed(2)} K · ลมวนกลับ ${(u.Cin * 100).toFixed(1)}% · capacity ${(u.capF * 100).toFixed(1)}%
+    out.push(`<li><b class="st-${u.status.key}">${esc(u.name)}</b> ΔT +${u.dT.toFixed(2)} °C · ลมวนกลับ ${(u.Cin * 100).toFixed(1)}% · capacity ${(u.capF * 100).toFixed(1)}%
       <br>${tips.map(t => '→ ' + t).join('<br>')}</li>`);
   }
-  if (!out.length) out.push('<li><b class="st-ok">ทุกเครื่อง ΔT &lt; 1 K</b> — ลมร้อนวนกลับน้อย ผังนี้ใช้ได้ในเงื่อนไขที่ตั้งไว้</li>');
+  if (!out.length) out.push('<li><b class="st-ok">ทุกเครื่อง ΔT &lt; 1 °C</b> — ลมร้อนวนกลับน้อย ผังนี้ใช้ได้ในเงื่อนไขที่ตั้งไว้</li>');
   const r = run.report;
   if (run.mesh.h >= 0.45) out.push('<li class="muted">ผลจากเมชหยาบ (0.5 ม.) ใช้ร่างผังเท่านั้น — ยืนยันด้วยเซลล์ 0.25–0.35 ม.</li>');
   if (run.state === 'done' && !r.converged) out.push('<li class="muted">ถึงเพดานเวลาแต่ยังไม่ลู่เข้า — กด "คำนวณต่อจนลู่เข้า" หรือเพิ่มเพดานเวลาในหัวข้อขั้นสูง</li>');
@@ -934,29 +934,139 @@ function updatePlayButton(on = viewer.display.playing) {
   b.textContent = on ? '❚❚ หยุดภาพเคลื่อนไหว' : '▶ เล่นภาพเคลื่อนไหว';
 }
 
-function updateColorbar() {
-  updatePlayButton();
-  $('#cbar').style.background = cssGradient(viewer.display.mode === 'contour' ? CONTOUR_LEVELS : 0);
+/** ตัวเลขบนแถบสี [{p: 0–1, txt}] — null ถ้ายังไม่มีผล */
+function colorbarTicks() {
   const f = viewer.display.field;
   const rng = viewer.fieldRange();
+  if (!rng) return null;
   const meta = FIELDS[f];
-  const lab = $('#cbar-labels');
-  if (!rng) {
-    lab.innerHTML = `<span style="left:0">${scene.site.ambient} °C (ambient)</span><span style="left:100%">คำนวณเพื่อดูสเกล</span>`;
-    return;
-  }
   const [lo, hi] = rng;
   const n = 4;
-  const parts = [];
+  const out = [];
   for (let i = 0; i < n; i++) {
     const v = lo + (hi - lo) * i / (n - 1);
     let txt = `${v.toFixed(meta.digits)}${meta.unit === '%' ? '%' : ''}`;
     if (i === 0 && f === 'T') txt = `${v.toFixed(1)} °C ambient`;
     else if (f === 'P' && i < n - 1) txt = `${v >= 0 ? '+' : ''}${v.toFixed(meta.digits)}`;
     else if (i === n - 1) txt += meta.unit === '%' ? '+' : ` ${meta.unit}`;
-    parts.push(`<span style="left:${i / (n - 1) * 100}%">${txt}</span>`);
+    out.push({ p: i / (n - 1), txt });
   }
-  lab.innerHTML = parts.join('');
+  return out;
+}
+
+function updateColorbar() {
+  updatePlayButton();
+  $('#cbar').style.background = cssGradient(viewer.display.mode === 'contour' ? CONTOUR_LEVELS : 0);
+  const lab = $('#cbar-labels');
+  const ticks = colorbarTicks();
+  if (!ticks) {
+    lab.innerHTML = `<span style="left:0">${scene.site.ambient} °C (ambient)</span><span style="left:100%">คำนวณเพื่อดูสเกล</span>`;
+    return;
+  }
+  lab.innerHTML = ticks.map(t => `<span style="left:${t.p * 100}%">${t.txt}</span>`).join('');
+}
+
+/* ───────── Capture ภาพหลายมุมสำหรับรายงาน ───────── */
+
+const captures = [];   // { url, caption }
+const VIEW_NAME = { '3d': '3D', px: 'มุมมอง +X', nx: 'มุมมอง −X', py: 'มุมมอง +Y (บน)', ny: 'มุมมอง −Y (ล่าง)', pz: 'มุมมอง +Z', nz: 'มุมมอง −Z' };
+const MODE_NAME = { contour: 'Contour', stream: 'Streamline', vector: 'Vector' };
+
+/** ภาพจากมุมมองปัจจุบัน + หัวเรื่องและแถบสี วาดรวมเป็น PNG เดียว */
+async function composeCapture(caption) {
+  const src = new Image();
+  src.src = viewer.snapshot();
+  await src.decode();
+  const W = src.width, s = W / 1200;
+  const head = Math.round(34 * s), foot = Math.round(70 * s);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = src.height + head + foot;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, cv.width, cv.height);
+  g.drawImage(src, 0, head);
+  g.fillStyle = '#1c2a36';
+  g.font = `600 ${Math.round(17 * s)}px "IBM Plex Sans Thai", Tahoma, sans-serif`;
+  g.textBaseline = 'middle';
+  g.fillText(caption, 12 * s, head / 2);
+  const ticks = colorbarTicks();
+  if (ticks) {
+    const x0 = 16 * s, x1 = Math.min(W - 16 * s, x0 + 620 * s), y = head + src.height + 14 * s, bh = 16 * s;
+    const lv = viewer.display.mode === 'contour' ? CONTOUR_LEVELS : 0;
+    const N = 240;
+    for (let i = 0; i < N; i++) {
+      let t = i / (N - 1);
+      if (lv) t = (Math.min(lv - 1, Math.floor(t * lv)) + 0.5) / lv;
+      const c = rgb(t);
+      g.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      g.fillRect(x0 + (x1 - x0) * i / N, y, (x1 - x0) / N + 1, bh);
+    }
+    g.strokeStyle = '#8a98a5'; g.lineWidth = Math.max(1, s); g.strokeRect(x0, y, x1 - x0, bh);
+    g.fillStyle = '#1c2a36';
+    g.font = `${Math.round(13 * s)}px "IBM Plex Sans Thai", Tahoma, sans-serif`;
+    g.textBaseline = 'top';
+    ticks.forEach((t, i) => {
+      g.textAlign = i === 0 ? 'left' : i === ticks.length - 1 ? 'right' : 'center';
+      g.fillText(t.txt, x0 + (x1 - x0) * t.p, y + bh + 5 * s);
+    });
+    g.textAlign = 'left';
+    g.fillText(`${FIELDS[viewer.display.field].label} · ${MODE_NAME[viewer.display.mode]}`, x1 + 16 * s, y);
+  }
+  return cv.toDataURL('image/png');
+}
+
+function captionNow() {
+  const f = FIELDS[viewer.display.field];
+  const sec = viewer.section.show ? ` · หน้าตัด ${viewer.section.axis.toUpperCase()} = ${viewer.section.pos.toFixed(2)} ม.` : '';
+  return `${scene.name} — ${VIEW_NAME[viewer.view] || viewer.view}${run.fields ? ` · ${f.label}${sec}` : ''}`;
+}
+
+async function captureView() {
+  const url = await composeCapture(captionNow());
+  captures.push({ url, caption: captionNow() });
+  const fl = document.createElement('div');
+  fl.className = 'capture-flash';
+  $('#viewport').appendChild(fl);
+  requestAnimationFrame(() => { fl.style.opacity = '0'; setTimeout(() => fl.remove(), 400); });
+  renderCaptures();
+  toast(`บันทึกภาพที่ ${captures.length} แล้ว — อยู่ในรายงาน HTML`);
+}
+
+function renderCaptures() {
+  $('#cap-count').textContent = `(${captures.length})`;
+  $('#btn-cap-all').disabled = $('#btn-cap-clear').disabled = !captures.length;
+  const box = $('#cap-list');
+  if (!captures.length) {
+    box.innerHTML = `<p class="muted small" style="margin:0">กด <b>📷 Capture</b> บนภาพ 3D เพื่อเก็บภาพหลายมุม (หมุน/เลือกแกน/เลื่อนหน้าตัดก่อนกด)
+      — ทุกภาพจะอยู่ในรายงาน HTML ตามลำดับ แก้คำบรรยายใต้ภาพได้</p>`;
+    return;
+  }
+  box.innerHTML = captures.map((c, i) => `<div class="cap-item" data-i="${i}">
+    <img src="${c.url}" alt="ภาพที่ ${i + 1}" title="คลิกเพื่อเปิดภาพเต็ม">
+    <input type="text" value="${esc(c.caption)}" title="คำบรรยายใต้ภาพในรายงาน">
+    <div class="cap-row"><span class="muted">ภาพที่ ${i + 1}</span><span>
+      <button class="ghost" data-a="up" ${i ? '' : 'disabled'} title="เลื่อนขึ้น">↑</button>
+      <button class="ghost" data-a="dl" title="ดาวน์โหลด PNG">⬇</button>
+      <button class="ghost danger" data-a="del" title="ลบ">✕</button></span></div></div>`).join('');
+  $$('.cap-item', box).forEach(el => {
+    const i = Number(el.dataset.i);
+    $('input', el).addEventListener('change', (e) => { captures[i].caption = e.target.value; });
+    $('img', el).addEventListener('click', () => { const w = window.open(); if (w) w.document.write(`<img src="${captures[i].url}" style="max-width:100%">`); });
+    $('[data-a="dl"]', el).addEventListener('click', () => downloadURL(captures[i].url, `${safeName(scene.name)}-${i + 1}.png`));
+    $('[data-a="del"]', el).addEventListener('click', () => { captures.splice(i, 1); renderCaptures(); });
+    $('[data-a="up"]', el).addEventListener('click', () => { [captures[i - 1], captures[i]] = [captures[i], captures[i - 1]]; renderCaptures(); });
+  });
+}
+
+function downloadURL(url, name) {
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function toggleFullscreen() {
+  const st = $('.stage');
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else st.requestFullscreen?.().catch(() => toast('เบราว์เซอร์ไม่อนุญาตโหมดเต็มจอ'));
 }
 
 function showProbe(info) {
@@ -966,7 +1076,7 @@ function showProbe(info) {
   const at = `(${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
   if (info.solid) { el.textContent = `จุดบนระนาบ ${at}: ของแข็ง`; return; }
   const P = info.P == null ? '' : ` · P ${info.P >= 0 ? '+' : ''}${info.P.toFixed(2)} Pa`;
-  el.textContent = `จุดบนระนาบ ${at}: T ${info.T.toFixed(2)} °C · ΔT +${(info.T - scene.site.ambient).toFixed(2)} K · |V| ${info.V.toFixed(2)} m/s${P} · ลมจาก CDU ${(info.C * 100).toFixed(0)}%`;
+  el.textContent = `จุดบนระนาบ ${at}: T ${info.T.toFixed(2)} °C · ΔT +${(info.T - scene.site.ambient).toFixed(2)} °C · |V| ${info.V.toFixed(2)} m/s${P} · ลมจาก CDU ${(info.C * 100).toFixed(0)}%`;
 }
 
 /* ───────── ไฟล์ / ส่งออก ───────── */
@@ -992,7 +1102,7 @@ function openProject(file) {
 function exportCSV() {
   const units = unitsNow();
   if (!units) return;
-  const head = ['CDU', 'รุ่น', 'kW พิกัด', 'อัตราลม m3/min', 'T ลมเข้าเฉลี่ย C', 'T ลมเข้าสูงสุด C', 'dT K', 'ลมวนกลับ %', 'T ลมเป่า C', 'Capacity %', 'kW ที่ได้', 'คอยล์ถูกบัง %', 'สถานะ', 'เกณฑ์ T ลมกลับ'];
+  const head = ['CDU', 'รุ่น', 'kW พิกัด', 'อัตราลม m3/min', 'T ลมเข้าเฉลี่ย C', 'T ลมเข้าสูงสุด C', 'dT C', 'ลมวนกลับ %', 'T ลมเป่า C', 'Capacity %', 'kW ที่ได้', 'คอยล์ถูกบัง %', 'สถานะ', 'เกณฑ์ T ลมกลับ'];
   const rows = units.map(u => [u.name, u.model, u.kwRated.toFixed(1), u.cmm.toFixed(0), u.Tin.toFixed(2), u.TinMax.toFixed(2), u.dT.toFixed(2),
     (u.Cin * 100).toFixed(1), u.Tdis.toFixed(1), (u.capF * 100).toFixed(1), u.kwAvail.toFixed(1), u.blockedPct.toFixed(0), u.status.label, BAND_TEXT[unitBand(u)].label]);
   const csv = '﻿' + [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
@@ -1002,12 +1112,12 @@ function exportCSV() {
 function exportReport() {
   const units = unitsNow();
   if (!units) return;
-  const img = viewer.snapshot();
+  const shots = captures.length ? captures : [{ url: viewer.snapshot(), caption: 'ภาพ 3 มิติ' }];
   const r = run.report;
   const date = new Date().toLocaleString('th-TH');
   const css = `body{font-family:"IBM Plex Sans Thai",Tahoma,sans-serif;color:#1c2a36;max-width:1000px;margin:24px auto;padding:0 18px}
     h1{margin:0}table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}th,td{border:1px solid #c8d3dc;padding:5px 7px;text-align:left}
-    td.n{text-align:right;font-family:monospace}th{background:#eef3f7}img{width:100%;border:1px solid #c8d3dc;border-radius:6px}
+    td.n{text-align:right;font-family:monospace}th{background:#eef3f7}img{width:100%;border:1px solid #c8d3dc;border-radius:6px}figure{margin:14px 0;page-break-inside:avoid}figcaption{font-size:13px;color:#4a5d6c;margin-top:4px}
     .muted{color:#667a8a}.criteria{list-style:none;padding-left:0}.criteria li{margin:4px 0}
     .chip{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
     .chip-green{background:#3ecf6e}.chip-yellow{background:#f5c518}.chip-red{background:#e5433b}
@@ -1021,9 +1131,9 @@ function exportReport() {
     <p>อากาศภายนอก ${scene.site.ambient} °C · ลม ${scene.site.windSpeed} m/s จากทิศ ${scene.site.windDir}° · เซลล์ ${run.mesh.h} ม.
       (${run.mesh.nx}×${run.mesh.ny}×${run.mesh.nz}) · เวลาจำลอง ${r.time.toFixed(0)} s · ${r.converged ? 'ลู่เข้าแล้ว' : 'ยังไม่ลู่เข้า'}
       · สมดุลพลังงาน ${(r.balance.ratio * 100).toFixed(1)}%</p>
-    <img src="${img}" alt="ภาพ 3 มิติ">
+    ${shots.map((c, i) => `<figure><img src="${c.url}" alt="${esc(c.caption)}"><figcaption>รูปที่ ${i + 1} — ${esc(c.caption)}</figcaption></figure>`).join('')}
     <h2>ผลรายเครื่อง</h2>
-    <table><tr><th>CDU</th><th>รุ่น</th><th>kW พิกัด</th><th>ลม m³/min</th><th>T ลมเข้า °C</th><th>สูงสุด °C</th><th>ΔT K</th><th>ลมวนกลับ %</th><th>Capacity %</th><th>kW ที่ได้</th><th>สถานะ</th><th>เกณฑ์ T ลมกลับ</th></tr>${tbl}</table>
+    <table><tr><th>CDU</th><th>รุ่น</th><th>kW พิกัด</th><th>ลม m³/min</th><th>T ลมเข้า °C</th><th>สูงสุด °C</th><th>ΔT °C</th><th>ลมวนกลับ %</th><th>Capacity %</th><th>kW ที่ได้</th><th>สถานะ</th><th>เกณฑ์ T ลมกลับ</th></tr>${tbl}</table>
     <h2>เกณฑ์อุณหภูมิลมกลับ</h2>${bandCriteriaHTML()}
     <h2>ข้อสังเกต</h2><ul>${$('#advice').innerHTML}</ul>
     <p class="muted">ค่าเฉลี่ยตามเวลาในช่วง ${r.avgWindow.toFixed(0)} วินาทีสุดท้าย · ตัวเลขสมรรถนะเป็นค่าอ้างอิงโดยประมาณ ใช้เพื่อเปรียบเทียบผังการวางเครื่อง</p>
@@ -1099,6 +1209,17 @@ function bindUI() {
     if (b.dataset.tab === 'tool') { viewer.resize(); drawChart(unitsNow()); drawResiduals(); }
   }));
   $$('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  $('#btn-capture').addEventListener('click', captureView);
+  $('#btn-full').addEventListener('click', toggleFullscreen);
+  document.addEventListener('fullscreenchange', () => {
+    $('#btn-full').textContent = document.fullscreenElement ? '✕ ออกเต็มจอ' : '⛶ เต็มจอ';
+    setTimeout(() => viewer.resize(), 60);
+  });
+  $('#btn-cap-all').addEventListener('click', () => captures.forEach((c, i) =>
+    setTimeout(() => downloadURL(c.url, `${safeName(scene.name)}-${i + 1}.png`), i * 250)));
+  $('#btn-cap-clear').addEventListener('click', () => {
+    if (confirm(`ลบภาพที่บันทึกไว้ทั้งหมด ${captures.length} ภาพ?`)) { captures.length = 0; renderCaptures(); }
+  });
   $$('.vt').forEach(b => b.addEventListener('click', () => {
     $$('.vt').forEach(x => x.classList.toggle('on', x === b));
     viewer.setView(b.dataset.view);
@@ -1167,7 +1288,7 @@ function bindUI() {
   $('#d-labels').addEventListener('change', (e) => viewer.setDisplay({ labels: e.target.checked }));
   $('#d-iso-dt').addEventListener('input', (e) => {
     const v = parseFloat(e.target.value);
-    $('#d-iso-val').textContent = `${v.toFixed(1)} K`;
+    $('#d-iso-val').textContent = `${v.toFixed(1)} °C`;
     viewer.setDisplay({ isoDT: v });
   });
 
@@ -1197,6 +1318,7 @@ function bindUI() {
     else if (k === 'w') setTool('wall');
     else if (k === 'b') setTool('building');
     else if (k === 'f') setTool('slab');
+    else if (k === 'p') captureView();
     else if (k === ' ') { e.preventDefault(); startOrToggle(); }
     else if (k.startsWith('arrow') && selected()) {
       e.preventDefault();

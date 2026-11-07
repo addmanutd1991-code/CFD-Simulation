@@ -114,38 +114,46 @@ export class Viewer {
   }
 
   setView(view) {
+    if (view === 'top') view = 'py';
+    if (view === 'side') view = 'pz';
     this.view = view;
     const d = this.dom;
     if (!d) return;
     const cx = d.ox + d.W / 2, cz = d.oz + d.D / 2, cy = Math.min(d.H / 3, 3);
     const c = this.controls;
-    if (view === '3d') {
-      this.camera = this.persp;
-      c.object = this.persp;
-      const R = Math.max(d.W, d.D, d.H * 1.6) * 0.95;
-      this.persp.position.set(cx - R * 0.55, R * 0.62, cz + R * 0.95);
-      c.target.set(cx, cy, cz);
-      c.enableRotate = true;
-      c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-    } else {
+    c.maxPolarAngle = Math.PI * 0.495;
+    this.gGround.visible = view !== 'ny';   // มองจากใต้พื้น: ซ่อนพื้นไม่ให้บังโมเดล
+    if (AXIS_VIEWS[view]) {
+      // มองตามแกน (ภาพฉายตั้งฉาก) — ยังหมุนต่อได้ด้วยการลากซ้าย
+      const [dx, dy, dz] = AXIS_VIEWS[view];
       this.camera = this.ortho;
       c.object = this.ortho;
-      const w = this.host.clientWidth || 1, h = this.host.clientHeight || 1;
-      if (view === 'top') {
-        this.orthoSize = Math.max(d.D, d.W * h / w) * 1.08;
-        this.ortho.position.set(cx, 200, cz + 0.0001);
-        this.ortho.up.set(0, 1, 0);
-        c.target.set(cx, 0, cz);
-      } else {
-        this.orthoSize = Math.max(d.H * 1.25, d.W * h / w * 1.05);
-        this.ortho.position.set(cx, d.H * 0.4, cz + 300);
-        c.target.set(cx, d.H * 0.4, cz);
-      }
+      const w = this.host.clientWidth || 1, h = this.host.clientHeight || 1, a = h / w;
+      const ty = dy ? 0 : d.H * 0.4;
+      const horiz = dx ? d.D : d.W, vert = dy ? d.D : d.H * 1.15;
+      this.orthoSize = Math.max(vert, horiz * a) * 1.1;
+      const R = 300;
+      // เหลื่อมเล็กน้อยตอนมองจากบน/ล่าง กันกล้องตั้งฉากกับแกน up พอดี (ทิศเหนืออยู่ด้านบนภาพ)
+      this.ortho.position.set(cx + dx * R, ty + dy * R, cz + dz * R + (dy ? 0.001 : 0));
+      this.ortho.up.set(0, 1, 0);
+      c.target.set(cx, ty, cz);
+      c.maxPolarAngle = Math.PI;
       this.ortho.zoom = 1;
       this.#fitOrtho();
-      c.enableRotate = false;
-      c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+      c.enableRotate = true;
+      c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+      this.camera.updateProjectionMatrix();
+      c.update();
+      return;
     }
+    // มุมมอง 3 มิติ (perspective)
+    this.camera = this.persp;
+    c.object = this.persp;
+    const R = Math.max(d.W, d.D, d.H * 1.6) * 0.95;
+    this.persp.position.set(cx - R * 0.55, R * 0.62, cz + R * 0.95);
+    c.target.set(cx, cy, cz);
+    c.enableRotate = true;
+    c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     this.camera.updateProjectionMatrix();
     c.update();
   }
@@ -225,7 +233,9 @@ export class Viewer {
 
   /** ความทึบของวัตถุ (1 = ทึบ) — คูณกับความโปร่งเดิมของวัสดุ เช่น louver */
   #applyOpacity(g) {
-    const k = this.display.objOpacity;
+    // CDU คงทึบเสมอ ให้เห็นตัวเครื่องและสีผลชัด — โปร่งเฉพาะผนัง อาคาร พื้น/หลังคา
+    const isCdu = this.objects?.find(q => q.id === g.userData.objId)?.type === 'cdu';
+    const k = isCdu ? 1 : this.display.objOpacity;
     g.traverse(m => {
       if (!m.isMesh || m === g.userData.outline) return;
       for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
@@ -244,7 +254,7 @@ export class Viewer {
     if (o.type === 'cdu') {
       html = `<b>${esc(o.name)}</b> · ${esc(getModel(o.model).id)}`;
       const r = this.results?.units?.find(u => u.id === o.id);
-      if (r) html += `<span class="lbl-res st-${r.status.key}">${r.Tin.toFixed(1)} °C · +${r.dT.toFixed(1)} K</span>`;
+      if (r) html += `<span class="lbl-res st-${r.status.key}">${r.Tin.toFixed(1)} °C · +${r.dT.toFixed(1)} °C</span>`;
     } else if (o.type === 'wall') {
       html = `${esc(o.name)} · ${fmt(o.height)} m · ${o.louver > 0 ? 'louver ' + o.louver + '%' : 'ทึบ'}`;
     } else if (o.type === 'slab') {
@@ -705,18 +715,43 @@ export class Viewer {
     }
     const [lo, hi] = this.fieldRange();
     const span = Math.max(1e-6, hi - lo);
-    const buf = new Uint8Array(cols * rows * 4);
+    // ค่าและชนิดเซลล์บนหน้าตัด (ความละเอียดเท่าเมช)
+    const val = new Float32Array(cols * rows), sol = new Uint8Array(cols * rows);
     for (let b = 0; b < rows; b++)
       for (let a = 0; a < cols; a++) {
-        const c = idx(a, b), o = (a + b * cols) * 4;
-        if (M.type[c] === 1) { buf[o] = 128; buf[o + 1] = 136; buf[o + 2] = 146; buf[o + 3] = 255; continue; }
-        // contour: ปัดเป็นขั้นสี
-        const t = Math.min(CONTOUR_LEVELS - 1, Math.max(0, Math.floor((this.fieldValue(c) - lo) / span * CONTOUR_LEVELS)));
-        const col = rgb((t + 0.5) / CONTOUR_LEVELS);
+        const c = idx(a, b), q = a + b * cols;
+        if (M.type[c] === 1) sol[q] = 1; else val[q] = this.fieldValue(c);
+      }
+    // ภาพละเอียดกว่าเมช: แต่ละเซลล์แบ่งเป็น f×f พิกเซล ค่าแทรกแบบ bilinear จากศูนย์กลางเซลล์รอบข้าง
+    // (ข้ามเซลล์ของแข็ง) แล้วปัดเป็นขั้นสี → เส้นแบ่งขั้นสีเรียบ ไม่เป็นขั้นบันไดตามเซลล์
+    const f = Math.max(1, Math.min(8, Math.floor(2048 / Math.max(cols, rows))));
+    const W = cols * f, H = rows * f;
+    const buf = new Uint8Array(W * H * 4);
+    const lut = [];
+    for (let t = 0; t < CONTOUR_LEVELS; t++) lut.push(rgb((t + 0.5) / CONTOUR_LEVELS));
+    for (let pb = 0; pb < H; pb++) {
+      const fb = (pb + 0.5) / f - 0.5, cb = Math.floor((pb + 0.5) / f);
+      const b0 = Math.max(0, Math.min(rows - 1, Math.floor(fb))), b1 = Math.min(rows - 1, b0 + 1);
+      const tb = Math.max(0, Math.min(1, fb - b0));
+      for (let pa = 0; pa < W; pa++) {
+        const o = (pa + pb * W) * 4;
+        const ca = Math.floor((pa + 0.5) / f);
+        if (sol[ca + cb * cols]) { buf[o] = 128; buf[o + 1] = 136; buf[o + 2] = 146; buf[o + 3] = 255; continue; }
+        const fa = (pa + 0.5) / f - 0.5;
+        const a0 = Math.max(0, Math.min(cols - 1, Math.floor(fa))), a1 = Math.min(cols - 1, a0 + 1);
+        const ta = Math.max(0, Math.min(1, fa - a0));
+        let sw = 0, sv = 0;
+        const add = (a, b, wgt) => { const q = a + b * cols; if (!sol[q] && wgt > 0) { sw += wgt; sv += wgt * val[q]; } };
+        add(a0, b0, (1 - ta) * (1 - tb)); add(a1, b0, ta * (1 - tb));
+        add(a0, b1, (1 - ta) * tb); add(a1, b1, ta * tb);
+        const v = sw > 1e-9 ? sv / sw : val[ca + cb * cols];
+        const t = Math.min(CONTOUR_LEVELS - 1, Math.max(0, Math.floor((v - lo) / span * CONTOUR_LEVELS)));
+        const col = lut[t];
         buf[o] = col[0]; buf[o + 1] = col[1]; buf[o + 2] = col[2]; buf[o + 3] = 238;
       }
-    const tex = new THREE.DataTexture(buf, cols, rows, THREE.RGBAFormat);
-    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter;
+    }
+    const tex = new THREE.DataTexture(buf, W, H, THREE.RGBAFormat);
+    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     if (m.map) m.map.dispose();
@@ -1036,7 +1071,7 @@ export class Viewer {
       const tMax = Math.max(...u.modules.map(q => q.Tin));
       html += `<div class="pop-row pop-big"><span>อุณหภูมิลมกลับ</span><b class="mono">${chip(tMax)}${u.Tin.toFixed(1)} °C</b></div>
         <div class="pop-row"><span>จุดร้อนสุดหน้าคอยล์</span><span class="mono">${u.TinMax.toFixed(1)} °C</span></div>
-        <div class="pop-row"><span>สูงกว่าอากาศภายนอก</span><span class="mono st-${u.status.key}">+${u.dT.toFixed(2)} K</span></div>
+        <div class="pop-row"><span>สูงกว่าอากาศภายนอก</span><span class="mono st-${u.status.key}">+${u.dT.toFixed(2)} °C</span></div>
         <div class="pop-row"><span>capacity ที่ได้</span><span class="mono">${(u.capF * 100).toFixed(1)}%</span></div>`;
       if (u.modules.length > 1)
         html += `<div class="pop-mods">${u.modules.map((q, i) => `<span>${chip(q.Tin)}โมดูล ${i + 1}: <b class="mono">${q.Tin.toFixed(1)} °C</b></span>`).join('')}</div>`;
@@ -1415,6 +1450,11 @@ export class Viewer {
 }
 
 /* ───────── เครื่องมือช่วย ───────── */
+
+/** มุมมองตามแกน: ทิศจากเป้าหมายไปหากล้อง (เช่น 'px' = มองจากด้าน +X เข้าหา −X) */
+export const AXIS_VIEWS = {
+  px: [1, 0, 0], nx: [-1, 0, 0], py: [0, 1, 0], ny: [0, -1, 0], pz: [0, 0, 1], nz: [0, 0, -1],
+};
 
 function clampI(v, a, b) { return v < a ? a : v > b ? b : v; }
 function fmt(v) { return (Math.round(v * 100) / 100).toString(); }

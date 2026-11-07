@@ -38,7 +38,7 @@ export function cssGradient(levels = 0) {
 /** ตัวแปรที่แสดงผลได้ พร้อมหน่วยและวิธีกำหนดช่วงสเกล */
 export const FIELDS = {
   T: { label: 'อุณหภูมิ', unit: '°C', digits: 1 },
-  dT: { label: 'อุณหภูมิเกินอากาศภายนอก', unit: 'K', digits: 1 },
+  dT: { label: 'อุณหภูมิเกินอากาศภายนอก', unit: '°C', digits: 1 },
   C: { label: 'สัดส่วนลมร้อนจาก CDU', unit: '%', digits: 0 },
   V: { label: 'ความเร็วลม', unit: 'm/s', digits: 2 },
   P: { label: 'ความดันเทียบบรรยากาศ', unit: 'Pa', digits: 2 },
