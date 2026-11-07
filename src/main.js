@@ -156,6 +156,67 @@ function rotateSelected() {
   });
 }
 
+/* ───────── คัดลอก / ตัด / วาง (Ctrl+C / X / V) ───────── */
+
+let clipboard = null, pasteN = 0;
+
+function copySelected(cut = false) {
+  const o = selected();
+  if (!o) { toast('เลือกวัตถุก่อน แล้วกด Ctrl+C'); return; }
+  clipboard = JSON.parse(JSON.stringify(o));
+  pasteN = 0;
+  if (cut) {
+    edit(() => { scene.objects = scene.objects.filter(q => q.id !== o.id); selectedId = null; });
+    toast(`ตัด ${o.name} แล้ว — ชี้เมาส์ตรงจุดที่ต้องการแล้วกด Ctrl+V`);
+  } else toast(`คัดลอก ${o.name} แล้ว — ชี้เมาส์ตรงจุดที่ต้องการแล้วกด Ctrl+V (วางซ้ำได้)`);
+}
+
+const refPoint = o => (o.type === 'wall' ? { x: (o.x1 + o.x2) / 2, z: (o.z1 + o.z2) / 2 } : { x: o.x, z: o.z });
+/** ระดับผิวแผ่นพื้น/หลังคาที่รองรับ ณ จุด (x, z) */
+const supportAt = (x, z) => scene.objects.filter(s => s.type === 'slab' && insideRect(s, x, z)).reduce((m, s) => Math.max(m, s.y), 0);
+
+function pasteClipboard() {
+  if (!clipboard) { toast('ยังไม่ได้คัดลอก — เลือกวัตถุแล้วกด Ctrl+C ก่อน'); return; }
+  const src = clipboard, r = refPoint(src);
+  // วาง ณ ตำแหน่งเมาส์บนพื้น — ถ้าเมาส์ไม่อยู่บนมุมมอง วางเยื้องจากต้นฉบับทีละ 1 ม.
+  let p = viewer.cursorPoint();
+  if (!p) { pasteN++; p = { x: r.x + pasteN, z: r.z + pasteN }; }
+  const dx = p.x - r.x, dz = p.z - r.z;
+  edit(() => {
+    const c = makeObject(scene, src.type, { ...src, id: undefined, name: undefined });
+    if (c.type === 'wall') { c.x1 = round3(c.x1 + dx); c.x2 = round3(c.x2 + dx); c.z1 = round3(c.z1 + dz); c.z2 = round3(c.z2 + dz); }
+    else { c.x = round3(c.x + dx); c.z = round3(c.z + dz); }
+    viewer.keepInside(c);
+    // CDU: คงระยะฐานเหนือพื้นรองรับ (ย้ายจากหลังคาลงพื้นหรือกลับกันได้ถูกต้อง)
+    if (c.type === 'cdu') c.elev = round2(Math.max(0, src.elev - supportAt(src.x, src.z)) + supportAt(c.x, c.z));
+    scene.objects.push(c);
+    selectedId = c.id;
+  });
+}
+
+/** Tab / Shift+Tab: เลือกวัตถุถัดไป/ก่อนหน้า (ช่วยเลือกวัตถุที่ถูกบังหรือซ้อนกัน) */
+function cycleSelection(dir) {
+  const list = scene.objects;
+  if (!list.length) return;
+  const i = list.findIndex(o => o.id === selectedId);
+  const n = i < 0 ? (dir > 0 ? 0 : list.length - 1) : (i + dir + list.length) % list.length;
+  if (tool !== 'select') setTool('select');
+  select(list[n].id);
+}
+
+let ortho = false;
+function setOrtho(on) {
+  ortho = on;
+  viewer.setOrtho(on);
+  $('#btn-ortho').classList.toggle('on', on);
+  toast(on ? 'Ortho เปิด — ผนังล็อกตามแนวแกน X/Z (Shift = ปลดชั่วคราว)' : 'Ortho ปิด', 1600);
+}
+
+function toggleKeys(show) {
+  const el = $('#keys-pop');
+  el.hidden = show === undefined ? !el.hidden : !show;
+}
+
 function nudge(dx, dz) {
   const o = selected();
   if (!o) return;
@@ -169,7 +230,7 @@ function nudge(dx, dz) {
 
 const TOOL_HINT = {
   cdu: 'คลิกบนพื้นภายในกริดแกนเพื่อวาง CDU · วางต่อได้หลายตัว · คลิกโดนวัตถุเดิม = เลือกเพื่อแก้ไข · Esc เพื่อจบ',
-  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้ ภายในกริดแกน) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · Shift ล็อกแนวตรง · คลิกกลางผนังเดิม = เลือก · ดับเบิลคลิก/Esc เพื่อจบ',
+  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้ ภายในกริดแกน) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · F8 Ortho / Shift ล็อกแนวแกน · คลิกกลางผนังเดิม = เลือก · ดับเบิลคลิก/Esc เพื่อจบ',
   slab: 'คลิกมุมหนึ่งของแผ่นพื้น/หลังคา แล้วคลิกมุมตรงข้าม · ตั้งระดับความสูงที่แผงด้านขวา · Esc เพื่อจบ',
   building: 'คลิกมุมหนึ่งของอาคาร แล้วคลิกมุมตรงข้าม · Esc เพื่อจบ',
 };
@@ -1183,6 +1244,7 @@ function toast(text, ms = 3200) {
 
 function fmt(v) { return String(Math.round(v * 100) / 100); }
 function round2(v) { return Math.round(v * 100) / 100; }
+function round3(v) { return Math.round(v * 1000) / 1000; }
 function fmtK(n) { return n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n); }
 function fmtDur(s) {
   if (!isFinite(s)) return '–';
@@ -1234,6 +1296,9 @@ function bindUI() {
   });
   $$('.vt').forEach(b => b.addEventListener('click', () => setViewUI(b.dataset.view)));
   $('#btn-undo').addEventListener('click', undo);
+  $('#btn-ortho').addEventListener('click', () => setOrtho(!ortho));
+  $('#btn-keys').addEventListener('click', () => toggleKeys());
+  $('#keys-pop .keys-x').addEventListener('click', () => toggleKeys(false));
   $('#btn-redo').addEventListener('click', redo);
   $('#btn-run').addEventListener('click', startOrToggle);
   $('#btn-reset').addEventListener('click', resetResults);
@@ -1307,11 +1372,24 @@ function bindUI() {
   window.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    // ใช้ปุ่มจริงบนคีย์บอร์ด (e.code) ให้คีย์ลัดทำงานแม้เปิดแป้นพิมพ์ภาษาไทยอยู่
+    const c = e.code || '';
+    const k = c.startsWith('Key') ? c.slice(3).toLowerCase()
+      : /^(Digit|Numpad)\d$/.test(c) ? c.slice(-1)
+      : c === 'Period' || c === 'NumpadDecimal' ? '.'
+      : c === 'Slash' && e.shiftKey ? '?'
+      : e.key.toLowerCase();
     // ระหว่างลากผนัง: พิมพ์ตัวเลขความยาวแล้วกด Enter
-    if (!(e.ctrlKey || e.metaKey) && viewer.typeLength(e.key)) { e.preventDefault(); return; }
+    const typed = /^[0-9.]$/.test(k) ? k : e.key;
+    if (!(e.ctrlKey || e.metaKey) && viewer.typeLength(typed)) { e.preventDefault(); return; }
     const ctrl = e.ctrlKey || e.metaKey;
-    const k = e.key.toLowerCase();
+    if (!$('#keys-pop').hidden && (k === 'escape' || k === '?')) { toggleKeys(false); return; }
+    if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (ctrl && k === 'c') { if (selected()) { e.preventDefault(); copySelected(); } }
+    else if (ctrl && k === 'x') { if (selected()) { e.preventDefault(); copySelected(true); } }
+    else if (ctrl && k === 'v') { e.preventDefault(); pasteClipboard(); }
+    else if (ctrl && k === 'l') { e.preventDefault(); setTool('wall'); }
     else if (ctrl && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
     else if (ctrl && k === 'd') { e.preventDefault(); duplicateSelected(); }
     else if (ctrl && k === 's') { e.preventDefault(); saveProject(); }
@@ -1324,7 +1402,10 @@ function bindUI() {
     else if (k === 'r') rotateSelected();
     else if (k === 'v') setTool('select');
     else if (k === 'c') setTool('cdu');
-    else if (k === 'w') setTool('wall');
+    else if (k === 'w' || k === 'l') setTool('wall');
+    else if (k === 'o') setOrtho(!ortho);
+    else if (k === '?') toggleKeys();
+    else if (k === 'tab' && (e.target === document.body || e.target.tagName === 'CANVAS')) { e.preventDefault(); cycleSelection(e.shiftKey ? -1 : 1); }
     else if (k === 'b') setTool('building');
     else if (k === 'f') setTool('slab');
     else if (k === 'p') captureView();

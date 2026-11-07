@@ -50,7 +50,8 @@ export function cloneBC(bc) {
 }
 
 export function nextId(scene) {
-  return scene.objects.reduce((m, o) => Math.max(m, o.id), 0) + 1;
+  // ข้าม id ที่ไม่ใช่ตัวเลข (ป้องกัน NaN ลามไปทุกวัตถุใหม่จนคลิกเลือกไม่ได้)
+  return scene.objects.reduce((m, o) => (Number.isFinite(o.id) ? Math.max(m, o.id) : m), 0) + 1;
 }
 
 export function nextName(scene, type) {
@@ -61,8 +62,10 @@ export function nextName(scene, type) {
   return prefix + n;
 }
 
-export function makeObject(scene, type, props = {}) {
-  const base = { id: nextId(scene), type, name: nextName(scene, type) };
+export function makeObject(scene, type, input = {}) {
+  // id/name ที่ไม่ได้ระบุ (รวมถึง undefined ตอนทำสำเนา/วาง) ต้องไม่ทับค่าที่สร้างใหม่
+  const { id, name, type: _t, ...props } = input;
+  const base = { id: Number.isFinite(id) ? id : nextId(scene), type, name: name || nextName(scene, type) };
   if (type === 'cdu') return { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, airflow: null, ...props };
   if (type === 'wall') return { ...base, x1: 0, z1: 0, x2: 4, z2: 0, height: 2.4, thick: 0.15, louver: 50, gap: 0, ...props };
   if (type === 'slab') return { ...base, x: 0, z: 0, w: 5, d: 4, y: 3, thick: 0.2, rot: 0, open: 0, ...props };

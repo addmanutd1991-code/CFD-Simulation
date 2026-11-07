@@ -215,6 +215,17 @@ table.doc th { background: var(--panel-2); color: var(--muted); font-weight: 500
 table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
 .kbd-list { line-height: 2; }
 
+.keys-pop {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 60; width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px); overflow: auto; background: #12202c; border: 1px solid var(--accent); border-radius: 10px;
+  padding: 14px 18px 16px; box-shadow: 0 16px 40px rgba(0,0,0,.5); font-size: 13.5px;
+}
+.keys-pop h3 { margin: 0 0 8px; }
+.keys-pop .keys-x { position: absolute; top: 6px; right: 8px; border: 0; background: transparent; font-size: 20px; color: var(--muted); cursor: pointer; }
+.keys-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; line-height: 1.9; }
+.keys-grid b { grid-column: 1 / -1; margin-top: 6px; color: var(--accent); }
+@media (max-width: 520px) { .keys-grid { grid-template-columns: 1fr; } }
+
 .foot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50;

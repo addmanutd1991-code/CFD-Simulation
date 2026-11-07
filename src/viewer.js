@@ -27,6 +27,8 @@ export class Viewer {
     this.cb = cb;
     this.tool = 'select';
     this.selectedId = null;
+    this.orthoMode = false;   // ล็อกผนังตามแนวแกน X/Z (F8) — กด Shift เพื่อสลับชั่วคราว
+    this.cursor = null;       // จุดบนพื้นใต้เมาส์ล่าสุด (ใช้วางวัตถุที่คัดลอก)
     this.scene3 = new THREE.Scene();
     this.objects = [];
     this.meshes = new Map();
@@ -1194,6 +1196,21 @@ export class Viewer {
     return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), pt) ? pt : null;
   }
 
+  /** ล็อกแนวแกน: โหมด Ortho (F8) หรือกด Shift — กด Shift ขณะเปิด Ortho = ปลดล็อกชั่วคราว */
+  #lock(e) { return e.shiftKey !== this.orthoMode; }
+
+  setOrtho(on) { this.orthoMode = !!on; }
+
+  /** จุดบนพื้นใต้เมาส์ (ปัด 0.1 ม. และอยู่ในกริดแกน) หรือ null ถ้าเมาส์ไม่อยู่บนมุมมอง */
+  cursorPoint() {
+    if (!this.cursor) return null;
+    const r = v => Math.round(v / SNAP) * SNAP;
+    return this.#clampXZ(r(this.cursor.x), r(this.cursor.z));
+  }
+
+  /** ให้วัตถุอยู่ในกริดแกน (ใช้หลังวางวัตถุที่คัดลอก) */
+  keepInside(o) { this.#keepInside(o); }
+
   /** บีบจุด (x, z) ให้อยู่ในพื้นที่แกน (กริดพื้นของโดเมน) — inset = ระยะเว้นจากขอบ */
   #clampXZ(x, z, ix = 0, iz = 0) {
     const d = this.dom;
@@ -1310,6 +1327,7 @@ export class Viewer {
     }, { capture: true });
 
     el.addEventListener('pointermove', (e) => {
+      this.cursor = this.#ground(e);
       if (drag) { this.#dragMove(e, drag, snap); return; }
       if (this.tool !== 'select') { this.#toolHover(e, snap); return; }
       this.#probe(e);
@@ -1334,7 +1352,7 @@ export class Viewer {
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
-    el.addEventListener('pointerleave', () => this.cb.onProbe?.(null));
+    el.addEventListener('pointerleave', () => { this.cursor = null; this.cb.onProbe?.(null); });
     el.addEventListener('dblclick', () => { if (this.tool === 'wall') this.cancelDraw(); });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -1370,7 +1388,7 @@ export class Viewer {
     if (d.kind === 'end') {
       let { x, z } = this.#clampXZ(snap(g.x, e), snap(g.z, e));
       const ox2 = o[d.end === 1 ? 'x2' : 'x1'], oz2 = o[d.end === 1 ? 'z2' : 'z1'];
-      if (e.shiftKey) { if (Math.abs(x - ox2) > Math.abs(z - oz2)) z = oz2; else x = ox2; }
+      if (this.#lock(e)) { if (Math.abs(x - ox2) > Math.abs(z - oz2)) z = oz2; else x = ox2; }
       o['x' + d.end] = x; o['z' + d.end] = z;
       this.#showDim(e, `${fmt(Math.hypot(o.x2 - o.x1, o.z2 - o.z1))} m`);
     } else if (o.type === 'wall') {
@@ -1403,7 +1421,7 @@ export class Viewer {
     let x = snap(g.x, e), z = snap(g.z, e);
     if (this.tool === 'cdu') { const h = this.#newCduHalf(); ({ x, z } = this.#clampXZ(x, z, h.hx, h.hz)); }
     else ({ x, z } = this.#clampXZ(x, z));
-    this.hover = { x, z, lock: e.shiftKey };
+    this.hover = { x, z, lock: this.#lock(e) };
     const ghost = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.35, depthWrite: false });
     const line = new THREE.LineBasicMaterial({ color: ACCENT });
     if (this.tool === 'cdu') {
@@ -1418,7 +1436,7 @@ export class Viewer {
       this.gPreview.add(dot);
       if (this.draw) {
         let ex = x, ez = z;
-        if (e.shiftKey) { if (Math.abs(ex - this.draw.x) > Math.abs(ez - this.draw.z)) ez = this.draw.z; else ex = this.draw.x; }
+        if (this.#lock(e)) { if (Math.abs(ex - this.draw.x) > Math.abs(ez - this.draw.z)) ez = this.draw.z; else ex = this.draw.x; }
         const L = Math.hypot(ex - this.draw.x, ez - this.draw.z);
         const hgt = this.cb.newWallHeight?.() || 2.4;
         const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01, L), hgt, 0.15), ghost);
@@ -1455,7 +1473,7 @@ export class Viewer {
       this.cb.onCreate('cdu', { x, z });
     } else if (this.tool === 'wall') {
       if (!this.draw) { this.draw = { x, z, sx: x, sz: z, n: 0 }; return; }
-      if (e.shiftKey) { if (Math.abs(x - this.draw.x) > Math.abs(z - this.draw.z)) z = this.draw.z; else x = this.draw.x; }
+      if (this.#lock(e)) { if (Math.abs(x - this.draw.x) > Math.abs(z - this.draw.z)) z = this.draw.z; else x = this.draw.x; }
       if (Math.hypot(x - this.draw.x, z - this.draw.z) < 0.2) return;
       this.cb.onCreate('wall', { x1: this.draw.x, z1: this.draw.z, x2: x, z2: z });
       const closed = this.draw.n >= 1 && Math.hypot(x - this.draw.sx, z - this.draw.sz) < 0.25;
