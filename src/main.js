@@ -31,12 +31,15 @@ const compare = [];
 
 const viewer = new Viewer($('#viewport'), {
   onSelect: (id) => select(id),
+  // คลิกโดนวัตถุเดิมขณะถือเครื่องมือวาง → กลับโหมดเลือกแล้วเลือกวัตถุนั้น (ไม่วางซ้ำทับ)
+  onPickWhileTool: (id) => { setTool('select'); select(id); },
   onBeginEdit: () => pushUndo(),
   onObjectEdited: () => afterChange(true),
   onCreate: (type, props) => createObject(type, props),
   onSectionMoved: (pos) => syncSectionUI(pos),
   onProbe: (info) => showProbe(info),
   newCduModel: () => lastUsed.model,
+  newCduRot: () => lastUsed.rot,
   newWallHeight: () => lastUsed.wallHeight,
 });
 
@@ -165,8 +168,8 @@ function nudge(dx, dz) {
 /* ───────── เครื่องมือ ───────── */
 
 const TOOL_HINT = {
-  cdu: 'คลิกบนพื้นเพื่อวาง CDU · วางต่อได้หลายตัว · Esc เพื่อจบ',
-  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · Shift ล็อกแนวตรง · ดับเบิลคลิก/Esc เพื่อจบ',
+  cdu: 'คลิกบนพื้นภายในกริดแกนเพื่อวาง CDU · วางต่อได้หลายตัว · คลิกโดนวัตถุเดิม = เลือกเพื่อแก้ไข · Esc เพื่อจบ',
+  wall: 'คลิกจุดเริ่ม แล้วคลิกจุดถัดไป (ต่อเนื่องได้ ภายในกริดแกน) · พิมพ์ความยาว (ม.) + Enter ตามทิศเมาส์ · Shift ล็อกแนวตรง · คลิกกลางผนังเดิม = เลือก · ดับเบิลคลิก/Esc เพื่อจบ',
   slab: 'คลิกมุมหนึ่งของแผ่นพื้น/หลังคา แล้วคลิกมุมตรงข้าม · ตั้งระดับความสูงที่แผงด้านขวา · Esc เพื่อจบ',
   building: 'คลิกมุมหนึ่งของอาคาร แล้วคลิกมุมตรงข้าม · Esc เพื่อจบ',
 };

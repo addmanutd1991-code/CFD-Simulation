@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { unitModules, unitSize, getModel } from './models.js';
-import { cduFootprint, slabRange, insideRect } from './scene.js';
+import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
 
 const ACCENT = 0x4fc3f7;
@@ -1153,7 +1153,8 @@ export class Viewer {
       const n = Math.hypot(ux, uz);
       if (!(L > 0.05) || n < 1e-6) return true;
       const r3 = v => Math.round(v * 1000) / 1000;
-      const x = r3(d.x + ux / n * L), z = r3(d.z + uz / n * L);
+      const { x, z } = this.#clampXZ(r3(d.x + ux / n * L), r3(d.z + uz / n * L));
+      if (Math.hypot(x - d.x, z - d.z) < 0.05) return true;
       this.cb.onCreate('wall', { x1: d.x, z1: d.z, x2: x, z2: z });
       this.draw = { ...d, x, z, n: d.n + 1, typed: '' };
     } else return false;
@@ -1193,6 +1194,61 @@ export class Viewer {
     return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), pt) ? pt : null;
   }
 
+  /** บีบจุด (x, z) ให้อยู่ในพื้นที่แกน (กริดพื้นของโดเมน) — inset = ระยะเว้นจากขอบ */
+  #clampXZ(x, z, ix = 0, iz = 0) {
+    const d = this.dom;
+    if (!d) return { x, z };
+    const cl = (v, a, b) => (a > b ? (a + b) / 2 : Math.min(b, Math.max(a, v)));
+    const r = v => Math.round(v * 1000) / 1000;
+    return { x: r(cl(x, d.ox + ix, d.ox + d.W - ix)), z: r(cl(z, d.oz + iz, d.oz + d.D - iz)) };
+  }
+
+  /** เลื่อนวัตถุทั้งชิ้นกลับเข้ามาในพื้นที่แกน ถ้ามีส่วนใดล้นขอบ */
+  #keepInside(o) {
+    const d = this.dom;
+    if (!d) return;
+    const b = objectBounds(o);
+    const shift = (lo, hi, a, w) => (hi - lo > w ? a + w / 2 - (lo + hi) / 2 : lo < a ? a - lo : hi > a + w ? a + w - hi : 0);
+    const dx = shift(b.x0, b.x1, d.ox, d.W), dz = shift(b.z0, b.z1, d.oz, d.D);
+    if (!dx && !dz) return;
+    const r = v => Math.round(v * 1000) / 1000;
+    if (o.type === 'wall') { o.x1 = r(o.x1 + dx); o.x2 = r(o.x2 + dx); o.z1 = r(o.z1 + dz); o.z2 = r(o.z2 + dz); }
+    else { o.x = r(o.x + dx); o.z = r(o.z + dz); }
+  }
+
+  /** ระยะครึ่งรอยเท้าของ CDU ใหม่ (ใช้เว้นขอบตอนวาง) */
+  #newCduHalf() {
+    const fp = cduFootprint({ model: this.cb.newCduModel?.() || 'RXQ16BY1S', rot: this.cb.newCduRot?.() || 0 });
+    return { hx: fp.sx / 2, hz: fp.sz / 2 };
+  }
+
+  /** วัตถุที่ถูกชี้ (ให้ CDU/ผนังมาก่อนแผ่นพื้นที่บังอยู่ด้านบน) */
+  #hitObject(e) {
+    const hits = this.#pick(e).intersectObjects(this.gObjects.children, true);
+    if (!hits.length) return null;
+    const isSlab = (h) => this.objects.find(q => q.id === h.object.userData.objId)?.type === 'slab';
+    const hit = hits.find(h => h.object.userData.objId != null && !isSlab(h)) || hits[0];
+    return hit.object.userData.objId != null ? this.objects.find(q => q.id === hit.object.userData.objId) || null : null;
+  }
+
+  /**
+   * ขณะใช้เครื่องมือวาง (CDU/ผนัง) แล้วคลิกโดนวัตถุที่มีอยู่ → เลือกวัตถุนั้นแทนการวางซ้ำทับ
+   * (ผนัง: ถ้าคลิกใกล้ปลายผนังเดิม ยังเริ่มลากผนังต่อจากมุมได้ตามปกติ)
+   */
+  #pickInsteadOfCreate(e, snap) {
+    if (this.draw || (this.tool !== 'cdu' && this.tool !== 'wall')) return null;
+    const o = this.#hitObject(e);
+    if (!o || o.type === 'slab' || o.type === 'building') return null;
+    if (this.tool === 'wall' && o.type === 'wall') {
+      const g = this.#ground(e);
+      if (g) {
+        const x = snap(g.x, e), z = snap(g.z, e);
+        if (Math.hypot(x - o.x1, z - o.z1) < 0.35 || Math.hypot(x - o.x2, z - o.z2) < 0.35) return null;
+      }
+    }
+    return o;
+  }
+
   #initInput() {
     const el = this.renderer.domElement;
     const snap = (v, e) => e.altKey ? Math.round(v * 100) / 100 : Math.round(v / SNAP) * SNAP;
@@ -1209,6 +1265,12 @@ export class Viewer {
       if (e.button !== 0) return;
       if (this.tool !== 'select') {
         e.stopPropagation();
+        const o = this.#pickInsteadOfCreate(e, snap);
+        if (o) {
+          this.#clearPreview();
+          this.cb.onPickWhileTool ? this.cb.onPickWhileTool(o.id) : this.cb.onSelect(o.id);
+          return;
+        }
         this.#toolClick(e, snap);
         return;
       }
@@ -1306,7 +1368,7 @@ export class Viewer {
     if (!o || !g) return;
     if (!d.moved) { this.cb.onBeginEdit?.(); d.moved = true; }
     if (d.kind === 'end') {
-      let x = snap(g.x, e), z = snap(g.z, e);
+      let { x, z } = this.#clampXZ(snap(g.x, e), snap(g.z, e));
       const ox2 = o[d.end === 1 ? 'x2' : 'x1'], oz2 = o[d.end === 1 ? 'z2' : 'z1'];
       if (e.shiftKey) { if (Math.abs(x - ox2) > Math.abs(z - oz2)) z = oz2; else x = ox2; }
       o['x' + d.end] = x; o['z' + d.end] = z;
@@ -1315,8 +1377,10 @@ export class Viewer {
       const nx = snap(g.x + d.off.x, e), nz = snap(g.z + d.off.z, e);
       const dx = nx - o.x1, dz = nz - o.z1;
       o.x1 += dx; o.x2 += dx; o.z1 += dz; o.z2 += dz;
+      this.#keepInside(o);
     } else {
       o.x = snap(g.x + d.off.x, e); o.z = snap(g.z + d.off.z, e);
+      this.#keepInside(o);
       this.#showDim(e, `x ${fmt(o.x)} · z ${fmt(o.z)}`);
     }
     this.refreshObject(o);
@@ -1336,12 +1400,14 @@ export class Viewer {
     const g = this.#ground(e);
     this.#clearPreview();
     if (!g) return;
-    const x = snap(g.x, e), z = snap(g.z, e);
+    let x = snap(g.x, e), z = snap(g.z, e);
+    if (this.tool === 'cdu') { const h = this.#newCduHalf(); ({ x, z } = this.#clampXZ(x, z, h.hx, h.hz)); }
+    else ({ x, z } = this.#clampXZ(x, z));
     this.hover = { x, z, lock: e.shiftKey };
     const ghost = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.35, depthWrite: false });
     const line = new THREE.LineBasicMaterial({ color: ACCENT });
     if (this.tool === 'cdu') {
-      const fp = cduFootprint({ model: this.cb.newCduModel?.() || 'RXQ16BY1S', rot: 0 });
+      const fp = cduFootprint({ model: this.cb.newCduModel?.() || 'RXQ16BY1S', rot: this.cb.newCduRot?.() || 0 });
       const m = new THREE.Mesh(new THREE.BoxGeometry(fp.sx, fp.h, fp.sz), ghost);
       m.position.set(x, fp.h / 2 + 0.2, z);
       this.gPreview.add(m);
@@ -1382,6 +1448,9 @@ export class Viewer {
     const g = this.#ground(e);
     if (!g) return;
     let x = snap(g.x, e), z = snap(g.z, e);
+    // วางได้เฉพาะในพื้นที่แกน (กริดพื้นของโดเมน) — คลิกนอกขอบจะถูกดึงเข้ามาที่ขอบ
+    if (this.tool === 'cdu') { const h = this.#newCduHalf(); ({ x, z } = this.#clampXZ(x, z, h.hx, h.hz)); }
+    else ({ x, z } = this.#clampXZ(x, z));
     if (this.tool === 'cdu') {
       this.cb.onCreate('cdu', { x, z });
     } else if (this.tool === 'wall') {
