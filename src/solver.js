@@ -2,7 +2,8 @@
  * solver.js — เครื่องคำนวณ CFD สามมิติสำหรับลมร้อนจากคอยล์ร้อน
  *
  * สมการ: Navier–Stokes แบบอัดตัวไม่ได้ + Boussinesq + สมการพลังงาน + สารติดตาม (tracer)
- * กริด: สม่ำเสมอ แบบ staggered (MAC) ความเร็วอยู่บนหน้าเซลล์ ความดัน/อุณหภูมิอยู่กลางเซลล์
+ * กริด: rectilinear แบบ staggered (MAC) เซลล์กว้างไม่เท่ากันได้ (ดู grid.js)
+ *       ความเร็วอยู่บนหน้าเซลล์ ความดัน/อุณหภูมิอยู่กลางเซลล์
  *
  *   ความเร็ว     : Semi-Lagrangian (เสถียรที่ CFL > 1) + ความหนืดปั่นป่วน Smagorinsky
  *   ความดัน      : Projection, สมการ Poisson แก้ด้วย Red–Black SOR แบบ warm start
@@ -10,9 +11,9 @@
  *   CDU          : หน้าพัดลม/หน้าคอยล์กำหนดความเร็ว, อุณหภูมิลมเป่าคำนวณจากลมเข้า + ความร้อนทิ้ง
  *                  ซึ่งขึ้นกับอุณหภูมิลมเข้าเอง (ป้อนกลับทุกสเต็ป)
  *
- * ความเร็ว: ลูปหนัก (advection, turbulence, diffusion, projection, transport) มีสองชุดที่ให้ผลตรงกัน
- * ทุกบิต — WebAssembly (src/kernels.c, เร็วกว่าราว 1.7 เท่า) และ JavaScript ในไฟล์นี้ (ใช้เมื่อโหลด
- * WebAssembly ไม่ได้)
+ * ลูปหนักทั้งหมด (advection, turbulence, diffusion, projection, transport, residual) อยู่ใน
+ * src/kernels.c (WebAssembly, แบ่งงานตามชั้น k ให้หลายเธรดเมื่อใช้ได้) ไฟล์นี้เป็นตัวจัดลำดับงาน
+ * เงื่อนไขขอบ และการติดตามผล
  *
  * ไม่มีการอ้างถึง DOM — ใช้ได้ทั้งใน Web Worker และ main thread
  */
@@ -34,9 +35,49 @@ export const CONV = {
   tMin: 60,          // s — เวลาขั้นต่ำก่อนเริ่มตัดสิน (ให้ลมร้อนเดินทางทั่วโดเมน)
   drift: 0.05,       // K — ค่าเฉลี่ย 10 s ล่าสุดของ T ลมเข้าเทียบ 10 s ก่อนหน้า
   balLo: 0.95, balHi: 1.05,
-  mass: 0.01,        // RMS(∇·u)·h / u_max หลัง projection
+  mass: 0.01,        // RMS(∇·u)·L / u_max หลัง projection (L = ขนาดเซลล์)
   hold: 6,
 };
+
+/* ลำดับช่องต้องตรงกับ struct Ctx, enum AX_*, และ enum P_* ใน kernels.c */
+const CTX = ['nx', 'ny', 'nz', 'NX', 'NY', 'NZ', 'sy', 'sz', 'N', 'nthreads',
+  'u', 'v', 'w', 'u0', 'v0', 'w0', 'T', 'T0', 'C', 'C0', 'phi', 'rhs', 'nut', 'idg',
+  'pu', 'pv', 'pw', 'pT', 'type', 'fx', 'pm', 'axx', 'axy', 'axz', 'red', 'scratch', 'par'];
+const SLOT = Object.fromEntries(CTX.map((n, i) => [n, i]));
+const AXT = { F: 0, C: 1, D: 2, RD: 3, RDC: 4, WF: 5, PM: 6, PP: 7, FM: 8, FP: 9, R2: 10, Q23: 11, RD2: 12, CB: 13, COUNT: 14 };
+const PAR = Object.fromEntries(['DT', 'KB', 'AMB', 'CS2', 'NUMIN', 'OMEGA', 'KA',
+  'MAXU', 'MAXV', 'MAXW', 'RATE', 'OUT', 'E2', 'QOUT', 'DE', 'DU2', 'DT2'].map((n, i) => [n, i]));
+const RED = 8;
+const SWAP = ['u', 'v', 'w', 'u0', 'v0', 'w0', 'T', 'T0', 'C', 'C0'];
+const F32 = ['u', 'v', 'w', 'u0', 'v0', 'w0', 'T', 'T0', 'C', 'C0', 'phi', 'rhs', 'nut', 'idg', 'pu', 'pv', 'pw', 'pT'];
+
+/** ตารางระยะและสัมประสิทธิ์ของหนึ่งแกน จากพิกัดหน้าเซลล์ f[0..n] (n เซลล์ภายใน) */
+function axisTables(f) {
+  const n = f.length - 1, NA = n + 2, L = NA + 2;
+  const t = new Float64Array(AXT.COUNT * L);
+  const at = (q, i) => q * L + i;
+  const F = i => t[at(AXT.F, i)], d = i => t[at(AXT.D, i)], rd = i => t[at(AXT.RD, i)], C = i => t[at(AXT.C, i)], rdc = i => t[at(AXT.RDC, i)];
+  for (let i = 1; i <= n + 1; i++) t[at(AXT.F, i)] = f[i - 1];
+  t[at(AXT.F, 0)] = f[0] - (f[1] - f[0]);
+  t[at(AXT.F, NA)] = f[n] + (f[n] - f[n - 1]);
+  for (let i = 0; i < NA; i++) {
+    const w = F(i + 1) - F(i);
+    t[at(AXT.D, i)] = w; t[at(AXT.RD, i)] = 1 / w; t[at(AXT.C, i)] = 0.5 * (F(i) + F(i + 1));
+    t[at(AXT.Q23, i)] = Math.cbrt(w) ** 2; t[at(AXT.RD2, i)] = 1 / (w * w); t[at(AXT.CB, i)] = Math.cbrt(w);
+  }
+  t[at(AXT.RDC, 0)] = rd(0); t[at(AXT.RDC, NA)] = rd(NA - 1);
+  for (let i = 1; i < NA; i++) t[at(AXT.RDC, i)] = 1 / (C(i) - C(i - 1));
+  t[at(AXT.WF, 0)] = 0.5;
+  for (let i = 0; i < NA; i++) {
+    if (i >= 1) {
+      t[at(AXT.WF, i)] = 0.5 * d(i - 1) * rdc(i);
+      t[at(AXT.FM, i)] = rdc(i) * rd(i - 1); t[at(AXT.FP, i)] = rdc(i) * rd(i);
+    }
+    t[at(AXT.PM, i)] = rd(i) * rdc(i); t[at(AXT.PP, i)] = rd(i) * rdc(i + 1);
+    if (i >= 1 && i <= NA - 2) t[at(AXT.R2, i)] = 1 / (C(i + 1) - C(i - 1));
+  }
+  return { t, L, NA };
+}
 
 export class Solver {
   constructor(mesh, params) {
@@ -60,31 +101,34 @@ export class Solver {
     this.cp = AIR_CP;
     this.beta = 1 / (this.amb + 273.15);
 
-    // อาร์เรย์ทั้งหมดอยู่ใน linear memory ของ WebAssembly ถ้าใช้ได้ (params.kernels มาจาก
-    // createKernelsAsync ใน engine.js) ไม่เช่นนั้นเป็น typed array ธรรมดา
+    // อาร์เรย์ทั้งหมดอยู่ใน linear memory ของ WebAssembly (params.kernels มาจาก createKernelsAsync ใน
+    // engine.js — อาจเป็นแบบหลายเธรด; ถ้าไม่ส่งมาจะสร้างแบบเธรดเดียวที่นี่)
     const N = this.N;
-    this.k = params.kernels === undefined ? createKernels(Solver.memoryBytes(mesh)) : params.kernels;
-    const A = this.k ? (T, n) => this.k.alloc(T, n) : (T, n) => new T(n);
-    this.alloc = A;
-    const F = () => A(Float32Array, N);
+    this.k = params.kernels || createKernels(Solver.memoryBytes(mesh, 1));
+    if (!this.k) throw new Error('เบราว์เซอร์นี้ใช้ WebAssembly ไม่ได้ — ไม่สามารถคำนวณได้');
+    this.threads = this.k.threads || 1;
+    const A = (T, n) => this.k.alloc(T, n);
+    for (const n of F32) this[n] = A(Float32Array, N);
     this.type = A(Uint8Array, N); this.type.set(mesh.type);
-    this.u = F(); this.v = F(); this.w = F();
-    this.u0 = F(); this.v0 = F(); this.w0 = F();
-    this.T = F(); this.T0 = F(); this.C = F(); this.C0 = F();
-    // ตัวสะสมฟลักซ์เป็น double — ไม่ปัดเศษเป็น float ระหว่างรวมฟลักซ์จากหกหน้า
-    this.dT = A(Float64Array, N); this.dC = A(Float64Array, N);
-    this.phi = F(); this.rhs = F(); this.dv = F();
-    this.nut = F();
-    this.uc = F(); this.vc = F(); this.wc = F();
-    this.fixU = A(Uint8Array, N); this.fixV = A(Uint8Array, N); this.fixW = A(Uint8Array, N);
-    this.uF = F(); this.vF = F(); this.wF = F();
-    this.fanOf = A(Int16Array, N);   // หน้า v ที่เป็นพัดลม → ดัชนีโมดูล + 1
-    this.pm = A(Uint8Array, N); this.nf = A(Uint8Array, N);
-    this.tdis = A(Float64Array, Math.max(1, this.mods.length));   // T ลมเป่าของแต่ละโมดูล
-    this.kout = A(Float64Array, 8);                                 // ผลลัพธ์สเกลาร์จาก kernel
+    this.fx = A(Uint8Array, N);      // บิต 1/2/4 = หน้า u/v/w ด้านลบของเซลล์ถูกกำหนดความเร็ว
+    this.pm = A(Uint8Array, N);      // บิตของหน้าอิสระหกด้านของเซลล์อากาศ (ใช้ใน projection)
+    this.red = A(Float64Array, this.NZ * RED);
+    this.scratch = A(Float64Array, this.threads * (2 * this.NX * this.NY + 2 * this.NX));
+    this.par = A(Float64Array, 32);
+    this.axes = [mesh.xf, mesh.yf, mesh.zf].map(f => {
+      const a = axisTables(f);
+      const m = A(Float64Array, a.t.length);
+      m.set(a.t);
+      return { ...a, t: m };
+    });
+    this.ctx = new Int32Array(this.k.memory.buffer, this.k.ex.ctx(), CTX.length);
+    for (const n of ['nx', 'ny', 'nz', 'NX', 'NY', 'NZ', 'sy', 'sz', 'N']) this.ctx[SLOT[n]] = this[n];
+    this.ctx[SLOT.nthreads] = this.threads;
+    for (const n of [...F32, 'type', 'fx', 'pm', 'red', 'scratch', 'par']) this.ctx[SLOT[n]] = this[n].byteOffset;
+    ['axx', 'axy', 'axz'].forEach((n, a) => { this.ctx[SLOT[n]] = this.axes[a].t.byteOffset; });
+    this.par[PAR.AMB] = this.amb; this.par[PAR.CS2] = CS * CS; this.par[PAR.NUMIN] = NU_MIN; this.par[PAR.KA] = 0.5 / PR_T;
 
     this.#classifyFaces();
-    this.#buildFixedLists();
     this.#buildPorous();
     this.#buildMirror(mesh.bc);
     this.#buildProjection();
@@ -92,11 +136,17 @@ export class Solver {
   }
 
   /** ขนาดหน่วยความจำ (ไบต์) ที่ต้องจองให้ WebAssembly สำหรับกริดนี้ */
-  static memoryBytes(mesh) {
-    const N = mesh.N;
-    // 20 Float32 + 2 Float64 + 6 Uint8 + 1 Int16 + รายการเซลล์ (red+black ≤ N, fluid ≤ N) เป็น Int32
-    return N * (20 * 4 + 2 * 8 + 6 + 2 + 2 * 4) + (mesh.modules.length + 9) * 8 + 40 * ALIGN_SLACK;
+  static memoryBytes(mesh, threads = 1) {
+    const N = mesh.N, NX = mesh.nx + 2, NY = mesh.ny + 2, NZ = mesh.nz + 2;
+    // 18 Float32 + 3 Uint8 ต่อเซลล์ + ตารางต่อแกน + ผลรวมต่อชั้น + บัฟเฟอร์ฟลักซ์ต่อเธรด
+    return N * (F32.length * 4 + 3) + AXT.COUNT * (NX + NY + NZ + 12) * 8 + NZ * RED * 8
+      + threads * (2 * NX * NY + 2 * NX) * 8 + 32 * 8 + 40 * ALIGN_SLACK;
   }
+
+  /** ไบต์ต่อเซลล์โดยประมาณ (ใช้ประเมินหน่วยความจำใน UI) */
+  static get bytesPerCell() { return F32.length * 4 + 3; }
+
+  dispose() { this.k?.dispose?.(); }
 
   /* ───────── การเตรียมกริด ───────── */
 
@@ -105,15 +155,19 @@ export class Solver {
     return 1;
   }
 
+  /** ตารางของแกน a (0 = x, 1 = y, 2 = z) ชนิด q ที่ดัชนี i */
+  #ax(a, q, i) { const A = this.axes[a]; return A.t[q * A.L + i]; }
+
   #classifyFaces() {
-    const { NX, NY, NZ, sy, sz, type, h, nx, nz } = this;
-    const { fixU, fixV, fixW, uF, vF, wF } = this;
+    const { NX, NY, NZ, N, sy, sz, type, nx, nz, fx } = this;
+    const fixU = new Uint8Array(N), fixV = new Uint8Array(N), fixW = new Uint8Array(N);
+    const uF = new Float32Array(N), vF = new Float32Array(N), wF = new Float32Array(N);
     const wind = this.windSpeed > 0.01;
     for (let k = 0; k < NZ; k++)
       for (let j = 0; j < NY; j++)
         for (let i = 0; i < NX; i++) {
           const c = i + j * sy + k * sz, tc = type[c];
-          const y = (j - 0.5) * h, prof = this.windAt(y);
+          const prof = this.windAt(this.#ax(1, AXT.C, j));
           // หน้า u (ระหว่าง c-1 กับ c)
           if (i === 0) fixU[c] = 1;
           else {
@@ -140,25 +194,34 @@ export class Solver {
         }
 
     // หน้าพัดลมและหน้าคอยล์ของ CDU
-    this.mods.forEach((m, mi) => {
-      if (!m.active) return;
+    let fanRate = 0, fanVmax = 0;
+    for (const m of this.mods) {
+      if (!m.active) continue;
       for (let a = 0; a < m.fanFaces.length; a++) {
-        const f = m.fanFaces[a];
-        fixV[f] = 1; vF[f] = m.fanVel[a]; this.fanOf[f] = mi + 1;
+        const f = m.fanFaces[a], j = ((f / sy) | 0) % NY;
+        fixV[f] = 1; vF[f] = m.fanVel[a];
+        fanVmax = Math.max(fanVmax, m.fanVel[a]);
+        fanRate = Math.max(fanRate, m.fanVel[a] * this.#ax(1, AXT.RD, j));
       }
       for (let a = 0; a < m.inFaces.length; a++) {
         const f = m.inFaces[a];
         if (m.inAxis[a] === 0) { fixU[f] = 1; uF[f] = m.inVel[a]; }
         else { fixW[f] = 1; wF[f] = m.inVel[a]; }
       }
-    });
-  }
+    }
+    this.fanRate = fanRate; this.fanVmax = fanVmax;
 
-  /** รายการหน้าที่ถูกกำหนดความเร็ว — ไม่ต้องไล่ตรวจทั้งกริดทุกสเต็ป */
-  #buildFixedLists() {
-    const { N, fixU, fixV, fixW } = this;
-    const list = fix => { const a = []; for (let c = 0; c < N; c++) if (fix[c]) a.push(c); return Int32Array.from(a); };
-    this.fixList = { u: list(fixU), v: list(fixV), w: list(fixW) };
+    // รายการหน้าที่ถูกกำหนดความเร็ว (ดัชนี + ค่า) — ไม่ต้องเก็บอาร์เรย์เต็มกริดและไม่ต้องไล่ทั้งกริดทุกสเต็ป
+    const list = (fix, val) => {
+      let n = 0;
+      for (let c = 0; c < N; c++) n += fix[c];
+      const idx = new Int32Array(n), v = new Float32Array(n);
+      n = 0;
+      for (let c = 0; c < N; c++) if (fix[c]) { idx[n] = c; v[n++] = val[c]; }
+      return { idx, val: v };
+    };
+    this.fixList = { u: list(fixU, uF), v: list(fixV, vF), w: list(fixW, wF) };
+    for (let c = 0; c < N; c++) fx[c] = fixU[c] | (fixV[c] << 1) | (fixW[c] << 2);
   }
 
   /** หน้าที่อยู่ใน louver (k > 0) พร้อมสัมประสิทธิ์ของแต่ละแกน */
@@ -207,57 +270,69 @@ export class Solver {
     }
   }
 
+  /** หน้าอิสระของแต่ละเซลล์อากาศ (pm) และส่วนกลับของผลรวมสัมประสิทธิ์ (idg) สำหรับ SOR */
   #buildProjection() {
-    const { N, type, sy, sz, fixU, fixV, fixW } = this;
-    const red = [], black = [], fluid = [];
-    for (let c = 0; c < N; c++) {
-      if (type[c] !== FLUID) continue;
-      let m = 0, n = 0;
-      if (!fixU[c]) { m |= 1; n++; }
-      if (!fixU[c + 1]) { m |= 2; n++; }
-      if (!fixV[c]) { m |= 4; n++; }
-      if (!fixV[c + sy]) { m |= 8; n++; }
-      if (!fixW[c]) { m |= 16; n++; }
-      if (!fixW[c + sz]) { m |= 32; n++; }
-      this.pm[c] = m; this.nf[c] = n;
-      fluid.push(c);
-      if (!n) continue;
-      const i = c % this.NX, j = ((c / sy) | 0) % this.NY, k = (c / sz) | 0;
-      ((i + j + k) & 1 ? black : red).push(c);
+    const { NX, NY, NZ, type, sy, sz, fx, pm, idg } = this;
+    let nFluid = 0;
+    for (let k = 1; k < NZ - 1; k++) {
+      const zm = this.#ax(2, AXT.PM, k), zp = this.#ax(2, AXT.PP, k);
+      for (let j = 1; j < NY - 1; j++) {
+        const ym = this.#ax(1, AXT.PM, j), yp = this.#ax(1, AXT.PP, j);
+        for (let i = 1; i < NX - 1; i++) {
+          const c = i + j * sy + k * sz;
+          if (type[c] !== FLUID) continue;
+          nFluid++;
+          let m = 0, s = 0;
+          if (!(fx[c] & 1)) { m |= 1; s += this.#ax(0, AXT.PM, i); }
+          if (!(fx[c + 1] & 1)) { m |= 2; s += this.#ax(0, AXT.PP, i); }
+          if (!(fx[c] & 2)) { m |= 4; s += ym; }
+          if (!(fx[c + sy] & 2)) { m |= 8; s += yp; }
+          if (!(fx[c] & 4)) { m |= 16; s += zm; }
+          if (!(fx[c + sz] & 4)) { m |= 32; s += zp; }
+          pm[c] = m;
+          idg[c] = m ? 1 / s : 0;
+        }
+      }
     }
-    const list = a => { const r = this.alloc(Int32Array, a.length); r.set(a); return r; };
-    this.red = list(red);
-    this.black = list(black);
-    this.fluid = list(fluid);
+    this.nFluid = nFluid;
     const L = Math.max(this.nx, this.ny, this.nz);
     this.omega = Math.min(1.92, Math.max(1.6, 2 / (1 + Math.sin(Math.PI / L))));
+    this.par[PAR.OMEGA] = this.omega;
     this.pIters = 40;
   }
 
+  /** เขียนตำแหน่งบัฟเฟอร์ที่สลับได้ลงบริบทของ kernel */
+  #sync() { for (const n of SWAP) this.ctx[SLOT[n]] = this[n].byteOffset; }
+
+  #swapVel() {
+    [this.u, this.u0] = [this.u0, this.u];
+    [this.v, this.v0] = [this.v0, this.v];
+    [this.w, this.w0] = [this.w0, this.w];
+    this.#sync();
+  }
+
   reset() {
-    const { N, u, v, w, T, C, uF, vF, wF, fixU, fixV, fixW } = this;
-    for (let c = 0; c < N; c++) {
-      u[c] = fixU[c] ? uF[c] : 0; v[c] = fixV[c] ? vF[c] : 0; w[c] = fixW[c] ? wF[c] : 0;
-    }
+    const { N, u, v, w, T, C } = this;
+    for (const n of F32) if (n !== 'idg') this[n].fill(0);
+    this.#applyFixed();
     // เริ่มจากสนามลมธรรมชาติ ช่วยให้เข้าสู่สภาวะคงตัวเร็วขึ้น
     if (this.windSpeed > 0.01) {
-      const { NX, NY, NZ, sy, sz, h } = this;
-      for (let k = 0; k < NZ; k++)
-        for (let j = 0; j < NY; j++)
-          for (let i = 0; i < NX; i++) {
-            const c = i + j * sy + k * sz, p = this.windAt((j - 0.5) * h);
-            if (!fixU[c]) u[c] = this.wx * p;
-            if (!fixW[c]) w[c] = this.wz * p;
-          }
+      const fx = this.fx, p = this.windAt(0);
+      for (let c = 0; c < N; c++) {
+        const f = fx[c];
+        if (!(f & 1)) u[c] = this.wx * p;
+        if (!(f & 4)) w[c] = this.wz * p;
+      }
     }
+    void v;
     T.fill(this.amb); C.fill(0);
-    this.T0.fill(this.amb); this.C0.fill(0); this.dT.fill(0); this.dC.fill(0);
-    this.phi.fill(0);
+    this.T0.fill(this.amb); this.C0.fill(0);
+    this.#sync();
     this.time = 0; this.steps = 0; this.dt = 0;
-    this.vmax = 1;
+    this.vmax = 1; this.rate = 0;
     this.divErr = 0;
     this.hist = { t: [], tin: this.mods.map(() => []), cin: this.mods.map(() => []), bal: [], res: { mass: [], mom: [], energy: [] } };
-    this.prev = { u: this.u.slice(), v: this.v.slice(), w: this.w.slice(), T: this.T.slice() };
+    this.k.ex.residual();   // เก็บสนามเริ่มต้นไว้เป็นค่าอ้างอิงของ residual
     this.hold = 0;
     this.checks = null;
     this.acc = this.#newAcc();
@@ -272,13 +347,18 @@ export class Solver {
   /* ───────── สเต็ปเวลา ───────── */
 
   step() {
-    const h = this.h;
-    const dt = Math.min(0.25, CFL_VEL * h / Math.max(0.5, this.vmax));
+    const h = this.h, par = this.par, ex = this.k.ex;
+    // Δt จากอัตรา CFL สูงสุด max(|u|/Δx) — เซลล์ใหญ่ไกลเครื่องไม่จำกัด Δt
+    const dt = Math.min(0.25, CFL_VEL / Math.max(0.5 / h, this.rate));
     this.dt = dt;
-    this.#advectVelocity(dt);
-    this.#buoyancy(dt);
-    this.#turbulence(dt);
-    this.#diffuseVelocity(dt);
+    par[PAR.DT] = dt;
+    this.#swapVel();
+    ex.advect();
+    par[PAR.KB] = G * this.beta * dt;   // แรงลอยตัว Boussinesq บนหน้า v: g·β·(T − T∞)
+    ex.buoyancy();
+    ex.turbulence();
+    this.#swapVel();
+    ex.diffuse();
     this.#porous(dt);
     this.#applyFixed();
     this.#applyMirror();
@@ -287,7 +367,7 @@ export class Solver {
     this.#adaptIterations();
 
     // อุณหภูมิและ tracer: แบ่งสเต็ปย่อยให้ผ่านเงื่อนไข CFL ของวิธี explicit
-    const cour = this.maxOut * dt / h;
+    const cour = this.maxOut * dt;
     // เผื่อ 1% กันเศษทศนิยม: ที่ CFL_VEL = 1.5 อัตราส่วนนี้มักเป็น 3.000x พอดี (ลมจากพัดลมเป็นค่าสูงสุด)
     // ซึ่ง ceil จะปัดเป็น 4 สเต็ปย่อยโดยไม่จำเป็น — CFL จริงต่อสเต็ปย่อยยังไม่เกิน 0.505
     const ns = Math.max(1, Math.ceil(cour / CFL_SCALAR - 0.01));
@@ -301,156 +381,10 @@ export class Solver {
   }
 
   #applyFixed() {
-    const { u, v, w, uF, vF, wF, fixList } = this;
-    let L = fixList.u;
-    for (let a = 0; a < L.length; a++) { const c = L[a]; u[c] = uF[c]; }
-    L = fixList.v;
-    for (let a = 0; a < L.length; a++) { const c = L[a]; v[c] = vF[c]; }
-    L = fixList.w;
-    for (let a = 0; a < L.length; a++) { const c = L[a]; w[c] = wF[c]; }
-  }
-
-  #advectVelocity(dt) {
-    const { nx, ny, nz, NX, NY, NZ, sy, sz, h, u, v, w, u0, v0, w0, fixU, fixV, fixW } = this;
-    u0.set(u); v0.set(v); w0.set(w);
-    const r = dt / h;
-    if (this.k) {
-      this.k.ex.advect(nx, ny, nz, NX, NY, NZ, sy, sz, r, u.byteOffset, v.byteOffset, w.byteOffset,
-        u0.byteOffset, v0.byteOffset, w0.byteOffset, fixU.byteOffset, fixV.byteOffset, fixW.byteOffset);
-      return;
+    for (const a of ['u', 'v', 'w']) {
+      const f = this[a], { idx, val } = this.fixList[a];
+      for (let q = 0; q < idx.length; q++) f[idx[q]] = val[q];
     }
-    const xm = NX - 1.001, ym = NY - 1.001, zm = NZ - 1.001;
-    // ย้อนรอยตามลม (backtrace) แล้วอ่านค่าแบบ trilinear ในพิกัดดัชนีของอาร์เรย์นั้น
-    const sample = (a, fi, fj, fk) => {
-      if (fi < 0) fi = 0; else if (fi > xm) fi = xm;
-      if (fj < 0) fj = 0; else if (fj > ym) fj = ym;
-      if (fk < 0) fk = 0; else if (fk > zm) fk = zm;
-      const i0 = fi | 0, j0 = fj | 0, k0 = fk | 0;
-      const s1 = fi - i0, t1 = fj - j0, r1 = fk - k0;
-      const b = i0 + j0 * sy + k0 * sz;
-      const a00 = a[b] + s1 * (a[b + 1] - a[b]);
-      const a10 = a[b + sy] + s1 * (a[b + sy + 1] - a[b + sy]);
-      const a01 = a[b + sz] + s1 * (a[b + sz + 1] - a[b + sz]);
-      const a11 = a[b + sz + sy] + s1 * (a[b + sz + sy + 1] - a[b + sz + sy]);
-      const a0 = a00 + t1 * (a10 - a00), a1 = a01 + t1 * (a11 - a01);
-      return a0 + r1 * (a1 - a0);
-    };
-    for (let k = 1; k <= nz; k++)
-      for (let j = 1; j <= ny; j++) {
-        let c = 1 + j * sy + k * sz;
-        for (let i = 1; i <= nx + 1; i++, c++) {
-          if (fixU[c]) continue;
-          const uu = u0[c];
-          const vv = 0.25 * (v0[c - 1] + v0[c] + v0[c - 1 + sy] + v0[c + sy]);
-          const ww = 0.25 * (w0[c - 1] + w0[c] + w0[c - 1 + sz] + w0[c + sz]);
-          u[c] = sample(u0, i - r * uu, j - r * vv, k - r * ww);
-        }
-      }
-    for (let k = 1; k <= nz; k++)
-      for (let j = 1; j <= ny + 1; j++) {
-        let c = 1 + j * sy + k * sz;
-        for (let i = 1; i <= nx; i++, c++) {
-          if (fixV[c]) continue;
-          const uu = 0.25 * (u0[c] + u0[c + 1] + u0[c - sy] + u0[c + 1 - sy]);
-          const vv = v0[c];
-          const ww = 0.25 * (w0[c] + w0[c + sz] + w0[c - sy] + w0[c - sy + sz]);
-          v[c] = sample(v0, i - r * uu, j - r * vv, k - r * ww);
-        }
-      }
-    for (let k = 1; k <= nz + 1; k++)
-      for (let j = 1; j <= ny; j++) {
-        let c = 1 + j * sy + k * sz;
-        for (let i = 1; i <= nx; i++, c++) {
-          if (fixW[c]) continue;
-          const uu = 0.25 * (u0[c] + u0[c + 1] + u0[c - sz] + u0[c + 1 - sz]);
-          const vv = 0.25 * (v0[c] + v0[c + sy] + v0[c - sz] + v0[c + sy - sz]);
-          const ww = w0[c];
-          w[c] = sample(w0, i - r * uu, j - r * vv, k - r * ww);
-        }
-      }
-  }
-
-  /** แรงลอยตัว Boussinesq บนหน้า v: g·β·(T − T∞) */
-  #buoyancy(dt) {
-    const { nx, ny, nz, sy, sz, v, T, fixV } = this;
-    const kb = G * this.beta * dt, amb = this.amb;
-    if (this.k) {
-      this.k.ex.buoyancy(nx, ny, nz, sy, sz, kb, amb, v.byteOffset, T.byteOffset, fixV.byteOffset);
-      return;
-    }
-    for (let k = 1; k <= nz; k++)
-      for (let j = 2; j <= ny + 1; j++) {
-        let c = 1 + j * sy + k * sz;
-        for (let i = 1; i <= nx; i++, c++) {
-          if (fixV[c]) continue;
-          v[c] += kb * (0.5 * (T[c] + T[c - sy]) - amb);
-        }
-      }
-  }
-
-  /** ความหนืดปั่นป่วนแบบ Smagorinsky: νt = (Cs·Δ)²·|S| */
-  #turbulence(dt) {
-    const { nx, ny, nz, sy, sz, h, u, v, w, uc, vc, wc, nut, type } = this;
-    if (this.k) {
-      this.k.ex.turbulence(nx, ny, nz, sy, sz, (CS * h) ** 2, 1 / h, 0.5 / h, 0.14 * h * h / dt, NU_MIN,
-        u.byteOffset, v.byteOffset, w.byteOffset, uc.byteOffset, vc.byteOffset, wc.byteOffset, nut.byteOffset, type.byteOffset);
-      return;
-    }
-    for (let k = 1; k <= nz; k++)
-      for (let j = 1; j <= ny; j++) {
-        let c = 1 + j * sy + k * sz;
-        for (let i = 1; i <= nx; i++, c++) {
-          uc[c] = 0.5 * (u[c] + u[c + 1]);
-          vc[c] = 0.5 * (v[c] + v[c + sy]);
-          wc[c] = 0.5 * (w[c] + w[c + sz]);
-        }
-      }
-    const l2 = (CS * h) ** 2, inv = 1 / h, i2 = 0.5 / h;
-    const cap = 0.14 * h * h / dt;
-    for (let k = 1; k <= nz; k++)
-      for (let j = 1; j <= ny; j++) {
-        let c = 1 + j * sy + k * sz;
-        for (let i = 1; i <= nx; i++, c++) {
-          if (type[c] !== FLUID) { nut[c] = 0; continue; }
-          const dudx = (u[c + 1] - u[c]) * inv, dvdy = (v[c + sy] - v[c]) * inv, dwdz = (w[c + sz] - w[c]) * inv;
-          const dudy = (uc[c + sy] - uc[c - sy]) * i2, dudz = (uc[c + sz] - uc[c - sz]) * i2;
-          const dvdx = (vc[c + 1] - vc[c - 1]) * i2, dvdz = (vc[c + sz] - vc[c - sz]) * i2;
-          const dwdx = (wc[c + 1] - wc[c - 1]) * i2, dwdy = (wc[c + sy] - wc[c - sy]) * i2;
-          const a = dudy + dvdx, b = dudz + dwdx, e = dvdz + dwdy;
-          const S = Math.sqrt(2 * (dudx * dudx + dvdy * dvdy + dwdz * dwdz) + a * a + b * b + e * e);
-          const nu = NU_MIN + l2 * S;
-          nut[c] = nu < cap ? nu : cap;
-        }
-      }
-  }
-
-  #diffuseVelocity(dt) {
-    const { nx, ny, nz, sy, sz, h, u, v, w, u0, v0, w0, nut, fixU, fixV, fixW } = this;
-    u0.set(u); v0.set(v); w0.set(w);
-    const q = dt / (h * h);
-    if (this.k) {
-      this.k.ex.diffuse(nx, ny, nz, sy, sz, q, u.byteOffset, v.byteOffset, w.byteOffset,
-        u0.byteOffset, v0.byteOffset, w0.byteOffset, nut.byteOffset, fixU.byteOffset, fixV.byteOffset, fixW.byteOffset);
-      return;
-    }
-    for (let k = 2; k <= nz - 1; k++)
-      for (let j = 2; j <= ny - 1; j++) {
-        let c = 2 + j * sy + k * sz;
-        for (let i = 2; i <= nx - 1; i++, c++) {
-          if (!fixU[c]) {
-            const a = q * 0.5 * (nut[c] + nut[c - 1]);
-            u[c] = u0[c] + a * (u0[c - 1] + u0[c + 1] + u0[c - sy] + u0[c + sy] + u0[c - sz] + u0[c + sz] - 6 * u0[c]);
-          }
-          if (!fixV[c]) {
-            const a = q * 0.5 * (nut[c] + nut[c - sy]);
-            v[c] = v0[c] + a * (v0[c - 1] + v0[c + 1] + v0[c - sy] + v0[c + sy] + v0[c - sz] + v0[c + sz] - 6 * v0[c]);
-          }
-          if (!fixW[c]) {
-            const a = q * 0.5 * (nut[c] + nut[c - sz]);
-            w[c] = w0[c] + a * (w0[c - 1] + w0[c + 1] + w0[c - sy] + w0[c + sy] + w0[c - sz] + w0[c + sz] - 6 * w0[c]);
-          }
-        }
-      }
   }
 
   /** ความต้านทานของ louver: du/dt = −k·|u|·u (แก้แบบ implicit จึงไม่มีวันกลับทิศ) */
@@ -466,82 +400,18 @@ export class Solver {
   }
 
   /**
-   * Projection: หา φ จาก Σ_หน้าอิสระ (φc − φnb) = −h·Σ u_out แล้ว u ← u − ∇φ
+   * Projection: หา φ จาก Σ_หน้าอิสระ coef·(φc − φnb) = −∇·u แล้ว u ← u − ∇φ
    * หน้าที่ถูกกำหนดความเร็ว (ผนัง พัดลม คอยล์ ลมเข้า) เป็นเงื่อนไข Neumann
    * เซลล์เงาของขอบเปิดมี φ = 0 (ความดันบรรยากาศ)
    */
   project(iters) {
-    const { sy, sz, h, u, v, w, phi, rhs, pm, nf, red, black, fluid } = this;
-    if (this.k) {
-      const o = this.kout;
-      this.k.ex.project(sy, sz, h, iters, this.omega, u.byteOffset, v.byteOffset, w.byteOffset,
-        phi.byteOffset, rhs.byteOffset, this.dv.byteOffset, pm.byteOffset, nf.byteOffset, this.type.byteOffset,
-        red.byteOffset, red.length, black.byteOffset, black.length, fluid.byteOffset, fluid.length, o.byteOffset);
-      this.#projectStats(o[0], o[1], o[2], o[3], o[4]);
-      return;
-    }
-    for (let a = 0; a < fluid.length; a++) {
-      const c = fluid[a];
-      rhs[c] = h * (u[c + 1] - u[c] + v[c + sy] - v[c] + w[c + sz] - w[c]);
-    }
-    const om = this.omega;
-    for (let it = 0; it < iters; it++) {
-      for (let pass = 0; pass < 2; pass++) {
-        const list = pass ? black : red;
-        for (let a = 0; a < list.length; a++) {
-          const c = list[a], m = pm[c];
-          if (m === 63) {
-            // เซลล์ภายในทั่วไป: หน้าอิสระครบหกด้าน
-            const p = phi[c];
-            phi[c] = p + om * ((phi[c - 1] + phi[c + 1] + phi[c - sy] + phi[c + sy] + phi[c - sz] + phi[c + sz] - rhs[c]) / 6 - p);
-            continue;
-          }
-          let s = 0;
-          if (m & 1) s += phi[c - 1];
-          if (m & 2) s += phi[c + 1];
-          if (m & 4) s += phi[c - sy];
-          if (m & 8) s += phi[c + sy];
-          if (m & 16) s += phi[c - sz];
-          if (m & 32) s += phi[c + sz];
-          const p = phi[c];
-          phi[c] = p + om * ((s - rhs[c]) / nf[c] - p);
-        }
-      }
-    }
-    const inv = 1 / h;
-    let mu = 0, mv = 0, mw = 0;
-    for (let a = 0; a < fluid.length; a++) {
-      const c = fluid[a], m = pm[c], p = phi[c];
-      // ปรับหน้าด้านลบของเซลล์ (หน้าด้านบวกเป็นหน้าด้านลบของเซลล์ถัดไป หรือหน้าขอบเปิด)
-      if (m & 1) u[c] -= (p - phi[c - 1]) * inv;
-      if (m & 4) v[c] -= (p - phi[c - sy]) * inv;
-      if (m & 16) w[c] -= (p - phi[c - sz]) * inv;
-      if ((m & 2) && this.type[c + 1] === OPEN) u[c + 1] -= (0 - p) * inv;
-      if ((m & 8) && this.type[c + sy] === OPEN) v[c + sy] -= (0 - p) * inv;
-      if ((m & 32) && this.type[c + sz] === OPEN) w[c + sz] -= (0 - p) * inv;
-    }
-    // ความคลาดเคลื่อนของสมการความต่อเนื่องหลัง projection
-    let e2 = 0, mo = 0;
-    const dv = this.dv;
-    for (let a = 0; a < fluid.length; a++) {
-      const c = fluid[a];
-      const au = Math.abs(u[c]), av = Math.abs(v[c]), aw = Math.abs(w[c]);
-      if (au > mu) mu = au; if (av > mv) mv = av; if (aw > mw) mw = aw;
-      const up = u[c + 1], um = u[c], vp = v[c + sy], vm = v[c], wp = w[c + sz], wm = w[c];
-      const d = up - um + vp - vm + wp - wm;
-      dv[c] = d;
-      const o = (up > 0 ? up : 0) - (um < 0 ? um : 0) + (vp > 0 ? vp : 0) - (vm < 0 ? vm : 0) + (wp > 0 ? wp : 0) - (wm < 0 ? wm : 0);
-      if (o > mo) mo = o;
-      e2 += d * d;
-    }
-    this.#projectStats(mu, mv, mw, mo, e2);
-  }
-
-  #projectStats(mu, mv, mw, mo, e2) {
-    for (const m of this.mods) for (let a = 0; a < m.fanVel.length; a++) if (m.fanVel[a] > mv) mv = m.fanVel[a];
-    this.maxU = mu; this.maxV = mv; this.maxW = mw; this.maxOut = mo;
-    this.vmax = Math.max(mu, mv, mw);
-    this.divErr = Math.sqrt(e2 / Math.max(1, this.fluid.length)) / Math.max(0.5, this.vmax);
+    const o = this.par;
+    this.k.ex.project(iters);
+    this.maxU = o[PAR.MAXU]; this.maxV = Math.max(o[PAR.MAXV], this.fanVmax); this.maxW = o[PAR.MAXW];
+    this.maxOut = o[PAR.OUT];                         // 1/s — อัตราไหลออกรวมสูงสุดของเซลล์
+    this.rate = Math.max(o[PAR.RATE], this.fanRate);  // 1/s — max(|u|/Δx)
+    this.vmax = Math.max(this.maxU, this.maxV, this.maxW);
+    this.divErr = Math.sqrt(o[PAR.E2] / Math.max(1, this.nFluid)) / Math.max(0.5, this.vmax);
   }
 
   #adaptIterations() {
@@ -557,18 +427,22 @@ export class Solver {
     this.mods.forEach((m, mi) => {
       const st = this.modState[mi];
       if (!m.active) return;
-      let s = 0, sc = 0, mx = -1e9;
-      const cells = m.inCells;
+      // T ลมเข้า = ค่าเฉลี่ยถ่วงพื้นที่หน้าคอยล์ (ความเร็วดูดเท่ากันทุกหน้า → เท่ากับถ่วงด้วยอัตราไหล)
+      let s = 0, sc = 0, sa = 0, mx = -1e9;
+      const cells = m.inCells, area = m.inArea;
       for (let a = 0; a < cells.length; a++) {
-        const t = T[cells[a]];
-        s += t; sc += C[cells[a]];
+        const t = T[cells[a]], w = area[a];
+        s += t * w; sc += C[cells[a]] * w; sa += w;
         if (t > mx) mx = t;
       }
-      const Tin = s / cells.length;
+      const Tin = s / sa;
       const p = modulePerf(m.kw, m.eer, Tin, this.perf);
-      st.Tin = Tin; st.TinMax = mx; st.Cin = sc / cells.length;
+      st.Tin = Tin; st.TinMax = mx; st.Cin = sc / sa;
       st.capF = p.capF; st.qRej = p.qRej;
       st.Tdis = Tin + p.qRej / (rho * m.q * cp);
+      // เซลล์ทึบใต้หน้าพัดลมเก็บสภาวะลมเป่า — transport ใช้เป็นค่าต้นลมของหน้าพัดลม
+      const fc = m.fanCells;
+      for (let a = 0; a < fc.length; a++) { T[fc[a]] = st.Tdis; C[fc[a]] = 1; }
     });
   }
 
@@ -579,48 +453,11 @@ export class Solver {
    */
   #transport(dt) {
     // สลับบัฟเฟอร์แทนการคัดลอก: ค่าเดิมอยู่ใน T0/C0 เขียนค่าใหม่ลง T/C
-    // (เซลล์ที่ไม่ใช่อากาศมีค่าเท่ากันทั้งสองบัฟเฟอร์เสมอ — ดู reset)
     [this.T, this.T0] = [this.T0, this.T];
     [this.C, this.C0] = [this.C0, this.C];
-    let dE;
-    if (this.k) {
-      const { T, C, T0, C0, dT, dC, tdis, kout: o, fluid } = this;
-      for (let mi = 0; mi < this.mods.length; mi++) tdis[mi] = this.modState[mi].Tdis;
-      this.k.ex.transport(this.nx, this.ny, this.nz, this.sy, this.sz, dt, this.h, 0.5 / PR_T, this.amb,
-        this.u.byteOffset, this.v.byteOffset, this.w.byteOffset, this.type.byteOffset,
-        T.byteOffset, C.byteOffset, T0.byteOffset, C0.byteOffset, dT.byteOffset, dC.byteOffset,
-        this.nut.byteOffset, this.dv.byteOffset, this.fanOf.byteOffset, tdis.byteOffset,
-        fluid.byteOffset, fluid.length, o.byteOffset);
-      this._qOut = o[0]; dE = o[1];
-    } else dE = this.#transportJS(dt);
-    this.#energyAccount(dt, dE);
-  }
-
-  #transportJS(dt) {
-    const { T, C, T0, C0, dT, dC, h, amb } = this;
-    this._qOut = 0;
-    this.#fluxAxis(this.u, 1, 0, dt);
-    this.#fluxAxis(this.v, this.sy, 1, dt);
-    this.#fluxAxis(this.w, this.sz, 2, dt);
-    const k = dt / h, dv = this.dv;
-    let dE = 0;
-    const fl = this.fluid;
-    for (let a = 0; a < fl.length; a++) {
-      const c = fl[a];
-      // + S·(∇·u) ชดเชยความคลาดเคลื่อนของมวลที่เหลือจาก projection (สนามคงที่ยังคงที่)
-      let t = T0[c] + k * (dT[c] + T0[c] * dv[c]);
-      let q = C0[c] + k * (dC[c] + C0[c] * dv[c]);
-      dT[c] = 0; dC[c] = 0;   // ฟลักซ์เขียนลงเฉพาะเซลล์อากาศ จึงล้างที่นี่แทน fill ทั้งกริด
-      if (t < amb - 2) t = amb - 2; else if (t > amb + 70) t = amb + 70;
-      if (q < 0) q = 0; else if (q > 1) q = 1;
-      dE += t - T0[c];
-      T[c] = t; C[c] = q;
-    }
-    return dE;
-  }
-
-  #energyAccount(dt, dE) {
-    const h = this.h;
+    this.#sync();
+    this.par[PAR.DT] = dt;
+    this.k.ex.transport();
     // บัญชีพลังงาน (W): ความร้อนจาก CDU, ความร้อนที่ออกทางขอบโดเมน, การสะสมในอากาศ
     const rc = this.rho * this.cp;
     let qIn = 0;
@@ -628,89 +465,9 @@ export class Solver {
     const acc = this.acc;
     acc.t += dt;
     acc.qIn += qIn * dt;
-    acc.qOut += rc * h * h * this._qOut * dt;
-    acc.dE += rc * h * h * h * dE;
+    acc.qOut += rc * this.par[PAR.QOUT] * dt;
+    acc.dE += rc * this.par[PAR.DE];
     this.mods.forEach((m, mi) => { acc.tin[mi] += this.modState[mi].Tin * dt; acc.cin[mi] += this.modState[mi].Cin * dt; });
-  }
-
-  #fluxAxis(vel, st, axis, dt) {
-    const { nx, ny, nz, sy, sz, type, T0, C0, dT, dC, nut, h, amb, fanOf } = this;
-    const i1 = axis === 0 ? nx + 1 : nx, j1 = axis === 1 ? ny + 1 : ny, k1 = axis === 2 ? nz + 1 : nz;
-    const acap = 0.12 * h * h / dt;
-    const dh = 1 / h, ka = 0.5 / PR_T;
-    let qOut = 0;
-    for (let k = 1; k <= k1; k++)
-      for (let j = 1; j <= j1; j++) {
-        let c = 1 + j * sy + k * sz;
-        for (let i = 1; i <= i1; i++, c++) {
-          const a = c - st;
-          const ta = type[a], tb = type[c];
-          const vf = vel[c];
-          if ((ta | tb) === 0) {
-            // ── กรณีทั่วไป: อากาศ–อากาศ (MUSCL + van Leer: ค่าที่หน้า = Sup + ½·2d1d2/(d1+d2)) ──
-            let sT, sC;
-            if (vf > 0) {
-              const ta0 = T0[a], ca0 = C0[a];
-              sT = ta0; sC = ca0;
-              const m = a - st;
-              if (type[m] === 0) {
-                let d1 = ta0 - T0[m], d2 = T0[c] - ta0, p = d1 * d2;
-                if (p > 0) sT += p / (d1 + d2);
-                d1 = ca0 - C0[m]; d2 = C0[c] - ca0; p = d1 * d2;
-                if (p > 0) sC += p / (d1 + d2);
-              }
-            } else {
-              const tb0 = T0[c], cb0 = C0[c];
-              sT = tb0; sC = cb0;
-              const m = c + st;
-              if (type[m] === 0) {
-                let d1 = tb0 - T0[m], d2 = T0[a] - tb0, p = d1 * d2;
-                if (p > 0) sT += p / (d1 + d2);
-                d1 = cb0 - C0[m]; d2 = C0[a] - cb0; p = d1 * d2;
-                if (p > 0) sC += p / (d1 + d2);
-              }
-            }
-            let al = ka * (nut[a] + nut[c]);
-            if (al > acap) al = acap;
-            const g = al * dh;
-            const FT = vf * sT - g * (T0[c] - T0[a]);
-            const FC = vf * sC - g * (C0[c] - C0[a]);
-            dT[a] -= FT; dC[a] -= FC;
-            dT[c] += FT; dC[c] += FC;
-            continue;
-          }
-          if (ta !== FLUID && tb !== FLUID) continue;
-          if (ta === SOLID || tb === SOLID) {
-            if (vf === 0) continue;
-            let sT, sC;
-            if ((vf > 0) === (ta === SOLID)) {
-              // ลมเป่าออกจากพัดลม CDU
-              const m = fanOf[c];
-              if (!m) continue;
-              sT = this.modState[m - 1].Tdis; sC = 1;
-            } else {
-              // ลมถูกดูดเข้าคอยล์: ค่าที่หน้า = ค่าของเซลล์อากาศด้านต้นลม
-              const f = ta === FLUID ? a : c;
-              sT = T0[f]; sC = C0[f];
-            }
-            const FT = vf * sT, FC = vf * sC;
-            if (ta === FLUID) { dT[a] -= FT; dC[a] -= FC; } else { dT[c] += FT; dC[c] += FC; }
-            continue;
-          }
-          // อากาศ–ขอบเปิด: ลมเข้าโดเมนมีค่าเท่าอากาศภายนอก ลมออกใช้ค่าของเซลล์ด้านใน (upwind)
-          const f = ta === FLUID ? a : c;
-          const inflow = ta === FLUID ? vf < 0 : vf > 0;
-          const sT = inflow ? amb : T0[f], sC = inflow ? 0 : C0[f];
-          let al = 2 * ka * nut[f];
-          if (al > acap) al = acap;
-          const g = al * dh;
-          const FT = vf * sT - g * (ta === FLUID ? amb - T0[a] : T0[c] - amb);
-          const FC = vf * sC - g * (ta === FLUID ? -C0[a] : C0[c]);
-          if (ta === FLUID) { dT[a] -= FT; dC[a] -= FC; qOut += FT - vf * amb; }
-          else { dT[c] += FT; dC[c] += FC; qOut -= FT - vf * amb; }
-        }
-      }
-    this._qOut += qOut;
   }
 
   /* ───────── การติดตามผลและเกณฑ์ลู่เข้า ───────── */
@@ -735,22 +492,16 @@ export class Solver {
    *   energy = RMS(ΔT) / ΔT_ref   (ΔT_ref = อุณหภูมิลมเป่าเกินอากาศภายนอกสูงสุด)
    */
   #residuals() {
-    const { fluid, u, v, w, T, prev, sy, sz } = this;
-    let du = 0, dT = 0;
-    for (let a = 0; a < fluid.length; a++) {
-      const c = fluid[a];
-      const x = u[c] - prev.u[c], y = v[c] - prev.v[c], z = w[c] - prev.w[c], t = T[c] - prev.T[c];
-      du += x * x + y * y + z * z; dT += t * t;
-    }
-    void sy; void sz;
-    const n = Math.max(1, fluid.length);
+    this.#sync();
+    this.k.ex.residual();
+    const du = this.par[PAR.DU2], dT = this.par[PAR.DT2];
+    const n = Math.max(1, this.nFluid);
     let dTref = 1;
     for (const st of this.modState) dTref = Math.max(dTref, st.Tdis - this.amb);
     const R = this.hist.res;
     R.mass.push(this.divErr);
     R.mom.push(Math.sqrt(du / (3 * n)) / Math.max(0.5, this.vmax));
     R.energy.push(Math.sqrt(dT / n) / dTref);
-    prev.u.set(u); prev.v.set(v); prev.w.set(w); prev.T.set(T);
   }
 
   /** ค่าเฉลี่ยของประวัติในช่วงเวลา [t0, t1] */
@@ -819,7 +570,7 @@ export class Solver {
       avgWindow: win,
       divErr: this.divErr, pIters: this.pIters, drift: this.drift ?? NaN,
       balance: bal, converged: this.converged,
-      vmax: this.vmax,
+      vmax: this.vmax, threads: this.threads, cells: this.nx * this.ny * this.nz,
       modules: mods,
       history: decimate(this.hist, 500),
     };
@@ -841,7 +592,10 @@ export class Solver {
     // ความดันเกจเทียบบรรยากาศ (Pa): projection แก้ u -= ∇φ จึงได้ φ = Δt·p/ρ
     const P = new Float32Array(this.N), kp = this.rho / Math.max(1e-6, this.dt || 0.1);
     for (let c = 0; c < this.N; c++) P[c] = this.type[c] === SOLID ? 0 : this.phi[c] * kp;
-    return { T: this.T.slice(), C: this.C.slice(), u: uc, v: vc, w: wc, P };
+    // เซลล์ทึบใต้พัดลมเก็บสภาวะลมเป่าไว้ให้ transport — ไม่ใช่ค่าของอากาศ จึงไม่ส่งไปแสดงผล
+    const T = this.T.slice(), C = this.C.slice();
+    for (const m of this.mods) for (let a = 0; a < m.fanCells.length; a++) { T[m.fanCells[a]] = this.amb; C[m.fanCells[a]] = 0; }
+    return { T, C, u: uc, v: vc, w: wc, P };
   }
 }
 
@@ -855,10 +609,4 @@ function decimate(H, n) {
     t: pick(H.t), tin: H.tin.map(pick),
     res: { mass: pick(H.res.mass), mom: pick(H.res.mom), energy: pick(H.res.energy) },
   };
-}
-
-/** van Leer: ความชันแบบค่าเฉลี่ยฮาร์มอนิก เป็นศูนย์เมื่อสองข้างต่างทิศ */
-function vl(d1, d2) {
-  const p = d1 * d2;
-  return p > 0 ? 2 * p / (d1 + d2) : 0;
 }

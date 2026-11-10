@@ -12,6 +12,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { unitModules, unitSize, getModel } from './models.js';
 import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
+import { axisLocator } from './grid.js';
 
 const ACCENT = 0x4fc3f7;
 /** สีสถานะ CDU ตามอุณหภูมิลมเข้า */
@@ -23,6 +24,14 @@ const norm360 = a => Math.round((((a % 360) + 360) % 360) * 10) / 10 % 360;
 const MAX_STREAKS = 3200;
 /** จำนวนขั้นสีของภาพ contour */
 export const CONTOUR_LEVELS = 16;
+
+/** ตัวหาตำแหน่งบนกริดของเมช (เซลล์กว้างไม่เท่ากันได้) — สร้างครั้งเดียวต่อเมช */
+const LOCATORS = new WeakMap();
+function locOf(M) {
+  let L = LOCATORS.get(M);
+  if (!L) { L = { x: axisLocator(M.xf), y: axisLocator(M.yf), z: axisLocator(M.zf) }; LOCATORS.set(M, L); }
+  return L;
+}
 
 export class Viewer {
   constructor(host, cb) {
@@ -719,18 +728,19 @@ export class Viewer {
       this.secEdge.material.color.set(0x6fb6ff);
       return;
     }
-    const M = r.mesh, { nx, ny, nz, sy, sz, h, ox, oz } = M;
+    const M = r.mesh, { nx, ny, nz, sy, sz } = M, loc = locOf(M);
     const axis = this.section.axis, pos = this.section.pos;
-    let cols, rows, idx;
+    // la / lb = แกนของกริดตามแนวนอน / แนวตั้งของภาพ
+    let cols, rows, idx, la, lb;
     if (axis === 'x') {
-      const i = clampI(Math.round((pos - ox) / h + 0.5), 1, nx);
-      cols = nz; rows = ny; idx = (a, b) => i + (b + 1) * sy + (a + 1) * sz;
+      const i = clampI(loc.x.cell(pos), 1, nx);
+      cols = nz; rows = ny; la = loc.z; lb = loc.y; idx = (a, b) => i + (b + 1) * sy + (a + 1) * sz;
     } else if (axis === 'z') {
-      const k = clampI(Math.round((pos - oz) / h + 0.5), 1, nz);
-      cols = nx; rows = ny; idx = (a, b) => (a + 1) + (b + 1) * sy + k * sz;
+      const k = clampI(loc.z.cell(pos), 1, nz);
+      cols = nx; rows = ny; la = loc.x; lb = loc.y; idx = (a, b) => (a + 1) + (b + 1) * sy + k * sz;
     } else {
-      const j = clampI(Math.round(pos / h + 0.5), 1, ny);
-      cols = nx; rows = nz; idx = (a, b) => (a + 1) + j * sy + (b + 1) * sz;
+      const j = clampI(loc.y.cell(pos), 1, ny);
+      cols = nx; rows = nz; la = loc.x; lb = loc.z; idx = (a, b) => (a + 1) + j * sy + (b + 1) * sz;
     }
     const [lo, hi] = this.fieldRange();
     const span = Math.max(1e-6, hi - lo);
@@ -741,24 +751,37 @@ export class Viewer {
         const c = idx(a, b), q = a + b * cols;
         if (M.type[c] === 1) sol[q] = 1; else val[q] = this.fieldValue(c);
       }
-    // ภาพละเอียดกว่าเมช: แต่ละเซลล์แบ่งเป็น f×f พิกเซล ค่าแทรกแบบ bilinear จากศูนย์กลางเซลล์รอบข้าง
-    // (ข้ามเซลล์ของแข็ง) แล้วปัดเป็นขั้นสี → เส้นแบ่งขั้นสีเรียบ ไม่เป็นขั้นบันไดตามเซลล์
-    const f = Math.max(1, Math.min(8, Math.floor(2048 / Math.max(cols, rows))));
-    const W = cols * f, H = rows * f;
+    // ภาพเป็นพิกเซลขนาดเท่ากันในพิกัดจริง (เมชอาจมีเซลล์กว้างไม่เท่ากัน) ละเอียดกว่าเซลล์เล็กสุดถึง 8 เท่า
+    // ค่าแทรกแบบ bilinear จากศูนย์กลางเซลล์รอบข้าง (ข้ามเซลล์ของแข็ง) แล้วปัดเป็นขั้นสี
+    // → เส้นแบ่งขั้นสีเรียบ ไม่เป็นขั้นบันไดตามเซลล์
+    const a0w = la.cc[0] + (la.cc[1] - la.cc[0]) / 2, b0w = lb.cc[0] + (lb.cc[1] - lb.cc[0]) / 2;   // ขอบโดเมนด้านต่ำ
+    const La = la.cc[la.n + 1] - (la.cc[la.n + 1] - la.cc[la.n]) / 2 - a0w, Lb = lb.cc[lb.n + 1] - (lb.cc[lb.n + 1] - lb.cc[lb.n]) / 2 - b0w;
+    const ppm = Math.max(1 / M.h, Math.min(8 / M.h, 2048 / Math.max(La, Lb)));
+    const W = Math.max(2, Math.min(4096, Math.round(La * ppm))), H = Math.max(2, Math.min(4096, Math.round(Lb * ppm)));
+    // ตำแหน่งของแต่ละคอลัมน์/แถวพิกเซลบนกริด: เซลล์ที่ครอบ และพิกัดดัชนีกึ่งกลางเซลล์ (ฐาน 0 = เซลล์ภายในแรก)
+    const mapAxis = (L, n, origin, len, cnt) => {
+      const cell = new Int32Array(n), i0 = new Int32Array(n), i1 = new Int32Array(n), t = new Float32Array(n);
+      for (let p = 0; p < n; p++) {
+        const x = origin + (p + 0.5) / n * len;
+        cell[p] = clampI(L.cell(x), 1, cnt) - 1;
+        const f = L.coord(x) - 1;
+        i0[p] = Math.max(0, Math.min(cnt - 1, Math.floor(f)));
+        i1[p] = Math.min(cnt - 1, i0[p] + 1);
+        t[p] = Math.max(0, Math.min(1, f - i0[p]));
+      }
+      return { cell, i0, i1, t };
+    };
+    const A = mapAxis(la, W, a0w, La, cols), B = mapAxis(lb, H, b0w, Lb, rows);
     const buf = new Uint8Array(W * H * 4);
     const lut = [];
     for (let t = 0; t < CONTOUR_LEVELS; t++) lut.push(rgb((t + 0.5) / CONTOUR_LEVELS));
     for (let pb = 0; pb < H; pb++) {
-      const fb = (pb + 0.5) / f - 0.5, cb = Math.floor((pb + 0.5) / f);
-      const b0 = Math.max(0, Math.min(rows - 1, Math.floor(fb))), b1 = Math.min(rows - 1, b0 + 1);
-      const tb = Math.max(0, Math.min(1, fb - b0));
+      const cb = B.cell[pb], b0 = B.i0[pb], b1 = B.i1[pb], tb = B.t[pb];
       for (let pa = 0; pa < W; pa++) {
         const o = (pa + pb * W) * 4;
-        const ca = Math.floor((pa + 0.5) / f);
+        const ca = A.cell[pa];
         if (sol[ca + cb * cols]) { buf[o] = 128; buf[o + 1] = 136; buf[o + 2] = 146; buf[o + 3] = 255; continue; }
-        const fa = (pa + 0.5) / f - 0.5;
-        const a0 = Math.max(0, Math.min(cols - 1, Math.floor(fa))), a1 = Math.min(cols - 1, a0 + 1);
-        const ta = Math.max(0, Math.min(1, fa - a0));
+        const a0 = A.i0[pa], a1 = A.i1[pa], ta = A.t[pa];
         let sw = 0, sv = 0;
         const add = (a, b, wgt) => { const q = a + b * cols; if (!sol[q] && wgt > 0) { sw += wgt; sv += wgt * val[q]; } };
         add(a0, b0, (1 - ta) * (1 - tb)); add(a1, b0, ta * (1 - tb));
@@ -781,7 +804,8 @@ export class Viewer {
   /** ค่าที่จุดใด ๆ ในโดเมน (trilinear) — ใช้กับหัววัดและอนุภาค */
   sample(arr, x, y, z) {
     const M = this.results.mesh;
-    let fi = (x - M.ox) / M.h + 0.5, fj = y / M.h + 0.5, fk = (z - M.oz) / M.h + 0.5;
+    const L = locOf(M);
+    let fi = L.x.coord(x), fj = L.y.coord(y), fk = L.z.coord(z);
     fi = Math.min(M.NX - 1.001, Math.max(0, fi));
     fj = Math.min(M.NY - 1.001, Math.max(0, fj));
     fk = Math.min(M.NZ - 1.001, Math.max(0, fk));
@@ -795,9 +819,7 @@ export class Viewer {
 
   cellAt(x, y, z) {
     const M = this.results.mesh;
-    const i = clampI(Math.floor((x - M.ox) / M.h) + 1, 0, M.NX - 1);
-    const j = clampI(Math.floor(y / M.h) + 1, 0, M.NY - 1);
-    const k = clampI(Math.floor((z - M.oz) / M.h) + 1, 0, M.NZ - 1);
+    const L = locOf(M), i = L.x.cell(x), j = L.y.cell(y), k = L.z.cell(z);
     return i + j * M.sy + k * M.sz;
   }
 
@@ -1922,7 +1944,10 @@ function makeTextures() {
  * เซลล์ทึบถือว่าต่ำกว่า iso เพื่อให้ผิวปิดรอบตัวเครื่อง
  */
 function surfaceNets(M, field, iso) {
-  const { nx, ny, nz, sy, sz, h, ox, oz, type } = M;
+  const { nx, ny, nz, sy, sz, type } = M;
+  // พิกัดกึ่งกลางเซลล์ของแต่ละแกน (เซลล์กว้างไม่เท่ากันได้)
+  const cen = f => { const c = new Float64Array(f.length + 1); for (let i = 1; i < f.length; i++) c[i] = 0.5 * (f[i - 1] + f[i]); return c; };
+  const xc = cen(M.xf), yc = cen(M.yf), zc = cen(M.zf);
   const val = c => (type[c] === 1 ? iso - 1 : field[c]) - iso;
   const vid = new Int32Array(M.N).fill(-1);
   const verts = [];
@@ -1952,7 +1977,7 @@ function surfaceNets(M, field, iso) {
           n++;
         }
         vid[c] = verts.length / 3;
-        verts.push(ox + (i - 0.5 + ax / n) * h, (j - 0.5 + ay / n) * h, oz + (k - 0.5 + az / n) * h);
+        verts.push(xc[i] + ax / n * (xc[i + 1] - xc[i]), yc[j] + ay / n * (yc[j + 1] - yc[j]), zc[k] + az / n * (zc[k + 1] - zc[k]));
       }
   // หน้าสี่เหลี่ยมต่อขอบกริดที่ค่าเปลี่ยนเครื่องหมาย
   const idx = [];

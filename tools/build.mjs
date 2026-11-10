@@ -6,7 +6,7 @@
  *   npm install && npm run build
  */
 import { build } from 'esbuild';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -47,4 +47,6 @@ let out = html
 if (out.includes('src/main.js') || out.includes('importmap')) throw new Error('แทนที่ส่วนหัว HTML ไม่สำเร็จ');
 await mkdir(r('dist'), { recursive: true });
 await writeFile(r('dist/cdu-airflow-cfd.html'), out);
+// service worker สำหรับคำนวณหลายเธรดเมื่อวางไฟล์บนเว็บเซิร์ฟเวอร์ (ไม่จำเป็นเมื่อเปิดจาก file://)
+await copyFile(r('coi-sw.js'), r('dist/coi-sw.js'));
 console.log(`dist/cdu-airflow-cfd.html  ${(out.length / 1024).toFixed(0)} KB`);

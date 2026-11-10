@@ -5,6 +5,7 @@
 import { MODELS, getModel, unitSize, status as unitStatus, MODULE_H, MODULE_D } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import { buildMesh } from './mesher.js';
+import { Solver } from './solver.js';
 import { Viewer, CONTOUR_LEVELS } from './viewer.js';
 import { Runner } from './runner.js';
 import { cssGradient, FIELDS, rgb } from './colormap.js';
@@ -46,6 +47,26 @@ const viewer = new Viewer($('#viewport'), {
   newCduRot: () => lastUsed.rot,
   newWallHeight: () => lastUsed.wallHeight,
 });
+
+/**
+ * คำนวณหลายเธรดต้องให้หน้าเว็บเป็น cross-origin isolated (เงื่อนไขของ SharedArrayBuffer)
+ * เมื่อเปิดผ่าน http(s) ให้ service worker coi-sw.js เติมส่วนหัว COOP/COEP แล้วโหลดหน้าใหม่หนึ่งครั้ง
+ * (เปิดจาก file:// ทำไม่ได้ — คำนวณเธรดเดียว)
+ */
+function enableIsolation() {
+  if (globalThis.crossOriginIsolated || !('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol) || !window.isSecureContext) return;
+  const KEY = 'cfd-coi-reload';
+  const reloadOnce = () => {
+    let done = false;
+    try { done = sessionStorage.getItem(KEY) === '1'; sessionStorage.setItem(KEY, '1'); } catch { done = true; }
+    if (!done) location.reload();
+  };
+  navigator.serviceWorker.register('coi-sw.js').then(() => {
+    if (navigator.serviceWorker.controller) reloadOnce();   // ควบคุมหน้าอยู่แล้วแต่หน้านี้โหลดมาก่อน
+    else navigator.serviceWorker.addEventListener('controllerchange', reloadOnce, { once: true });
+  }).catch(() => { /* ไม่มี service worker — ใช้เธรดเดียว */ });
+}
+enableIsolation();
 
 const runner = new Runner(onEngineMessage);
 
@@ -481,6 +502,7 @@ const SETTINGS = [
 
 function renderSettings() {
   for (const [sel, g, k] of SETTINGS) $(sel).value = scene[g][k];
+  $('#s-grade').value = scene.sim.grade === 'uniform' ? 'uniform' : 'auto';
   $('#p-kcap').value = round2(scene.perf.kCap * 100);
   $('#p-kpow').value = round2(scene.perf.kPow * 100);
   $('#proj-name').value = scene.name;
@@ -502,6 +524,7 @@ function bindSettings() {
       edit(() => { scene[g][k] = v; });
     });
   }
+  $('#s-grade').addEventListener('change', (e) => edit(() => { scene.sim.grade = e.target.value === 'uniform' ? 'uniform' : 'auto'; }));
   $('#p-kcap').addEventListener('change', (e) => edit(() => { scene.perf.kCap = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#p-kpow').addEventListener('change', (e) => edit(() => { scene.perf.kPow = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#proj-name').addEventListener('change', (e) => { scene.name = e.target.value.trim() || 'โปรเจกต์'; saveAutosave(); });
@@ -535,21 +558,29 @@ function bindBands() {
 /** ต้องมีขอบเปิดอย่างน้อยหนึ่งด้าน มิฉะนั้นความร้อนออกจากโดเมนไม่ได้และผลไม่มีวันนิ่ง */
 function hasOpenFace() { return BC_FACES.some(f => scene.bc[f].type === 'open'); }
 
-/** หน่วยความจำของ solver ≈ 112 ไบต์ต่อเซลล์ (รวมเซลล์ขอบ) — ดู Solver.memoryBytes */
-const meshBytes = d => (d.nx + 2) * (d.ny + 2) * (d.nz + 2) * 112;
+/** หน่วยความจำของ solver ≈ 75 ไบต์ต่อเซลล์ (รวมเซลล์ขอบ) — ดู Solver.memoryBytes */
+const meshBytes = d => (d.nx + 2) * (d.ny + 2) * (d.nz + 2) * Solver.bytesPerCell;
 /** WebAssembly 32 บิตจองได้สูงสุด 4 GiB เผื่อสแตก/ส่วนอื่นไว้ 128 MiB */
 const MAX_MESH_BYTES = 4 * 1024 ** 3 - 128 * 1024 ** 2;
 const fmtGB = b => (b / 1024 ** 3).toFixed(1);
+/** ขนาดหน่วยความจำพร้อมหน่วย (MB เมื่อน้อยกว่า 1 GB) */
+const fmtMem = b => b < 0.95 * 1024 ** 3 ? `${Math.max(1, Math.round(b / 1024 ** 2))} MB` : `${fmtGB(b)} GB`;
+/** จำนวนเซลล์ที่ควรถามยืนยันก่อนคำนวณ */
+const BIG_MESH = 2.5e6;
 
 function updateEstimate() {
   const d = domainOf(scene);
   // โดยทั่วไปลู่เข้าในช่วง 60–150 วินาทีจำลอง — ประมาณที่ 120 s
   const steps = 120 / (0.25 * d.h);
-  const sec = d.cells * 0.4e-6 * steps;   // ≈0.4 µs ต่อเซลล์ต่อสเต็ป (WebAssembly)
+  // ≈0.33 µs ต่อเซลล์ต่อสเต็ปต่อเธรด; หลายเธรดเร็วขึ้นราว 0.6 เท่าของจำนวนเธรด (จำกัดด้วยความเร็วหน่วยความจำ)
+  const th = run.threads || 1;
+  const sec = d.cells * 0.33e-6 * steps / Math.max(1, 0.6 * th);
   const el = $('#mesh-info');
-  el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์ · หน่วยความจำ ≈ ${fmtGB(meshBytes(d))} GB`
+  const saved = d.graded && d.cellsUniform > d.cells * 1.05
+    ? ` (เมชปรับความละเอียดอัตโนมัติ — ลดจาก ${fmtK(d.cellsUniform)} เซลล์ ${(d.cellsUniform / d.cells).toFixed(1)} เท่า · เซลล์ ${fmt(d.h)}–${fmt(d.hMax)} ม.)` : '';
+  el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์${saved} · หน่วยความจำ ≈ ${fmtMem(meshBytes(d))}`
     + (meshBytes(d) > MAX_MESH_BYTES ? ' — เกิน 4 GB คำนวณไม่ได้ ลดระยะเผื่อโดเมนหรือเพิ่มขนาดเซลล์' : '');
-  el.classList.toggle('warn', d.cells > 1.2e6);
+  el.classList.toggle('warn', d.cells > BIG_MESH);
   if (run.state !== 'running') $('#estimate').textContent = scene.objects.some(o => o.type === 'cdu')
     ? `${fmtK(d.cells)} เซลล์ · ประมาณ ${fmtDur(sec)}` : '';
 }
@@ -581,7 +612,7 @@ function startOrToggle() {
     toast(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์ ≈ ${fmtGB(meshBytes(d))} GB เกินหน่วยความจำสูงสุด 4 GB ของ WebAssembly) — เพิ่มขนาดเซลล์ หรือลดระยะเผื่อขอบโดเมน`, 6000);
     return;
   }
-  if (d.cells > 1.2e6 && !confirm(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`)) return;
+  if (d.cells > BIG_MESH && !confirm(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`)) return;
 
   const mesh = buildMesh(scene);
   run.mesh = mesh;
@@ -625,6 +656,24 @@ function invalidate() {
 function onEngineMessage(msg) {
   if (msg.type === 'mode') {
     $('#foot-mode').textContent = 'คำนวณบน main thread (เบราว์เซอร์ไม่อนุญาต Web Worker) — ผลเหมือนเดิมแต่หน้าจออาจหน่วงเล็กน้อย';
+    return;
+  }
+  if (msg.type === 'ready') {
+    // สถานะเครื่องคำนวณ: จำนวนเธรดที่ใช้จริง และเหตุผลถ้าใช้ได้เธรดเดียว
+    run.threads = msg.threads;
+    const cores = navigator.hardwareConcurrency || 1;
+    $('#foot-mode').textContent = msg.threads > 1
+      ? `คำนวณด้วย WebAssembly ${msg.threads} เธรด (เครื่องมี ${cores} แกน)`
+      : runner.mode === 'main' ? 'คำนวณบน main thread เธรดเดียว (เบราว์เซอร์ไม่อนุญาต Web Worker)'
+        : cores > 1 && !msg.isolated ? `คำนวณด้วย WebAssembly 1 เธรด — เปิดผ่านเว็บเซิร์ฟเวอร์ (เช่น npm run serve) เพื่อใช้ทั้ง ${cores} แกน`
+          : 'คำนวณด้วย WebAssembly 1 เธรด';
+    return;
+  }
+  if (msg.type === 'error') {
+    run.state = 'idle'; run.mesh = null; run.report = null; run.fields = null;
+    toast(msg.message, 8000);
+    renderResults();
+    updateRunUI();
     return;
   }
   if (!run.mesh || run.stale) return;
@@ -840,7 +889,8 @@ function renderQuality() {
   const r = run.report, M = run.mesh;
   const q = [];
   const cls = (ok) => ok ? 'good' : 'warn';
-  q.push(['กริด', `${M.nx}×${M.ny}×${M.nz} · h = ${M.h} ม.`]);
+  q.push(['กริด', `${M.nx}×${M.ny}×${M.nz} · h = ${M.h}${M.graded ? '–' + fmt(M.hMax) : ''} ม.${M.graded ? ' (ปรับความละเอียดอัตโนมัติ)' : ''}`]);
+  if (r.threads) q.push(['เธรดคำนวณ', `${r.threads}`]);
   q.push(['เซลล์อากาศ / louver', `${fmtK(M.stats.fluid)} / ${fmtK(M.stats.porous)}`]);
   q.push(['เวลาจำลอง · สเต็ป', `${r.time.toFixed(1)} s · ${r.steps}`]);
   q.push(['Δt', `${(r.dt * 1000).toFixed(0)} ms`]);

@@ -7,7 +7,7 @@
  */
 
 import { Solver } from './solver.js';
-import { createKernelsAsync } from './kernels.js';
+import { createKernelsAsync, maxThreads } from './kernels.js';
 
 export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
   let solver = null, running = false, timer = 0, lastField = 0;
@@ -32,7 +32,8 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     const now = performance.now();
     const done = solver.converged || solver.time >= solver.tMax;
     if (done) running = false;
-    const wantFields = done || now - lastField > fieldEvery;
+    // เมชใหญ่: ส่งสนามค่าไปแสดงผลห่างขึ้น (สำเนา 24 ไบต์ต่อเซลล์ต่อครั้ง) — ราว 0.4 วินาทีต่อล้านเซลล์
+    const wantFields = done || now - lastField > Math.max(fieldEvery, solver.N * 4e-4);
     if (wantFields) lastField = now;
     send(wantFields);
     if (done) post({ type: 'done', reason: solver.converged ? 'converged' : 'limit', report: solver.report() });
@@ -47,11 +48,25 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     if (msg.cmd === 'init') {
       running = false;
       clearTimeout(timer); timer = 0;
-      solver = null;
+      solver?.dispose(); solver = null;
       const t0 = performance.now();
-      const kernels = await createKernelsAsync(Solver.memoryBytes(msg.mesh));
-      solver = new Solver(msg.mesh, { ...msg.params, kernels });
-      post({ type: 'ready', ms: performance.now() - t0, wasm: !!kernels });
+      // ใช้ทุกแกนประมวลผลที่มี (เว้นไว้หนึ่งแกนให้หน้าจอเมื่อเครื่องมีมากกว่า 4 แกน) — ได้หลายเธรดเฉพาะเมื่อ
+      // หน้าเว็บเป็น cross-origin isolated (ดู kernels.js) ไม่เช่นนั้น maxThreads() = 1
+      const avail = maxThreads();
+      const threads = Math.max(1, Math.min(msg.threads || (avail > 4 ? avail - 1 : avail), avail));
+      const kernels = await createKernelsAsync(Solver.memoryBytes(msg.mesh, threads), { threads });
+      if (!kernels) {
+        post({ type: 'error', message: 'เบราว์เซอร์นี้ใช้ WebAssembly ไม่ได้ — ไม่สามารถคำนวณได้' });
+        return;
+      }
+      try {
+        solver = new Solver(msg.mesh, { ...msg.params, kernels });
+      } catch (err) {
+        kernels.dispose();
+        post({ type: 'error', message: err?.message || String(err) });
+        return;
+      }
+      post({ type: 'ready', ms: performance.now() - t0, threads: solver.threads, isolated: !!globalThis.crossOriginIsolated });
       send(true);
     } else if (msg.cmd === 'run') {
       if (!solver) return;
@@ -67,7 +82,7 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     } else if (msg.cmd === 'dispose') {
       running = false;
       clearTimeout(timer); timer = 0;
-      solver = null;
+      solver?.dispose(); solver = null;
     }
   };
 
