@@ -20,67 +20,33 @@
 
 import { modulePerf, airRho, AIR_CP, DEFAULT_PERF } from './models.js';
 import { createKernels, ALIGN_SLACK } from './kernels.js';
+import { SolverBase, CONV, SAMPLE_DT } from './monitor.js';
 
-export const FLUID = 0, SOLID = 1, OPEN = 2;
+export { CONV };
+
+import { GridPrep, AXT, FLUID, SOLID, OPEN } from './prep.js';
+
+export { FLUID, SOLID, OPEN };
 const G = 9.81;
 const CS = 0.17;        // ค่าคงที่ Smagorinsky
 const NU_MIN = 2e-3;    // m²/s — ความปั่นป่วนพื้นหลังของอากาศภายนอก
 const PR_T = 0.85;      // Turbulent Prandtl number
 const CFL_VEL = 1.5;    // Semi-Lagrangian ยอม CFL > 1
 const CFL_SCALAR = 0.5;    // ต่อผลรวมความเร็วไหลออกของเซลล์ (MUSCL + Euler)
-const SAMPLE_DT = 0.5;  // s — ระยะเก็บประวัติผล
-
-/** เกณฑ์ลู่เข้า — ต้องผ่านทุกข้อต่อเนื่องกัน HOLD ครั้ง (ครั้งละ SAMPLE_DT) */
-export const CONV = {
-  tMin: 60,          // s — เวลาขั้นต่ำก่อนเริ่มตัดสิน (ให้ลมร้อนเดินทางทั่วโดเมน)
-  drift: 0.05,       // K — ค่าเฉลี่ย 10 s ล่าสุดของ T ลมเข้าเทียบ 10 s ก่อนหน้า
-  balLo: 0.95, balHi: 1.05,
-  mass: 0.01,        // RMS(∇·u)·L / u_max หลัง projection (L = ขนาดเซลล์)
-  hold: 6,
-};
-
 /* ลำดับช่องต้องตรงกับ struct Ctx, enum AX_*, และ enum P_* ใน kernels.c */
 const CTX = ['nx', 'ny', 'nz', 'NX', 'NY', 'NZ', 'sy', 'sz', 'N', 'nthreads',
   'u', 'v', 'w', 'u0', 'v0', 'w0', 'T', 'T0', 'C', 'C0', 'phi', 'rhs', 'nut', 'idg',
   'pu', 'pv', 'pw', 'pT', 'type', 'fx', 'pm', 'axx', 'axy', 'axz', 'red', 'scratch', 'par'];
 const SLOT = Object.fromEntries(CTX.map((n, i) => [n, i]));
-const AXT = { F: 0, C: 1, D: 2, RD: 3, RDC: 4, WF: 5, PM: 6, PP: 7, FM: 8, FP: 9, R2: 10, Q23: 11, RD2: 12, CB: 13, COUNT: 14 };
 const PAR = Object.fromEntries(['DT', 'KB', 'AMB', 'CS2', 'NUMIN', 'OMEGA', 'KA',
   'MAXU', 'MAXV', 'MAXW', 'RATE', 'OUT', 'E2', 'QOUT', 'DE', 'DU2', 'DT2'].map((n, i) => [n, i]));
 const RED = 8;
 const SWAP = ['u', 'v', 'w', 'u0', 'v0', 'w0', 'T', 'T0', 'C', 'C0'];
 const F32 = ['u', 'v', 'w', 'u0', 'v0', 'w0', 'T', 'T0', 'C', 'C0', 'phi', 'rhs', 'nut', 'idg', 'pu', 'pv', 'pw', 'pT'];
 
-/** ตารางระยะและสัมประสิทธิ์ของหนึ่งแกน จากพิกัดหน้าเซลล์ f[0..n] (n เซลล์ภายใน) */
-function axisTables(f) {
-  const n = f.length - 1, NA = n + 2, L = NA + 2;
-  const t = new Float64Array(AXT.COUNT * L);
-  const at = (q, i) => q * L + i;
-  const F = i => t[at(AXT.F, i)], d = i => t[at(AXT.D, i)], rd = i => t[at(AXT.RD, i)], C = i => t[at(AXT.C, i)], rdc = i => t[at(AXT.RDC, i)];
-  for (let i = 1; i <= n + 1; i++) t[at(AXT.F, i)] = f[i - 1];
-  t[at(AXT.F, 0)] = f[0] - (f[1] - f[0]);
-  t[at(AXT.F, NA)] = f[n] + (f[n] - f[n - 1]);
-  for (let i = 0; i < NA; i++) {
-    const w = F(i + 1) - F(i);
-    t[at(AXT.D, i)] = w; t[at(AXT.RD, i)] = 1 / w; t[at(AXT.C, i)] = 0.5 * (F(i) + F(i + 1));
-    t[at(AXT.Q23, i)] = Math.cbrt(w) ** 2; t[at(AXT.RD2, i)] = 1 / (w * w); t[at(AXT.CB, i)] = Math.cbrt(w);
-  }
-  t[at(AXT.RDC, 0)] = rd(0); t[at(AXT.RDC, NA)] = rd(NA - 1);
-  for (let i = 1; i < NA; i++) t[at(AXT.RDC, i)] = 1 / (C(i) - C(i - 1));
-  t[at(AXT.WF, 0)] = 0.5;
-  for (let i = 0; i < NA; i++) {
-    if (i >= 1) {
-      t[at(AXT.WF, i)] = 0.5 * d(i - 1) * rdc(i);
-      t[at(AXT.FM, i)] = rdc(i) * rd(i - 1); t[at(AXT.FP, i)] = rdc(i) * rd(i);
-    }
-    t[at(AXT.PM, i)] = rd(i) * rdc(i); t[at(AXT.PP, i)] = rd(i) * rdc(i + 1);
-    if (i >= 1 && i <= NA - 2) t[at(AXT.R2, i)] = 1 / (C(i + 1) - C(i - 1));
-  }
-  return { t, L, NA };
-}
-
-export class Solver {
+export class Solver extends SolverBase {
   constructor(mesh, params) {
+    super();
     Object.assign(this, {
       nx: mesh.nx, ny: mesh.ny, nz: mesh.nz, h: mesh.h,
       NX: mesh.NX, NY: mesh.NY, NZ: mesh.NZ, N: mesh.N, sy: mesh.sy, sz: mesh.sz,
@@ -115,8 +81,14 @@ export class Solver {
     this.red = A(Float64Array, this.NZ * RED);
     this.scratch = A(Float64Array, this.threads * (2 * this.NX * this.NY + 2 * this.NX));
     this.par = A(Float64Array, 32);
-    this.axes = [mesh.xf, mesh.yf, mesh.zf].map(f => {
-      const a = axisTables(f);
+    // การเตรียมกริด (หน้าที่กำหนดความเร็ว louver ขอบสมมาตร สัมประสิทธิ์ Poisson) ใช้ร่วมกับ solver แบบ GPU
+    const prep = new GridPrep(mesh, { speed: this.windSpeed, wx: this.wx, wz: this.wz });
+    this.fx.set(prep.fx); this.pm.set(prep.pm); this.idg.set(prep.idg);
+    Object.assign(this, {
+      fixList: prep.fixList, porous: prep.porous, mirror: prep.mirror, nFluid: prep.nFluid, omega: prep.omega,
+      fanRate: prep.fanRate, fanVmax: prep.fanVmax,
+    });
+    this.axes = prep.axes.map(a => {
       const m = A(Float64Array, a.t.length);
       m.set(a.t);
       return { ...a, t: m };
@@ -128,10 +100,8 @@ export class Solver {
     ['axx', 'axy', 'axz'].forEach((n, a) => { this.ctx[SLOT[n]] = this.axes[a].t.byteOffset; });
     this.par[PAR.AMB] = this.amb; this.par[PAR.CS2] = CS * CS; this.par[PAR.NUMIN] = NU_MIN; this.par[PAR.KA] = 0.5 / PR_T;
 
-    this.#classifyFaces();
-    this.#buildPorous();
-    this.#buildMirror(mesh.bc);
-    this.#buildProjection();
+    this.par[PAR.OMEGA] = this.omega;
+    this.pIters = 40;
     this.reset();
   }
 
@@ -148,157 +118,13 @@ export class Solver {
 
   dispose() { this.k?.dispose?.(); }
 
-  /* ───────── การเตรียมกริด ───────── */
-
-  windAt(y) {
-    // ลมเข้าแบบสม่ำเสมอ: ความเร็วเท่ากันทุกระดับความสูงทั่วทั้งระนาบขอบต้นลม
-    return 1;
-  }
-
-  /** ตารางของแกน a (0 = x, 1 = y, 2 = z) ชนิด q ที่ดัชนี i */
-  #ax(a, q, i) { const A = this.axes[a]; return A.t[q * A.L + i]; }
-
-  #classifyFaces() {
-    const { NX, NY, NZ, N, sy, sz, type, nx, nz, fx } = this;
-    const fixU = new Uint8Array(N), fixV = new Uint8Array(N), fixW = new Uint8Array(N);
-    const uF = new Float32Array(N), vF = new Float32Array(N), wF = new Float32Array(N);
-    const wind = this.windSpeed > 0.01;
-    for (let k = 0; k < NZ; k++)
-      for (let j = 0; j < NY; j++)
-        for (let i = 0; i < NX; i++) {
-          const c = i + j * sy + k * sz, tc = type[c];
-          const prof = this.windAt(this.#ax(1, AXT.C, j));
-          // หน้า u (ระหว่าง c-1 กับ c)
-          if (i === 0) fixU[c] = 1;
-          else {
-            const ta = type[c - 1];
-            if (ta === SOLID || tc === SOLID) { fixU[c] = 1; uF[c] = 0; }
-            else if (ta === OPEN && tc === OPEN) { fixU[c] = 1; uF[c] = wind ? this.wx * prof : 0; }
-            else if (wind && ((i === 1 && this.wx > 0) || (i === nx + 1 && this.wx < 0))) { fixU[c] = 1; uF[c] = this.wx * prof; }
-          }
-          // หน้า v
-          if (j === 0) fixV[c] = 1;
-          else {
-            const ta = type[c - sy];
-            if (ta === SOLID || tc === SOLID) { fixV[c] = 1; vF[c] = 0; }
-            else if (ta === OPEN && tc === OPEN) { fixV[c] = 1; vF[c] = 0; }
-          }
-          // หน้า w
-          if (k === 0) fixW[c] = 1;
-          else {
-            const ta = type[c - sz];
-            if (ta === SOLID || tc === SOLID) { fixW[c] = 1; wF[c] = 0; }
-            else if (ta === OPEN && tc === OPEN) { fixW[c] = 1; wF[c] = wind ? this.wz * prof : 0; }
-            else if (wind && ((k === 1 && this.wz > 0) || (k === nz + 1 && this.wz < 0))) { fixW[c] = 1; wF[c] = this.wz * prof; }
-          }
-        }
-
-    // หน้าพัดลมและหน้าคอยล์ของ CDU
-    let fanRate = 0, fanVmax = 0;
-    for (const m of this.mods) {
-      if (!m.active) continue;
-      for (let a = 0; a < m.fanFaces.length; a++) {
-        const f = m.fanFaces[a], j = ((f / sy) | 0) % NY;
-        fixV[f] = 1; vF[f] = m.fanVel[a];
-        fanVmax = Math.max(fanVmax, m.fanVel[a]);
-        fanRate = Math.max(fanRate, m.fanVel[a] * this.#ax(1, AXT.RD, j));
-      }
-      for (let a = 0; a < m.inFaces.length; a++) {
-        const f = m.inFaces[a];
-        if (m.inAxis[a] === 0) { fixU[f] = 1; uF[f] = m.inVel[a]; }
-        else { fixW[f] = 1; wF[f] = m.inVel[a]; }
-      }
-    }
-    this.fanRate = fanRate; this.fanVmax = fanVmax;
-
-    // รายการหน้าที่ถูกกำหนดความเร็ว (ดัชนี + ค่า) — ไม่ต้องเก็บอาร์เรย์เต็มกริดและไม่ต้องไล่ทั้งกริดทุกสเต็ป
-    const list = (fix, val) => {
-      let n = 0;
-      for (let c = 0; c < N; c++) n += fix[c];
-      const idx = new Int32Array(n), v = new Float32Array(n);
-      n = 0;
-      for (let c = 0; c < N; c++) if (fix[c]) { idx[n] = c; v[n++] = val[c]; }
-      return { idx, val: v };
-    };
-    this.fixList = { u: list(fixU, uF), v: list(fixV, vF), w: list(fixW, wF) };
-    for (let c = 0; c < N; c++) fx[c] = fixU[c] | (fixV[c] << 1) | (fixW[c] << 2);
-  }
-
-  /** หน้าที่อยู่ใน louver (k > 0) พร้อมสัมประสิทธิ์ของแต่ละแกน */
-  #buildPorous() {
-    const { N, sy, sz, kp } = this;
-    const idx = [], ku = [], kv = [], kw = [];
-    for (let c = sz; c < N; c++) {
-      const kc = kp[c];
-      const ka = 0.5 * (kc + kp[c - 1]), kb = 0.5 * (kc + kp[c - sy]), kz = 0.5 * (kc + kp[c - sz]);
-      if (ka > 0 || kb > 0 || kz > 0) { idx.push(c); ku.push(ka); kv.push(kb); kw.push(kz); }
-    }
-    this.porous = { idx: Int32Array.from(idx), ku: Float64Array.from(ku), kv: Float64Array.from(kv), kw: Float64Array.from(kw) };
-  }
-
-  /**
-   * ขอบสมมาตร (ผนังลื่น): ความเร็วตั้งฉากเป็นศูนย์ (หน้าติดเซลล์ทึบอยู่แล้ว) และความเร็วแนวขนาน
-   * ในชั้นเงาเท่ากับชั้นในสุด — ไม่มีแรงเฉือนที่ขอบ ต่างจากผนังซึ่งชั้นเงามีความเร็วศูนย์
-   */
-  #buildMirror(bc) {
-    const { NX, NY, NZ, sy, sz } = this;
-    const pairs = { u: [], v: [], w: [] };
-    const add = (arrs, ghost, inner) => { for (const a of arrs) pairs[a].push(ghost, inner); };
-    const sym = f => bc && bc[f] && bc[f].type === 'symmetry';
-    for (let k = 0; k < NZ; k++)
-      for (let j = 0; j < NY; j++) {
-        if (sym('xmin')) add(['v', 'w'], j * sy + k * sz, 1 + j * sy + k * sz);
-        if (sym('xmax')) add(['v', 'w'], NX - 1 + j * sy + k * sz, NX - 2 + j * sy + k * sz);
-      }
-    for (let j = 0; j < NY; j++)
-      for (let i = 0; i < NX; i++) {
-        if (sym('zmin')) add(['u', 'v'], i + j * sy, i + j * sy + sz);
-        if (sym('zmax')) add(['u', 'v'], i + j * sy + (NZ - 1) * sz, i + j * sy + (NZ - 2) * sz);
-      }
-    for (let k = 0; k < NZ; k++)
-      for (let i = 0; i < NX; i++) {
-        if (sym('ymin')) add(['u', 'w'], i + k * sz, i + sy + k * sz);
-        if (sym('ymax')) add(['u', 'w'], i + (NY - 1) * sy + k * sz, i + (NY - 2) * sy + k * sz);
-      }
-    this.mirror = { u: Int32Array.from(pairs.u), v: Int32Array.from(pairs.v), w: Int32Array.from(pairs.w) };
-  }
+  windAt(y) { return 1; }   // ลมเข้าแบบสม่ำเสมอ (ดู GridPrep.windAt)
 
   #applyMirror() {
     for (const a of ['u', 'v', 'w']) {
       const m = this.mirror[a], f = this[a];
       for (let q = 0; q < m.length; q += 2) f[m[q]] = f[m[q + 1]];
     }
-  }
-
-  /** หน้าอิสระของแต่ละเซลล์อากาศ (pm) และส่วนกลับของผลรวมสัมประสิทธิ์ (idg) สำหรับ SOR */
-  #buildProjection() {
-    const { NX, NY, NZ, type, sy, sz, fx, pm, idg } = this;
-    let nFluid = 0;
-    for (let k = 1; k < NZ - 1; k++) {
-      const zm = this.#ax(2, AXT.PM, k), zp = this.#ax(2, AXT.PP, k);
-      for (let j = 1; j < NY - 1; j++) {
-        const ym = this.#ax(1, AXT.PM, j), yp = this.#ax(1, AXT.PP, j);
-        for (let i = 1; i < NX - 1; i++) {
-          const c = i + j * sy + k * sz;
-          if (type[c] !== FLUID) continue;
-          nFluid++;
-          let m = 0, s = 0;
-          if (!(fx[c] & 1)) { m |= 1; s += this.#ax(0, AXT.PM, i); }
-          if (!(fx[c + 1] & 1)) { m |= 2; s += this.#ax(0, AXT.PP, i); }
-          if (!(fx[c] & 2)) { m |= 4; s += ym; }
-          if (!(fx[c + sy] & 2)) { m |= 8; s += yp; }
-          if (!(fx[c] & 4)) { m |= 16; s += zm; }
-          if (!(fx[c + sz] & 4)) { m |= 32; s += zp; }
-          pm[c] = m;
-          idg[c] = m ? 1 / s : 0;
-        }
-      }
-    }
-    this.nFluid = nFluid;
-    const L = Math.max(this.nx, this.ny, this.nz);
-    this.omega = Math.min(1.92, Math.max(1.6, 2 / (1 + Math.sin(Math.PI / L))));
-    this.par[PAR.OMEGA] = this.omega;
-    this.pIters = 40;
   }
 
   /** เขียนตำแหน่งบัฟเฟอร์ที่สลับได้ลงบริบทของ kernel */
@@ -331,18 +157,17 @@ export class Solver {
     this.time = 0; this.steps = 0; this.dt = 0;
     this.vmax = 1; this.rate = 0;
     this.divErr = 0;
-    this.hist = { t: [], tin: this.mods.map(() => []), cin: this.mods.map(() => []), bal: [], res: { mass: [], mom: [], energy: [] } };
     this.k.ex.residual();   // เก็บสนามเริ่มต้นไว้เป็นค่าอ้างอิงของ residual
-    this.hold = 0;
-    this.checks = null;
-    this.acc = this.#newAcc();
-    this.nextSample = SAMPLE_DT;
-    this.modState = this.mods.map(m => ({ Tin: this.amb, TinMax: this.amb, Cin: 0, Tdis: this.amb, capF: 1, qRej: 0 }));
-    this.converged = false;
+    this._resetMonitor();
     this.project(80);
   }
 
-  #newAcc() { return { t: 0, qIn: 0, qOut: 0, dE: 0, tin: this.mods.map(() => 0), cin: this.mods.map(() => 0) }; }
+  /** Σ การเปลี่ยนแปลง² ของความเร็วและอุณหภูมิเทียบครั้งก่อน (แล้วเก็บค่าปัจจุบันไว้) */
+  _residualSums() {
+    this.#sync();
+    this.k.ex.residual();
+    return [this.par[PAR.DU2], this.par[PAR.DT2]];
+  }
 
   /* ───────── สเต็ปเวลา ───────── */
 
@@ -377,7 +202,7 @@ export class Solver {
     }
     this.time += dt;
     this.steps++;
-    this.#monitor(dt);
+    this._monitor(dt);
   }
 
   #applyFixed() {
@@ -470,112 +295,6 @@ export class Solver {
     this.mods.forEach((m, mi) => { acc.tin[mi] += this.modState[mi].Tin * dt; acc.cin[mi] += this.modState[mi].Cin * dt; });
   }
 
-  /* ───────── การติดตามผลและเกณฑ์ลู่เข้า ───────── */
-
-  #monitor() {
-    if (this.time < this.nextSample) return;
-    this.nextSample += SAMPLE_DT;
-    const acc = this.acc, t = Math.max(1e-9, acc.t);
-    const H = this.hist;
-    H.t.push(this.time);
-    this.mods.forEach((m, mi) => { H.tin[mi].push(acc.tin[mi] / t); H.cin[mi].push(acc.cin[mi] / t); });
-    H.bal.push({ qIn: acc.qIn / t, qOut: acc.qOut / t, dE: acc.dE / t });
-    this.#residuals();
-    this.acc = this.#newAcc();
-    this.#checkConvergence();
-  }
-
-  /**
-   * Residual แบบ CFX (ใช้ดูแนวโน้ม): RMS ของการเปลี่ยนแปลงในช่วง SAMPLE_DT ที่ทำให้ไร้มิติ
-   *   mass   = RMS(∇·u)·h / u_max
-   *   mom    = RMS(Δu) / u_max
-   *   energy = RMS(ΔT) / ΔT_ref   (ΔT_ref = อุณหภูมิลมเป่าเกินอากาศภายนอกสูงสุด)
-   */
-  #residuals() {
-    this.#sync();
-    this.k.ex.residual();
-    const du = this.par[PAR.DU2], dT = this.par[PAR.DT2];
-    const n = Math.max(1, this.nFluid);
-    let dTref = 1;
-    for (const st of this.modState) dTref = Math.max(dTref, st.Tdis - this.amb);
-    const R = this.hist.res;
-    R.mass.push(this.divErr);
-    R.mom.push(Math.sqrt(du / (3 * n)) / Math.max(0.5, this.vmax));
-    R.energy.push(Math.sqrt(dT / n) / dTref);
-  }
-
-  /** ค่าเฉลี่ยของประวัติในช่วงเวลา [t0, t1] */
-  #windowMean(arr, t0, t1) {
-    const t = this.hist.t;
-    let s = 0, n = 0;
-    for (let a = t.length - 1; a >= 0 && t[a] > t0; a--) if (t[a] <= t1) { s += arr[a]; n++; }
-    return n ? s / n : NaN;
-  }
-
-  energyBalance(win = 10) {
-    const H = this.hist, t1 = this.time, t0 = t1 - win;
-    let qi = 0, qo = 0, de = 0, n = 0;
-    for (let a = H.t.length - 1; a >= 0 && H.t[a] > t0; a--) { qi += H.bal[a].qIn; qo += H.bal[a].qOut; de += H.bal[a].dE; n++; }
-    if (!n || qi <= 0) return { ratio: NaN, qIn: 0, qOut: 0, dE: 0 };
-    return { ratio: (qo + de) / qi, qIn: qi / n, qOut: qo / n, dE: de / n };
-  }
-
-  #checkConvergence() {
-    const t = this.time;
-    let maxDrift = 0;
-    this.mods.forEach((m, mi) => {
-      if (!m.active) return;
-      const a = this.#windowMean(this.hist.tin[mi], t - 10, t);
-      const b = this.#windowMean(this.hist.tin[mi], t - 20, t - 10);
-      const d = Math.abs(a - b);
-      maxDrift = isFinite(d) && isFinite(maxDrift) ? Math.max(maxDrift, d) : NaN;
-    });
-    const bal = this.energyBalance(10).ratio;
-    this.drift = t >= 20 ? maxDrift : NaN;
-    this.checks = {
-      time: t >= CONV.tMin,
-      drift: this.drift <= CONV.drift,
-      balance: bal >= CONV.balLo && bal <= CONV.balHi,
-      mass: this.divErr <= CONV.mass,
-    };
-    const ok = Object.values(this.checks).every(Boolean);
-    this.hold = ok ? this.hold + 1 : 0;
-    this.converged = this.hold >= CONV.hold;
-  }
-
-  /* ───────── ผลลัพธ์ ───────── */
-
-  /** ช่วงเวลาที่ใช้เฉลี่ยผล: 20 วินาทีสุดท้าย (หรือครึ่งหลังของเวลาที่คำนวณถ้าสั้นกว่า) */
-  report() {
-    const t = this.time;
-    const win = Math.min(20, Math.max(SAMPLE_DT, t / 2));
-    const mods = this.mods.map((m, mi) => {
-      const st = this.modState[mi];
-      let Tin = this.#windowMean(this.hist.tin[mi], t - win, t);
-      let Cin = this.#windowMean(this.hist.cin[mi], t - win, t);
-      if (!isFinite(Tin)) { Tin = st.Tin; Cin = st.Cin; }
-      const p = modulePerf(m.kw, m.eer, Tin, this.perf);
-      return {
-        active: m.active, hp: m.hp, kw: m.kw, q: m.q,
-        Tin, Cin, TinNow: st.Tin, TinMax: st.TinMax,
-        Tdis: Tin + p.qRej / (this.rho * m.q * this.cp),
-        capF: p.capF, qCool: p.qCool, qRej: p.qRej, pIn: p.pIn,
-        blockedPct: m.blockedPct, fanAreaGrid: m.fanAreaGrid, fanAreaReal: m.fanAreaReal,
-      };
-    });
-    const bal = this.energyBalance(10);
-    return {
-      time: t, steps: this.steps, dt: this.dt, tMax: this.tMax,
-      checks: this.checks, hold: this.hold, conv: CONV,
-      avgWindow: win,
-      divErr: this.divErr, pIters: this.pIters, drift: this.drift ?? NaN,
-      balance: bal, converged: this.converged,
-      vmax: this.vmax, threads: this.threads, cells: this.nx * this.ny * this.nz,
-      modules: mods,
-      history: decimate(this.hist, 500),
-    };
-  }
-
   /** สนามค่าที่กึ่งกลางเซลล์ สำหรับแสดงผล */
   fields() {
     const { nx, ny, nz, sy, sz, u, v, w } = this;
@@ -597,16 +316,4 @@ export class Solver {
     for (const m of this.mods) for (let a = 0; a < m.fanCells.length; a++) { T[m.fanCells[a]] = this.amb; C[m.fanCells[a]] = 0; }
     return { T, C, u: uc, v: vc, w: wc, P };
   }
-}
-
-/** ย่อประวัติให้เหลือไม่เกิน n จุด (ส่งไปวาดกราฟ) — เก็บจุดสุดท้ายเสมอ */
-function decimate(H, n) {
-  const L = H.t.length, step = Math.max(1, Math.ceil(L / n));
-  const idx = [];
-  for (let a = (L - 1) % step; a < L; a += step) idx.push(a);
-  const pick = arr => idx.map(a => arr[a]);
-  return {
-    t: pick(H.t), tin: H.tin.map(pick),
-    res: { mass: pick(H.res.mass), mom: pick(H.res.mom), energy: pick(H.res.energy) },
-  };
 }

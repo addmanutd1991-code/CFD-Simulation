@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!--
+  gputest.html — ทดสอบ solver แบบ GPU (WebGPU) เทียบกับแบบ CPU (WebAssembly) ในเบราว์เซอร์
+  เปิดผ่านเว็บเซิร์ฟเวอร์: npm run serve แล้วเปิด http://localhost:8000/tools/gputest.html?preset=lightwell&cell=0.35&t=120
+    preset  ตัวอย่างสำเร็จรูป (rooftop | rooftop-duct | lightwell | ground-wind)
+    cell    ขนาดเซลล์ (ม.)      t  เวลาจำลอง (s) ที่ใช้เทียบ T ลมเข้าเฉลี่ย      steps  จำนวนสเต็ปแรกที่เทียบสนามค่าทีละสเต็ป
+-->
+<html lang="th"><head><meta charset="UTF-8"><title>GPU solver test</title></head>
+<body><pre id="out">กำลังทดสอบ…</pre>
+<script type="module">
+import { presetScene } from '../src/scene.js';
+import { buildMesh } from '../src/mesher.js';
+import { Solver } from '../src/solver.js';
+import { GpuSolver } from '../src/gpu-solver.js';
+import { createKernelsAsync } from '../src/kernels.js';
+
+const q = new URLSearchParams(location.search);
+const out = document.getElementById('out');
+const log = (s) => { out.textContent += '\n' + s; console.log(s); };
+out.textContent = '';
+try {
+  const s = presetScene(q.get('preset') || 'lightwell');
+  s.sim.cell = Number(q.get('cell') || 0.5);
+  if (q.get('grade') === 'uniform') s.sim.grade = 'uniform';
+  for (const f of (q.get('sym') || '').split(',').filter(Boolean)) s.bc[f].type = 'symmetry';
+  const tEnd = Number(q.get('t') || 90), nCmp = Number(q.get('steps') || 5);
+  const mesh = buildMesh(s);
+  const params = { ambient: s.site.ambient, windSpeed: s.site.windSpeed, windDir: s.site.windDir, perf: s.perf, tMax: 1e9 };
+  log(`mesh ${mesh.nx}x${mesh.ny}x${mesh.nz} = ${mesh.nx * mesh.ny * mesh.nz} cells`);
+  const cpu = new Solver(mesh, { ...params, kernels: await createKernelsAsync(Solver.memoryBytes(mesh, 1)) });
+  const t0 = performance.now();
+  const gpu = await GpuSolver.create(mesh, params);
+  log(`gpu: ${gpu.deviceName}${gpu.software ? ' (software)' : ''} · init ${(performance.now() - t0).toFixed(0)} ms`);
+
+  // 1) สนามค่าสเต็ปแรก ๆ ต้องใกล้กัน (ต่างกันเฉพาะความละเอียดของเลขทศนิยม)
+  const cmp = async (tag) => {
+    const g = await gpu.raw();
+    const d = {};
+    for (const f of ['u', 'v', 'w', 'T', 'C', 'phi']) {
+      let m = 0, at = -1, ref = 0;
+      for (let c = 0; c < mesh.N; c++) {
+        if (f === 'T' || f === 'C' || f === 'phi') { if (mesh.type[c] !== 0) continue; }
+        const e = Math.abs(g[f][c] - cpu[f][c]);
+        if (!(e <= m)) { m = e; at = c; }
+        ref = Math.max(ref, Math.abs(cpu[f][c]));
+      }
+      d[f] = `${m.toExponential(1)}/${ref.toFixed(2)}`;
+    }
+    log(`${tag}: max|Δ|/max ${Object.entries(d).map(([k, v]) => k + '=' + v).join('  ')}  dt cpu=${cpu.dt.toFixed(4)} gpu=${gpu.dt.toFixed(4)} div cpu=${(cpu.divErr * 100).toFixed(3)}% gpu=${(gpu.divErr * 100).toFixed(3)}%`);
+  };
+  await cmp('init');
+  for (let n = 1; n <= nCmp; n++) { cpu.step(); await gpu.step(); await cmp('step ' + n); }
+
+  // 2) เดินต่อ เทียบ T ลมเข้าเฉลี่ยตามเวลาช่วงสองในสามท้าย และสมดุลพลังงาน
+  const mean = async (sol, isGpu) => {
+    const U = mesh.units.length, sum = new Float64Array(U);
+    let tt = 0;
+    const w0 = performance.now();
+    let n0 = sol.steps;
+    while (sol.time < tEnd) {
+      if (isGpu) await sol.step(); else sol.step();
+      if (sol.time < tEnd / 3) continue;
+      mesh.units.forEach((u, a) => { let qq = 0, x = 0; for (const i of u.modules) { qq += mesh.modules[i].q; x += sol.modState[i].Tin * mesh.modules[i].q; } sum[a] += x / qq * sol.dt; });
+      tt += sol.dt;
+    }
+    return { tin: Array.from(sum, v => v / tt), ms: (performance.now() - w0) / (sol.steps - n0), bal: sol.energyBalance(10).ratio, steps: sol.steps, div: sol.divErr };
+  };
+  const a = await mean(cpu, false), b = await mean(gpu, true);
+  log(`cpu: steps=${a.steps} ${a.ms.toFixed(1)} ms/step bal=${(a.bal * 100).toFixed(1)}% div=${(a.div * 100).toFixed(2)}% Tin ${a.tin.map(v => v.toFixed(2)).join(' ')}`);
+  log(`gpu: steps=${b.steps} ${b.ms.toFixed(1)} ms/step bal=${(b.bal * 100).toFixed(1)}% div=${(b.div * 100).toFixed(2)}% Tin ${b.tin.map(v => v.toFixed(2)).join(' ')}`);
+  const worst = Math.max(...a.tin.map((v, i) => Math.abs(v - b.tin[i])));
+  log(`max |ΔTin| = ${worst.toFixed(3)} K`);
+  const f = await gpu.fields();
+  log(`fields ok: T ${Math.min(...f.T.subarray(0, 5000)).toFixed(1)}.. , report conv=${gpu.report().converged}`);
+  log('DONE');
+} catch (err) { log('ERROR ' + (err?.stack || err)); log('DONE'); }
+</script></body></html>

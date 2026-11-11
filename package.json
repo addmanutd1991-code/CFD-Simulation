@@ -1,6 +1,6 @@
 {
   "name": "cdu-airflow-cfd",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "description": "CDU Airflow CFD — จำลองลมร้อนวนกลับของคอยล์ร้อน VRV ในเบราว์เซอร์",
@@ -8,7 +8,7 @@
     "build": "node tools/build.mjs",
     "build:wasm": "node tools/build-wasm.mjs",
     "test": "node tools/selftest.mjs",
-    "serve": "python3 -m http.server 8000"
+    "serve": "node tools/serve.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.2"
