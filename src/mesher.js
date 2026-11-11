@@ -1,7 +1,8 @@
 /*
  * mesher.js — แปลงวัตถุในฉากเป็นกริดคำนวณ (voxel) และเงื่อนไขขอบของ CDU
  *
- * กริดมีชั้นเซลล์เงา (ghost) ล้อมรอบหนึ่งชั้น: ดัชนี i = 0 และ i = nx+1 เป็นเงา
+ * กริดเป็น rectilinear (เซลล์กว้างไม่เท่ากันได้ — ดู grid.js) เส้นกริดอยู่ใน xf/yf/zf
+ * มีชั้นเซลล์เงา (ghost) ล้อมรอบหนึ่งชั้น: ดัชนี i = 0 และ i = nx+1 เป็นเงา
  *   ชนิดเซลล์: FLUID = อากาศ, SOLID = ของแข็ง, OPEN = ขอบเปิด (อากาศภายนอก)
  * ความเร็วเก็บแบบ staggered (MAC): u[c] คือหน้าด้าน −x ของเซลล์ c,
  *   v[c] หน้าด้าน −y, w[c] หน้าด้าน −z
@@ -15,6 +16,7 @@
 
 import { unitModules, unitSize, FAN_AREA } from './models.js';
 import { domainOf, cloneBC, slabRange, insideRect } from './scene.js';
+import { cellIndex } from './grid.js';
 
 export const FLUID = 0, SOLID = 1, OPEN = 2;
 
@@ -29,7 +31,7 @@ export function louverK(freePct) {
 
 export function buildMesh(scene) {
   const dom = domainOf(scene);
-  const { nx, ny, nz, h, ox, oz } = dom;
+  const { nx, ny, nz, h, ox, oz, xf, yf, zf } = dom;
   const NX = nx + 2, NY = ny + 2, NZ = nz + 2;
   const sy = NX, sz = NX * NY, N = NX * NY * NZ;
   const type = new Uint8Array(N);
@@ -37,8 +39,16 @@ export function buildMesh(scene) {
   const owner = new Int32Array(N).fill(-1);       // เซลล์ของแข็งเป็นของโมดูลใด
   const warnings = [];
 
-  const X = i => ox + (i - 0.5) * h, Y = j => (j - 0.5) * h, Z = k => oz + (k - 0.5) * h;
-  const I = x => Math.floor((x - ox) / h) + 1, J = y => Math.floor(y / h) + 1, K = z => Math.floor((z - oz) / h) + 1;
+  const X = i => 0.5 * (xf[i - 1] + xf[i]), Y = j => 0.5 * (yf[j - 1] + yf[j]), Z = k => 0.5 * (zf[k - 1] + zf[k]);
+  const I = x => cellIndex(xf, x), J = y => cellIndex(yf, y), K = z => cellIndex(zf, z);
+  // ความกว้างเซลล์ (ดัชนี 1..n) และความกว้างสูงสุดของเซลล์ที่ครอบช่วง [a, b] ของแต่ละแกน
+  const DX = i => xf[i] - xf[i - 1], DY = j => yf[j] - yf[j - 1], DZ = k => zf[k] - zf[k - 1];
+  const maxSize = (f, n, a, b) => {
+    const i0 = Math.min(n, Math.max(1, cellIndex(f, a))), i1 = Math.min(n, Math.max(1, cellIndex(f, b)));
+    let m = 0;
+    for (let i = i0; i <= i1; i++) m = Math.max(m, f[i] - f[i - 1]);
+    return m;
+  };
   const ci = (a, lo, hi) => a < lo ? lo : a > hi ? hi : a;
 
   // ชั้นเงาตามชนิดขอบที่เลือก: ขอบเปิด = OPEN, ผนัง/สมมาตร = SOLID
@@ -87,7 +97,8 @@ export function buildMesh(scene) {
     const free = o.open ?? 0;
     if (free >= 100) continue;
     const { y0, y1 } = slabRange(o);
-    const yc = Math.max((y0 + y1) / 2, 0.5 * h), hy = Math.max((y1 - y0) / 2, 0.5 * h);
+    const hl = maxSize(yf, ny, y0, y1);   // ความสูงเซลล์บริเวณแผ่น
+    const yc = Math.max((y0 + y1) / 2, 0.5 * hl), hy = Math.max((y1 - y0) / 2, 0.5 * hl);
     const solid = free <= 0;
     const kk = solid ? 0 : louverK(free) / (2 * hy);
     const r = o.rot * Math.PI / 180, c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
@@ -107,11 +118,13 @@ export function buildMesh(scene) {
     if (L < 1e-3 || o.height <= 0) continue;
     const tx = dx / L, tz = dz / L;
     // ความหนาอย่างน้อยพอให้ผนังทึบต่อเนื่องบนกริด แม้วางเฉียง (กันลมรั่วระหว่างเซลล์)
-    const ht = Math.max(o.thick / 2, 0.5 * h * (Math.abs(tx) + Math.abs(tz)));
+    const hn = maxSize(zf, nz, Math.min(o.z1, o.z2), Math.max(o.z1, o.z2)) * Math.abs(tx)
+      + maxSize(xf, nx, Math.min(o.x1, o.x2), Math.max(o.x1, o.x2)) * Math.abs(tz);
+    const ht = Math.max(o.thick / 2, 0.5 * hn);
     const free = o.louver ?? 0;
     if (free >= 100) continue;
     const solid = free <= 0;
-    const k = solid ? 0 : louverK(free) / (2 * Math.max(h, 2 * ht));
+    const k = solid ? 0 : louverK(free) / (2 * Math.max(hn, 2 * ht));
     const y0 = o.gap || 0, y1 = y0 + o.height;
     forBox(Math.min(o.x1, o.x2) - ht, Math.max(o.x1, o.x2) + ht, y0, y1,
       Math.min(o.z1, o.z2) - ht, Math.max(o.z1, o.z2) + ht, (i, j, kk, x, y, z, id) => {
@@ -171,7 +184,7 @@ export function buildMesh(scene) {
       const q = md.cmm / 60;   // m³/s
       const rec = {
         unit: ui, unitId: o.id, index: mi, hp: md.hp, kw: md.kw, eer: md.eer, q,
-        fanFaces: [], fanVel: [], inAxis: [], inFaces: [], inVel: [], inCells: [],
+        fanFaces: [], fanVel: [], fanCells: [], inAxis: [], inFaces: [], inVel: [], inCells: [], inArea: [],
         blockedPct: 0, fanAreaGrid: 0, fanAreaReal: md.fans * FAN_AREA, active: true,
       };
 
@@ -192,7 +205,8 @@ export function buildMesh(scene) {
       }
 
       // ── พัดลม ──
-      const nWant = Math.max(1, Math.round(FAN_AREA / (h * h)));
+      const aCol = DX(Math.min(nx, Math.max(1, I(o.x)))) * DZ(Math.min(nz, Math.max(1, K(o.z))));   // พื้นที่หน้าเซลล์บริเวณเครื่อง
+      const nWant = Math.max(1, Math.round(FAN_AREA / aCol));
       const used = new Set();
       const fanCenters = [];
       for (let f = 0; f < md.fans; f++) {
@@ -206,6 +220,7 @@ export function buildMesh(scene) {
         const pick = cand.slice(0, nWant);
         if (!pick.length) continue;
         const faces = [];
+        let area = 0;
         for (const cc of pick) {
           used.add(cc.i + cc.k * 100000);
           let jt = cc.j;
@@ -217,18 +232,22 @@ export function buildMesh(scene) {
           const above = cc.i + (jt + 1) * sy + cc.k * sz;
           if (jt + 1 > ny || type[above] === SOLID) continue;
           faces.push(above);   // v[above] = หน้าด้านล่างของเซลล์เหนือพัดลม
+          area += DX(cc.i) * DZ(cc.k);
         }
         if (!faces.length) continue;
-        const vel = qFan / (faces.length * h * h);
-        for (const f of faces) { rec.fanFaces.push(f); rec.fanVel.push(vel); }
-        rec.fanAreaGrid += faces.length * h * h;
+        const vel = qFan / area;
+        // fanCells = เซลล์ทึบใต้หน้าพัดลม: solver เก็บอุณหภูมิลมเป่าไว้ที่นี่ (ค่าต้นลมของหน้าพัดลม)
+        for (const f of faces) { rec.fanFaces.push(f); rec.fanVel.push(vel); rec.fanCells.push(f - sy); }
+        rec.fanAreaGrid += area;
+        rec.fanQ = (rec.fanQ || 0) + vel * area;
       }
       if (!rec.fanFaces.length) {
         rec.active = false;
         warnings.push(`${o.name}: ด้านบนพัดลมถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
       }
       // ถ้าบางใบพัดหาหน้าไม่ได้ ให้อัตราลมรวมยังถูกต้อง
-      const fanQ = rec.fanVel.reduce((s2, v) => s2 + v * h * h, 0);
+      const fanQ = rec.fanQ || 0;
+      delete rec.fanQ;
       if (fanQ > 0 && Math.abs(fanQ - q) > 1e-6) rec.fanVel = rec.fanVel.map(v => v * q / fanQ);
 
       // ── คอยล์ดูดลม ──
@@ -248,7 +267,7 @@ export function buildMesh(scene) {
             if (ob >= gBase && ob < gBase + mods.length) continue;       // ติดกับโมดูลในชุดเดียวกัน
             if (sides === SIDES) potential++;
             if (type[nb] !== FLUID) continue;                             // ถูกผนัง/วัตถุอื่นบัง
-            out.push({ id, nb, di, dk });
+            out.push({ id, nb, di, dk, area: DY(j) * (di ? DZ(k) : DX(i)) });
           }
         });
         return out;
@@ -266,7 +285,8 @@ export function buildMesh(scene) {
       } else if (rec.blockedPct > 25) {
         warnings.push(`${o.name}: หน้าคอยล์ถูกบัง ${rec.blockedPct.toFixed(0)}%`);
       }
-      const vin = q / (faces.length * h * h);
+      const coilArea = faces.reduce((a, f) => a + f.area, 0);
+      const vin = q / coilArea;
       for (const f of faces) {
         // ความเร็วบวกตามแกน = ไหลไปทาง +x/+z
         if (f.di === 1) { rec.inAxis.push(0); rec.inFaces.push(f.id + 1); rec.inVel.push(-vin); }
@@ -274,8 +294,9 @@ export function buildMesh(scene) {
         else if (f.dk === 1) { rec.inAxis.push(2); rec.inFaces.push(f.id + sz); rec.inVel.push(-vin); }
         else { rec.inAxis.push(2); rec.inFaces.push(f.id); rec.inVel.push(vin); }
         rec.inCells.push(f.nb);
+        rec.inArea.push(f.area);
       }
-      rec.coilAreaGrid = faces.length * h * h;
+      rec.coilAreaGrid = coilArea;
       modules.push(rec);
       unit.modules.push(rec);
     });
@@ -290,10 +311,12 @@ export function buildMesh(scene) {
     fanFaces: Int32Array.from(m.fanFaces), fanVel: Float32Array.from(m.fanVel),
     inAxis: Uint8Array.from(m.inAxis), inFaces: Int32Array.from(m.inFaces),
     inVel: Float32Array.from(m.inVel), inCells: Int32Array.from(m.inCells),
+    fanCells: Int32Array.from(m.fanCells), inArea: Float32Array.from(m.inArea),
   }));
 
   return {
     dom, nx, ny, nz, h, ox, oz, NX, NY, NZ, N, sy, sz, bc,
+    xf, yf, zf, graded: dom.graded, hMax: dom.hMax,
     type, kp, modules: pack,
     units: units.map(u => ({ id: u.id, name: u.name, model: u.model, modules: u.modules.map(m => modules.indexOf(m)) })),
     stats: { fluid, porous, solid: nx * ny * nz - fluid },

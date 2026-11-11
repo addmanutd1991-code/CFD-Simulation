@@ -5,6 +5,8 @@
 import { MODELS, getModel, unitSize, status as unitStatus, MODULE_H, MODULE_D } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import { buildMesh } from './mesher.js';
+import { Solver } from './solver.js';
+import { GPU_BYTES_PER_CELL } from './gpu-solver.js';
 import { Viewer, CONTOUR_LEVELS } from './viewer.js';
 import { Runner } from './runner.js';
 import { cssGradient, FIELDS, rgb } from './colormap.js';
@@ -46,6 +48,26 @@ const viewer = new Viewer($('#viewport'), {
   newCduRot: () => lastUsed.rot,
   newWallHeight: () => lastUsed.wallHeight,
 });
+
+/**
+ * คำนวณหลายเธรดต้องให้หน้าเว็บเป็น cross-origin isolated (เงื่อนไขของ SharedArrayBuffer)
+ * เมื่อเปิดผ่าน http(s) ให้ service worker coi-sw.js เติมส่วนหัว COOP/COEP แล้วโหลดหน้าใหม่หนึ่งครั้ง
+ * (เปิดจาก file:// ทำไม่ได้ — คำนวณเธรดเดียว)
+ */
+function enableIsolation() {
+  if (globalThis.crossOriginIsolated || !('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol) || !window.isSecureContext) return;
+  const KEY = 'cfd-coi-reload';
+  const reloadOnce = () => {
+    let done = false;
+    try { done = sessionStorage.getItem(KEY) === '1'; sessionStorage.setItem(KEY, '1'); } catch { done = true; }
+    if (!done) location.reload();
+  };
+  navigator.serviceWorker.register('coi-sw.js').then(() => {
+    if (navigator.serviceWorker.controller) reloadOnce();   // ควบคุมหน้าอยู่แล้วแต่หน้านี้โหลดมาก่อน
+    else navigator.serviceWorker.addEventListener('controllerchange', reloadOnce, { once: true });
+  }).catch(() => { /* ไม่มี service worker — ใช้เธรดเดียว */ });
+}
+enableIsolation();
 
 const runner = new Runner(onEngineMessage);
 
@@ -481,6 +503,7 @@ const SETTINGS = [
 
 function renderSettings() {
   for (const [sel, g, k] of SETTINGS) $(sel).value = scene[g][k];
+  $('#s-grade').value = scene.sim.grade === 'uniform' ? 'uniform' : 'auto';
   $('#p-kcap').value = round2(scene.perf.kCap * 100);
   $('#p-kpow').value = round2(scene.perf.kPow * 100);
   $('#proj-name').value = scene.name;
@@ -502,6 +525,7 @@ function bindSettings() {
       edit(() => { scene[g][k] = v; });
     });
   }
+  $('#s-grade').addEventListener('change', (e) => edit(() => { scene.sim.grade = e.target.value === 'uniform' ? 'uniform' : 'auto'; }));
   $('#p-kcap').addEventListener('change', (e) => edit(() => { scene.perf.kCap = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#p-kpow').addEventListener('change', (e) => edit(() => { scene.perf.kPow = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#proj-name').addEventListener('change', (e) => { scene.name = e.target.value.trim() || 'โปรเจกต์'; saveAutosave(); });
@@ -535,23 +559,97 @@ function bindBands() {
 /** ต้องมีขอบเปิดอย่างน้อยหนึ่งด้าน มิฉะนั้นความร้อนออกจากโดเมนไม่ได้และผลไม่มีวันนิ่ง */
 function hasOpenFace() { return BC_FACES.some(f => scene.bc[f].type === 'open'); }
 
-/** หน่วยความจำของ solver ≈ 112 ไบต์ต่อเซลล์ (รวมเซลล์ขอบ) — ดู Solver.memoryBytes */
-const meshBytes = d => (d.nx + 2) * (d.ny + 2) * (d.nz + 2) * 112;
+/* ───────── เครื่องคำนวณ: CPU (WebAssembly) หรือ GPU (WebGPU) ───────── */
+
+/** ตัวเลือกของผู้ใช้ — เก็บไว้กับเบราว์เซอร์ (ขึ้นกับเครื่อง ไม่ใช่กับโปรเจกต์) */
+const BACKEND_KEY = 'cfd-backend';
+const gpu = { ok: false, name: '', software: false, maxBuffer: 0, reason: 'เบราว์เซอร์นี้ไม่มี WebGPU (ใช้ Chrome / Edge รุ่นใหม่)' };
+let backend = 'cpu';
+try { if (localStorage.getItem(BACKEND_KEY) === 'gpu') backend = 'gpu'; } catch { /* ถูกบล็อก */ }
+
+/** ตรวจการ์ดจอครั้งเดียวตอนเปิดโปรแกรม เพื่อบอกผู้ใช้ว่าเลือก GPU ได้หรือไม่ */
+async function probeGpu() {
+  try {
+    if (navigator.gpu) {
+      const ad = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      if (ad) {
+        const i = ad.info || {};
+        gpu.ok = true;
+        gpu.name = [i.vendor, i.device || i.architecture, i.description].filter(Boolean).join(' ') || 'WebGPU';
+        gpu.software = !!(ad.isFallbackAdapter || i.isFallbackAdapter || /swiftshader|llvmpipe|software/i.test(gpu.name));
+        gpu.maxBuffer = Math.min(ad.limits.maxBufferSize, ad.limits.maxStorageBufferBindingSize);
+      } else gpu.reason = 'ไม่พบการ์ดจอที่ใช้ WebGPU ได้ (ไดรเวอร์เก่า หรือถูกปิดในเบราว์เซอร์)';
+    }
+  } catch (err) { gpu.reason = err?.message || String(err); }
+  if (!gpu.ok) backend = 'cpu';
+  renderBackend();
+  updateEstimate();
+}
+
+function renderBackend() {
+  const sel = $('#s-backend');
+  sel.value = backend;
+  $('option[value="gpu"]', sel).disabled = !gpu.ok;
+  const cores = navigator.hardwareConcurrency || 1;
+  const note = $('#backend-note');
+  if (backend === 'gpu') {
+    note.textContent = `การ์ดจอ: ${gpu.name}` + (gpu.software
+      ? ' — เป็นตัวจำลองด้วยซอฟต์แวร์ ไม่ใช่การ์ดจอจริง จะช้ากว่า CPU'
+      : ' · ความแม่นยำ 32 บิต (ผลต่างจาก CPU เล็กน้อย) · ถ้าการ์ดจอใช้ไม่ได้ระหว่างเตรียมการคำนวณ จะใช้ CPU แทนอัตโนมัติ');
+  } else {
+    note.textContent = (globalThis.crossOriginIsolated
+      ? `CPU: ใช้ได้หลายเธรด (เครื่องมี ${cores} แกน)`
+      : cores > 1 ? `CPU: ใช้ได้ 1 เธรดจาก ${cores} แกน เพราะเปิดไฟล์โดยตรง — เปิดผ่าน http:// เพื่อใช้ทุกแกน (ดูแท็บ README)` : 'CPU: 1 เธรด')
+      + (gpu.ok ? '' : ` · GPU: ${gpu.reason}`);
+  }
+}
+
+function bindBackend() {
+  $('#s-backend').addEventListener('change', (e) => {
+    backend = e.target.value === 'gpu' && gpu.ok ? 'gpu' : 'cpu';
+    try { localStorage.setItem(BACKEND_KEY, backend); } catch { /* ถูกบล็อก */ }
+    renderBackend();
+    updateEstimate();
+    if (run.mesh && !run.stale && run.state !== 'idle') toast('เครื่องคำนวณที่เลือกจะใช้กับการคำนวณครั้งถัดไป — กด ↺ รีเซ็ตผล แล้วคำนวณใหม่');
+  });
+  renderBackend();
+  probeGpu();
+}
+
+/** หน่วยความจำของ solver: CPU ≈ 75 ไบต์ต่อเซลล์ (ดู Solver.memoryBytes), GPU ≈ 112 ไบต์ต่อเซลล์บนการ์ดจอ */
+const meshBytes = d => (d.nx + 2) * (d.ny + 2) * (d.nz + 2) * (backend === 'gpu' ? GPU_BYTES_PER_CELL : Solver.bytesPerCell);
+/** เมชเกินขีดจำกัดของเครื่องคำนวณที่เลือกหรือไม่ — คืนข้อความอธิบาย หรือ '' */
+function meshTooBig(d) {
+  const N = (d.nx + 2) * (d.ny + 2) * (d.nz + 2);
+  if (backend === 'gpu') {
+    return gpu.maxBuffer && N * 16 > gpu.maxBuffer ? `เกินขนาดบัฟเฟอร์สูงสุดของการ์ดจอนี้ (${fmtMem(gpu.maxBuffer)} ต่อบัฟเฟอร์)` : '';
+  }
+  return meshBytes(d) > MAX_MESH_BYTES ? 'เกินหน่วยความจำสูงสุด 4 GB ของ WebAssembly' : '';
+}
 /** WebAssembly 32 บิตจองได้สูงสุด 4 GiB เผื่อสแตก/ส่วนอื่นไว้ 128 MiB */
 const MAX_MESH_BYTES = 4 * 1024 ** 3 - 128 * 1024 ** 2;
 const fmtGB = b => (b / 1024 ** 3).toFixed(1);
+/** ขนาดหน่วยความจำพร้อมหน่วย (MB เมื่อน้อยกว่า 1 GB) */
+const fmtMem = b => b < 0.95 * 1024 ** 3 ? `${Math.max(1, Math.round(b / 1024 ** 2))} MB` : `${fmtGB(b)} GB`;
+/** จำนวนเซลล์ที่ควรถามยืนยันก่อนคำนวณ */
+const BIG_MESH = 2.5e6;
 
 function updateEstimate() {
   const d = domainOf(scene);
   // โดยทั่วไปลู่เข้าในช่วง 60–150 วินาทีจำลอง — ประมาณที่ 120 s
   const steps = 120 / (0.25 * d.h);
-  const sec = d.cells * 0.4e-6 * steps;   // ≈0.4 µs ต่อเซลล์ต่อสเต็ป (WebAssembly)
+  // ≈0.33 µs ต่อเซลล์ต่อสเต็ปต่อเธรด; หลายเธรดเร็วขึ้นราว 0.6 เท่าของจำนวนเธรด (จำกัดด้วยความเร็วหน่วยความจำ)
+  const th = run.threads || 1;
+  const sec = d.cells * 0.33e-6 * steps / Math.max(1, 0.6 * th);
   const el = $('#mesh-info');
-  el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์ · หน่วยความจำ ≈ ${fmtGB(meshBytes(d))} GB`
-    + (meshBytes(d) > MAX_MESH_BYTES ? ' — เกิน 4 GB คำนวณไม่ได้ ลดระยะเผื่อโดเมนหรือเพิ่มขนาดเซลล์' : '');
-  el.classList.toggle('warn', d.cells > 1.2e6);
+  const saved = d.graded && d.cellsUniform > d.cells * 1.05
+    ? ` (เมชปรับความละเอียดอัตโนมัติ — ลดจาก ${fmtK(d.cellsUniform)} เซลล์ ${(d.cellsUniform / d.cells).toFixed(1)} เท่า · เซลล์ ${fmt(d.h)}–${fmt(d.hMax)} ม.)` : '';
+  el.textContent = `โดเมน ${fmt(d.W)} × ${fmt(d.D)} × ${fmt(d.H)} ม. · กริด ${d.nx}×${d.ny}×${d.nz} = ${fmtK(d.cells)} เซลล์${saved} · หน่วยความจำ ≈ ${fmtMem(meshBytes(d))}`
+    + (backend === 'gpu' ? ' (บนการ์ดจอ)' : '')
+    + (meshTooBig(d) ? ` — ${meshTooBig(d)} คำนวณไม่ได้ ลดระยะเผื่อโดเมนหรือเพิ่มขนาดเซลล์` : '');
+  el.classList.toggle('warn', d.cells > BIG_MESH);
   if (run.state !== 'running') $('#estimate').textContent = scene.objects.some(o => o.type === 'cdu')
-    ? `${fmtK(d.cells)} เซลล์ · ประมาณ ${fmtDur(sec)}` : '';
+    ? (backend === 'gpu' ? `${fmtK(d.cells)} เซลล์ · GPU` : `${fmtK(d.cells)} เซลล์ · ประมาณ ${fmtDur(sec)}`) : '';
 }
 
 /* ───────── การคำนวณ ───────── */
@@ -577,11 +675,11 @@ function startOrToggle() {
   if (!scene.objects.some(o => o.type === 'cdu')) { toast('ยังไม่มี CDU ในฉาก — กด + CDU แล้ววางเครื่องก่อน'); return; }
   if (!hasOpenFace()) { toast('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน ไม่เช่นนั้นลมร้อนออกไม่ได้และผลจะไม่ลู่เข้า', 5000); return; }
   const d = domainOf(scene);
-  if (meshBytes(d) > MAX_MESH_BYTES) {
-    toast(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์ ≈ ${fmtGB(meshBytes(d))} GB เกินหน่วยความจำสูงสุด 4 GB ของ WebAssembly) — เพิ่มขนาดเซลล์ หรือลดระยะเผื่อขอบโดเมน`, 6000);
+  if (meshTooBig(d)) {
+    toast(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์ ≈ ${fmtMem(meshBytes(d))}) ${meshTooBig(d)} — เพิ่มขนาดเซลล์ หรือลดระยะเผื่อขอบโดเมน`, 6000);
     return;
   }
-  if (d.cells > 1.2e6 && !confirm(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`)) return;
+  if (d.cells > BIG_MESH && !confirm(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`)) return;
 
   const mesh = buildMesh(scene);
   run.mesh = mesh;
@@ -594,7 +692,7 @@ function startOrToggle() {
   run.lastT = 0; run.rate = null;
   viewer.setResults(null);
   runner.send({
-    cmd: 'init', mesh,
+    cmd: 'init', mesh, backend,
     params: { ambient: scene.site.ambient, windSpeed: scene.site.windSpeed, windDir: scene.site.windDir, perf: scene.perf, tMax: scene.sim.tMax },
   });
   runner.send({ cmd: 'run' });
@@ -625,6 +723,27 @@ function invalidate() {
 function onEngineMessage(msg) {
   if (msg.type === 'mode') {
     $('#foot-mode').textContent = 'คำนวณบน main thread (เบราว์เซอร์ไม่อนุญาต Web Worker) — ผลเหมือนเดิมแต่หน้าจออาจหน่วงเล็กน้อย';
+    return;
+  }
+  if (msg.type === 'ready') {
+    // สถานะเครื่องคำนวณที่ใช้จริง: GPU, หรือ CPU กี่เธรด (พร้อมเหตุผลถ้าใช้ได้เธรดเดียว)
+    run.threads = msg.threads;
+    const cores = navigator.hardwareConcurrency || 1;
+    if (msg.gpuError) toast(`ใช้ GPU ไม่ได้ (${msg.gpuError}) — คำนวณด้วย CPU แทน`, 8000);
+    $('#foot-mode').textContent = msg.backend === 'gpu'
+      ? `คำนวณบน GPU (WebGPU): ${msg.device}${msg.software ? ' — ตัวจำลองด้วยซอฟต์แวร์ ไม่ใช่การ์ดจอจริง' : ''}`
+      : msg.threads > 1
+        ? `คำนวณด้วย WebAssembly ${msg.threads} เธรด (เครื่องมี ${cores} แกน)`
+        : runner.mode === 'main' ? 'คำนวณบน main thread เธรดเดียว (เบราว์เซอร์ไม่อนุญาต Web Worker)'
+          : cores > 1 && !msg.isolated ? `คำนวณด้วย WebAssembly 1 เธรด — เปิดผ่าน http:// (เช่น npm run serve) เพื่อใช้ทั้ง ${cores} แกน หรือเลือกเครื่องคำนวณเป็น GPU`
+            : 'คำนวณด้วย WebAssembly 1 เธรด';
+    return;
+  }
+  if (msg.type === 'error') {
+    run.state = 'idle'; run.mesh = null; run.report = null; run.fields = null;
+    toast(msg.message, 8000);
+    renderResults();
+    updateRunUI();
     return;
   }
   if (!run.mesh || run.stale) return;
@@ -840,7 +959,8 @@ function renderQuality() {
   const r = run.report, M = run.mesh;
   const q = [];
   const cls = (ok) => ok ? 'good' : 'warn';
-  q.push(['กริด', `${M.nx}×${M.ny}×${M.nz} · h = ${M.h} ม.`]);
+  q.push(['กริด', `${M.nx}×${M.ny}×${M.nz} · h = ${M.h}${M.graded ? '–' + fmt(M.hMax) : ''} ม.${M.graded ? ' (ปรับความละเอียดอัตโนมัติ)' : ''}`]);
+  q.push(['เครื่องคำนวณ', r.backend === 'gpu' ? `GPU · ${esc(r.device || 'WebGPU')} · เลข 32 บิต` : `CPU · WebAssembly · ${r.threads || 1} เธรด`]);
   q.push(['เซลล์อากาศ / louver', `${fmtK(M.stats.fluid)} / ${fmtK(M.stats.porous)}`]);
   q.push(['เวลาจำลอง · สเต็ป', `${r.time.toFixed(1)} s · ${r.steps}`]);
   q.push(['Δt', `${(r.dt * 1000).toFixed(0)} ms`]);
@@ -1424,6 +1544,7 @@ function bindUI() {
   });
 
   bindSettings();
+  bindBackend();
   bindBands();
 
   window.addEventListener('keydown', (e) => {

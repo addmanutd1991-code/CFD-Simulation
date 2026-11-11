@@ -10,10 +10,12 @@
  */
 
 import { DEFAULT_PERF, unitSize } from './models.js';
+import { gradeFeatures, gradedAxis, uniformAxis } from './grid.js';
 
 export const DEFAULTS = {
   site: { ambient: 35, windSpeed: 0, windDir: 0 },
-  sim: { cell: 0.1, tMax: 1800 },
+  // grade: 'auto' = เมชปรับความละเอียดอัตโนมัติ (ละเอียดรอบ CDU ขยายออกสู่ขอบโดเมน) · 'uniform' = เซลล์เท่ากันทั้งโดเมน
+  sim: { cell: 0.1, tMax: 1800, grade: 'auto' },
   // เกณฑ์สี CDU ตาม T ลมเข้ารายโมดูล (°C) ที่อากาศภายนอก 35 °C: ≤ green เขียว, ≤ red เหลือง, > red แดง
   bands: { green: 40, red: 46 },
   bc: {
@@ -114,7 +116,8 @@ export function insideRect(o, x, z) {
 
 /**
  * โดเมนคำนวณ: ครอบวัตถุทั้งหมด + ระยะเผื่อรอบด้าน และความสูงเผื่อเหนือวัตถุที่สูงที่สุด
- * ปัดขนาดให้ลงตัวกับขนาดเซลล์
+ * คืนเส้นกริด xf/yf/zf (พิกัดหน้าเซลล์) — สม่ำเสมอ หรือปรับความละเอียดอัตโนมัติตาม sim.grade (ดู grid.js)
+ * cellsUniform = จำนวนเซลล์ถ้าใช้เซลล์ขนาด h เท่ากันทั้งโดเมน (ไว้เทียบว่าเมช graded ประหยัดไปเท่าใด)
  */
 export function domainOf(scene) {
   const { cell } = scene.sim;
@@ -133,7 +136,25 @@ export function domainOf(scene) {
   const D = Math.min(150, Math.ceil((z1 + bc.zmax.dist - oz) / cell) * cell);
   const H = Math.min(60, Math.ceil(Math.max(3, ymax + bc.ymax.dist) / cell) * cell);
   const nx = Math.round(W / cell), ny = Math.round(H / cell), nz = Math.round(D / cell);
-  return { ox, oz, W, H, D, h: cell, nx, ny, nz, cells: nx * ny * nz };
+  const cellsUniform = nx * ny * nz;
+  if (scene.sim.grade === 'uniform') {
+    return {
+      ox, oz, W, H, D, h: cell, nx, ny, nz, cells: cellsUniform, cellsUniform, graded: false, hMax: cell,
+      xf: uniformAxis(ox, nx, cell), yf: uniformAxis(0, ny, cell), zf: uniformAxis(oz, nz, cell),
+    };
+  }
+  // โดเมนเท่ากับของเมชสม่ำเสมอพอดี ต่างกันแค่การแบ่งเซลล์ภายใน
+  const { F, sMax } = gradeFeatures(scene, cell);
+  const xf = gradedAxis(ox, ox + nx * cell, cell, F.x, sMax);
+  const yf = gradedAxis(0, ny * cell, cell, F.y, sMax);
+  const zf = gradedAxis(oz, oz + nz * cell, cell, F.z, sMax);
+  const gx = xf.length - 1, gy = yf.length - 1, gz = zf.length - 1;
+  let hMax = cell;
+  for (const a of [xf, yf, zf]) for (let i = 1; i < a.length; i++) hMax = Math.max(hMax, a[i] - a[i - 1]);
+  return {
+    ox, oz, W, H, D, h: cell, nx: gx, ny: gy, nz: gz,
+    cells: gx * gy * gz, cellsUniform, graded: true, hMax, xf, yf, zf,
+  };
 }
 
 /* ───────── ตัวอย่างสำเร็จรูป ───────── */
@@ -245,6 +266,7 @@ export function normalizeScene(raw) {
   if (raw.sim?.margin != null) for (const f of ['xmin', 'xmax', 'zmin', 'zmax']) s.bc[f].dist = raw.sim.margin;
   if (raw.sim?.top != null) s.bc.ymax.dist = raw.sim.top;
   delete s.sim.margin; delete s.sim.top; delete s.sim.tEnd;
+  if (s.sim.grade !== 'uniform') s.sim.grade = 'auto';
   if (raw.bc) s.bc = cloneBC(raw.bc);
   Object.assign(s.bands, raw.bands || {});
   if (!(s.bands.red > s.bands.green)) s.bands = { ...DEFAULTS.bands };
