@@ -3,13 +3,18 @@
  *
  * พิกัดโลก (เมตร): +x = ทิศตะวันออก, +z = ทิศใต้, +y = ขึ้น (ทิศเหนือคือ −z)
  * วัตถุมี 4 ชนิด
- *   cdu      {x, z, rot, elev, model, duct, airflow}   — rot เป็นพหุคูณของ 90°, ด้านหน้าเครื่องหันไป +z เมื่อ rot = 0
+ *   cdu      {x, z, rot, elev, model, duct, hoodType, hoodDir, deflect, airflow}
+ *            — rot เป็นพหุคูณของ 90°, ด้านหน้าเครื่องหันไป +z เมื่อ rot = 0
+ *            — duct = Hood: รุ่นเป่าขึ้น (VRV 6A) คือความสูง Hood เหนือเครื่อง, รุ่นเป่าหน้า (VRV IV S / S Hi)
+ *              คือความยาว Hood ที่ยื่นจากหน้ากากพัดลม (0 = ไม่มี Hood)
+ *            — hoodType 'straight' | 'elbow' (หัก 90°) และ hoodDir 'front'|'back'|'left'|'right' (ทิศปากลมของ Hood หัก) — รุ่นเป่าขึ้น
+ *            — deflect 'none'|'up'|'down'|'left'|'right' ใบเบี่ยงลมร้อน 45° — รุ่นเป่าหน้า
  *   wall     {x1, z1, x2, z2, height, thick, louver, gap} — louver = % พื้นที่เปิด (0 = ผนังทึบ)
  *   building {x, z, w, d, h, rot}
  *   slab     {x, z, w, d, y, thick, rot, open}         — แผ่นพื้นยก/หลังคา: y = ระดับผิวบน, open = % ช่องเปิด (0 = ทึบ)
  */
 
-import { DEFAULT_PERF, unitSize } from './models.js';
+import { DEFAULT_PERF, unitSize, unitExtent } from './models.js';
 import { gradeFeatures, gradedAxis, uniformAxis } from './grid.js';
 
 export const DEFAULTS = {
@@ -68,7 +73,13 @@ export function makeObject(scene, type, input = {}) {
   // id/name ที่ไม่ได้ระบุ (รวมถึง undefined ตอนทำสำเนา/วาง) ต้องไม่ทับค่าที่สร้างใหม่
   const { id, name, type: _t, ...props } = input;
   const base = { id: Number.isFinite(id) ? id : nextId(scene), type, name: name || nextName(scene, type) };
-  if (type === 'cdu') return { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, airflow: null, ...props };
+  if (type === 'cdu') {
+    const o = { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, hoodType: 'straight', hoodDir: 'front', deflect: 'none', airflow: null, ...props };
+    if (!['straight', 'elbow'].includes(o.hoodType)) o.hoodType = 'straight';
+    if (!['front', 'back', 'left', 'right'].includes(o.hoodDir)) o.hoodDir = 'front';
+    if (!['none', 'up', 'down', 'left', 'right'].includes(o.deflect)) o.deflect = 'none';
+    return o;
+  }
   if (type === 'wall') return { ...base, x1: 0, z1: 0, x2: 4, z2: 0, height: 2.4, thick: 0.15, louver: 50, gap: 0, ...props };
   if (type === 'slab') return { ...base, x: 0, z: 0, w: 5, d: 4, y: 3, thick: 0.2, rot: 0, open: 0, ...props };
   return { ...base, x: 0, z: 0, w: 5, d: 4, h: 4.5, rot: 0, ...props };
@@ -81,11 +92,11 @@ export function cduFootprint(o) {
   return { sx: swap ? s.d : s.w, sz: swap ? s.w : s.d, h: s.h };
 }
 
-/** กรอบสี่เหลี่ยมตามแกน (AABB) ของวัตถุ พร้อมความสูงบนสุด */
+/** กรอบสี่เหลี่ยมตามแกน (AABB) ของวัตถุ พร้อมความสูงบนสุด — CDU รวม Hood และใบเบี่ยงลม */
 export function objectBounds(o) {
   if (o.type === 'cdu') {
-    const f = cduFootprint(o);
-    return { x0: o.x - f.sx / 2, x1: o.x + f.sx / 2, z0: o.z - f.sz / 2, z1: o.z + f.sz / 2, top: o.elev + f.h + (o.duct || 0) };
+    const e = unitExtent(o);
+    return { x0: e.x0, x1: e.x1, z0: e.z0, z1: e.z1, top: e.y1 };
   }
   if (o.type === 'wall') {
     const t = o.thick / 2;
@@ -239,6 +250,43 @@ export const PRESETS = [
           cdu('CDU-3', 9.0, 4.6, 0, 'RXQ18BY1S'),
           cdu('CDU-4', 12.0, 4.6, 0, 'RXQ18BY1S'),
           wall('รั้วบังตา', 1.5, 7.0, 13.5, 7.0, 2.0, 30),
+        ]),
+      };
+    },
+  },
+  {
+    key: 'canopy-elbow',
+    label: 'VRV 6A ใต้หลังคา + Hood หัก 90° ปากลมหันหน้า',
+    build() {
+      const hood = { duct: 1.2, hoodType: 'elbow', hoodDir: 'front' };
+      return {
+        name: 'VRV 6A ใต้หลังคา — Hood หัก 90°',
+        site: { ambient: 35, windSpeed: 0, windDir: 0 },
+        objects: withIds([
+          bldg('อาคาร', 4.0, 1.0, 10.0, 2.0, 6.0),
+          { type: 'slab', name: 'หลังคาคลุม', x: 4.0, z: 3.5, w: 10.0, d: 3.0, y: 4.0, thick: 0.2, rot: 0, open: 0 },
+          cdu('CDU-1', 2.5, 3.0, 0, 'RXQ12BY1S', hood),
+          cdu('CDU-2', 4.0, 3.0, 0, 'RXQ12BY1S', hood),
+          cdu('CDU-3', 5.5, 3.0, 0, 'RXQ12BY1S', hood),
+        ]),
+      };
+    },
+  },
+  {
+    key: 'side-deflect',
+    label: 'VRV S Hi / IV S เป่าหน้าชิดรั้ว + Hood ใบเบี่ยงลมขึ้น 45°',
+    build() {
+      const hood = { duct: 0.3, deflect: 'up' };
+      return {
+        name: 'VRV S Hi / IV S เป่าหน้า — ใบเบี่ยงลมขึ้น',
+        site: { ambient: 35, windSpeed: 0, windDir: 0 },
+        objects: withIds([
+          bldg('อาคาร', 5.0, 0.5, 12.0, 1.0, 6.0),
+          wall('รั้วทึบ', -1.0, 3.0, 11.0, 3.0, 2.0, 0),
+          cdu('CDU-1', 1.5, 1.5, 0, 'RSUQ9AYM', hood),
+          cdu('CDU-2', 3.5, 1.5, 0, 'RSUQ8AYM', hood),
+          cdu('CDU-3', 5.5, 1.4, 0, 'RXMQ6BVM', hood),
+          cdu('CDU-4', 7.5, 1.4, 0, 'RXMQ5BVM', { duct: 0, deflect: 'none' }),
         ]),
       };
     },

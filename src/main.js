@@ -2,7 +2,7 @@
  * main.js — ตัวควบคุมหลัก: เชื่อมหน้าจอ ↔ ข้อมูลฉาก ↔ มุมมอง 3D ↔ ตัวคำนวณ
  */
 
-import { MODELS, getModel, unitSize, status as unitStatus, MODULE_H, MODULE_D } from './models.js';
+import { MODELS, SERIES, getModel, unitSize, status as unitStatus, ELBOW_OPEN } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import { buildMesh } from './mesher.js';
 import { Solver } from './solver.js';
@@ -352,21 +352,40 @@ function renderProps() {
     <label class="row">ชื่อ <input type="text" data-k="name" value="${esc(o.name)}"></label>`;
   if (o.type === 'cdu') {
     const m = getModel(o.model);
-    const opts = (single) => MODELS.filter(x => (x.modules.length === 1) === single)
-      .map(x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.id} — ${x.hp} HP · ${x.kw.toFixed(1)} kW</option>`).join('');
+    const opt = x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.id} — ${x.hp} HP · ${x.kw.toFixed(1)} kW</option>`;
+    const groups = SERIES.flatMap(sr => {
+      const list = MODELS.filter(x => x.series === sr.key);
+      if (sr.key !== '6A') return [[`${sr.label} (${sr.code}) — เป่าลมหน้า`, list]];
+      return [[`${sr.label} — โมดูลเดี่ยว`, list.filter(x => x.modules.length === 1)], [`${sr.label} — ชุดคอมบิเนชัน`, list.filter(x => x.modules.length > 1)]];
+    }).map(([l, list]) => `<optgroup label="${l}">${list.map(opt).join('')}</optgroup>`).join('');
     const sz = unitSize(o);
+    const front = m.discharge === 'front';
+    const seg = (key, cur, items) => `<div class="seg" data-seg="${key}">${items.map(([v, l]) =>
+      `<button data-v="${v}" class="${cur === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+    const hoodHtml = front ? `
+      <label class="row">Hood ยื่นจากหน้าพัดลม (ม.) <input type="number" step="0.1" min="0" max="3" data-k="duct" value="${fmt(o.duct || 0)}"></label>
+      <div class="row row-block">ใบเบี่ยงลมร้อน 45° ${seg('deflect', o.deflect || 'none', [['none', 'ไม่มี'], ['up', 'ขึ้น'], ['down', 'ลง'], ['left', 'ซ้าย'], ['right', 'ขวา']])}</div>
+      <p class="note">Hood = ท่อสี่เหลี่ยม ${Math.round(m.fan.s * 1000)} × ${Math.round(m.fan.s * 1000)} มม. ครอบหน้ากากพัดลม (0 = ไม่มี Hood)
+        · ใบเบี่ยงติดที่ปากลม (หรือปลาย Hood) เบี่ยงลมร้อน 45° · ซ้าย/ขวามองจากด้านหน้าเครื่อง</p>` : `
+      <label class="row">ความสูง Hood (ม.) <input type="number" step="0.1" min="0" max="3" data-k="duct" value="${fmt(o.duct || 0)}"></label>
+      <div class="row">รูปแบบ Hood ${seg('hoodType', o.hoodType || 'straight', [['straight', 'ตรง (เป่าขึ้น)'], ['elbow', 'หัก 90°']])}</div>
+      ${o.hoodType === 'elbow' ? `<div class="row">ปากลม Hood หันไป ${seg('hoodDir', o.hoodDir || 'front', [['front', 'หน้า'], ['back', 'หลัง'], ['left', 'ซ้าย'], ['right', 'ขวา']])}</div>` : ''}
+      <p class="note">0 = ไม่มี Hood · Hood ตรง: ปากลมสูงขึ้นตามความสูงที่ตั้ง
+        · Hood หัก 90°: กล่องคลุมด้านบนทั้งชุด ช่องลมออกด้านข้างสูง ${Math.round(1000 * Math.min(ELBOW_OPEN, Math.max(o.duct || 0, 0)))} มม. ที่ช่วงบนสุด
+        ${m.modules.length > 1 ? '· ปากลมซ้าย/ขวาใช้ได้กับเครื่องโมดูลเดี่ยว' : ''}</p>`;
     html += `
-      <label class="row">รุ่น <select data-k="model"><optgroup label="โมดูลเดี่ยว">${opts(true)}</optgroup><optgroup label="ชุดคอมบิเนชัน">${opts(false)}</optgroup></select></label>
+      <label class="row">รุ่น <select data-k="model">${groups}</select></label>
       <div class="row">ตำแหน่ง x, z (ม.) <span class="xz"><input type="number" step="0.1" data-k="x" value="${fmt(o.x)}"><input type="number" step="0.1" data-k="z" value="${fmt(o.z)}"></span></div>
       <div class="row">ด้านหน้าเครื่องหันไป <div class="seg" data-seg="rot">
         ${[[0, 'ใต้'], [90, 'ตอ.'], [180, 'เหนือ'], [270, 'ตต.']].map(([v, l]) => `<button data-v="${v}" class="${o.rot === v ? 'on' : ''}">${l}</button>`).join('')}
       </div></div>
       <label class="row">ความสูงฐาน (ม.) <input type="number" step="0.05" min="0" max="60" data-k="elev" value="${fmt(o.elev)}"></label>
-      <label class="row">ท่อเป่าลมเหนือพัดลม (ม.) <input type="number" step="0.1" min="0" max="3" data-k="duct" value="${fmt(o.duct || 0)}"></label>
+      ${hoodHtml}
       <label class="row">อัตราลม (m³/min) <input type="number" step="1" min="30" max="2000" data-k="airflow" value="${fmt(o.airflow || m.cmm)}"></label>
       <div class="spec">
+        ${SERIES.find(q => q.key === m.series)?.label || ''} · ${front ? 'เป่าลมออกด้านหน้า' : 'เป่าลมขึ้นด้านบน'}<br>
         ${m.modules.length > 1 ? `ชุด <b>${m.modules.map(h => h + 'HP').join(' + ')}</b> · ` : ''}ทำความเย็น <b>${m.kw.toFixed(1)} kW</b> · EER <b>${m.eer.toFixed(2)}</b><br>
-        ขนาด <b>${Math.round(sz.w * 1000)} × ${MODULE_H} × ${MODULE_D}</b> มม. · พัดลม <b>${m.fans}</b> ใบ<br>
+        ขนาด (ก × ส × ล) <b>${Math.round(sz.w * 1000)} × ${Math.round(sz.h * 1000)} × ${Math.round(sz.d * 1000)}</b> มม. · พัดลม <b>${m.fans}</b> ใบ<br>
         อัตราลมมาตรฐาน <b>${m.cmm}</b> m³/min${o.airflow ? ` · <a href="#" data-reset-air>ใช้ค่ามาตรฐาน</a>` : ''}
       </div>`;
     const ur = unitsNow()?.find(u => u.id === o.id);
@@ -446,8 +465,12 @@ function renderProps() {
       }
       if (k === 'airflow' && Math.abs(v - getModel(o.model).cmm) < 0.5) v = null;
       edit(() => {
+        if (k === 'model') {
+          // เปลี่ยนชนิดการเป่าลม (ขึ้น ↔ หน้า): ความหมายของ Hood ต่างกัน จึงล้างค่า Hood เดิม
+          if (getModel(v).discharge !== getModel(o.model).discharge) { o.duct = 0; o.deflect = 'none'; o.hoodType = 'straight'; }
+          lastUsed.model = v; o.airflow = null;
+        }
         o[k] = v;
-        if (k === 'model') { lastUsed.model = v; o.airflow = null; }
         if (k === 'height' && o.type === 'wall') lastUsed.wallHeight = v;
       }, k !== 'name');
     });
@@ -465,6 +488,8 @@ function renderProps() {
     wallAnchor = b.dataset.v;
     $$('[data-seg="anchor"] button', box).forEach(q => q.classList.toggle('on', q === b));
   }));
+  for (const key of ['deflect', 'hoodType', 'hoodDir'])
+    $$(`[data-seg="${key}"] button`, box).forEach(b => b.addEventListener('click', () => edit(() => { o[key] = b.dataset.v; })));
   $$('[data-seg="rot"] button', box).forEach(b => b.addEventListener('click', () => {
     edit(() => { o.rot = Number(b.dataset.v); lastUsed.rot = o.rot; });
   }));
@@ -993,12 +1018,15 @@ function renderAdvice(units) {
     const o = u.obj;
     if (!o) continue;
     if (u.status.key === 'ok') continue;
-    const top = (o.elev || 0) + unitSize(o).h + (o.duct || 0);
+    const frontUnit = getModel(o.model).discharge === 'front';
+    const top = (o.elev || 0) + unitSize(o).h + (frontUnit ? 0 : (o.duct || 0));
     const tips = [];
     if (u.TinMax >= perf.Tlimit || u.Tin >= perf.Tlimit) tips.push(`<b>เสี่ยงตัดการทำงาน</b> — จุดร้อนหน้าคอยล์ ${u.TinMax.toFixed(1)} °C ถึงขีดจำกัด ${perf.Tlimit} °C`);
     const near = walls.filter(w => distToSeg(o.x, o.z, w) < 4);
     const tall = near.filter(w => (w.gap || 0) + w.height > top - 0.1);
-    if (!(o.duct > 0) && (tall.length || u.Cin > 0.1)) tips.push(`ติดท่อเป่าลมให้ปากลมสูงกว่า${tall.length ? 'ผนังรอบข้าง' : 'เดิม'} ≥ 0.5–1 ม.`);
+    if (frontUnit) {
+      if ((!o.deflect || o.deflect === 'none') && (tall.length || u.Cin > 0.1)) tips.push('ติด Hood + ใบเบี่ยงลมร้อน 45° เบี่ยงลมขึ้น (หรือไปทางที่โล่ง) ให้ลมร้อนพ้นผนัง/เครื่องข้างเคียง');
+    } else if (!(o.duct > 0) && (tall.length || u.Cin > 0.1)) tips.push(`ติด Hood ให้ปากลมสูงกว่า${tall.length ? 'ผนังรอบข้าง' : 'เดิม'} ≥ 0.5–1 ม. — ใต้หลังคา/ชายคาใช้ Hood หัก 90° เป่าออกทางด้านที่โล่ง`);
     const lowLouver = near.filter(w => w.louver > 0 && w.louver < 60);
     if (lowLouver.length) tips.push(`เพิ่มพื้นที่เปิดของ ${lowLouver.map(w => esc(w.name)).join(', ')} (ตอนนี้ ${lowLouver.map(w => w.louver + '%').join(', ')})`);
     const solidNear = near.filter(w => !(w.louver > 0));
@@ -1604,10 +1632,11 @@ function bindUI() {
 }
 
 function renderModelTable() {
-  const rows = MODELS.map(m => `<tr><td>${m.id}</td><td class="n">${m.hp}</td><td>${m.modules.length > 1 ? m.modules.join(' + ') : '—'}</td>
+  const label = k => SERIES.find(q => q.key === k)?.label || k;
+  const rows = MODELS.map(m => `<tr><td>${label(m.series)}</td><td>${m.id}</td><td class="n">${m.hp}</td><td>${m.modules.length > 1 ? m.modules.join(' + ') : '—'}</td>
     <td class="n">${m.kw.toFixed(1)}</td><td class="n">${m.cmm}</td><td class="n">${m.eer.toFixed(2)}</td>
-    <td class="n">${m.width} × ${MODULE_H} × ${MODULE_D}</td><td class="n">${m.fans}</td></tr>`).join('');
-  $('#model-table').innerHTML = `<tr><th>รุ่น</th><th class="n">HP</th><th>โมดูล</th><th class="n">kW</th><th class="n">m³/min</th><th class="n">EER</th><th class="n">ก × ส × ล (มม.)</th><th class="n">พัดลม</th></tr>${rows}`;
+    <td class="n">${m.width} × ${m.height} × ${m.depth}</td><td class="n">${m.fans}</td><td>${m.discharge === 'front' ? 'หน้า' : 'บน'}</td></tr>`).join('');
+  $('#model-table').innerHTML = `<tr><th>ซีรีส์</th><th>รุ่น</th><th class="n">HP</th><th>โมดูล</th><th class="n">kW</th><th class="n">m³/min</th><th class="n">EER</th><th class="n">ก × ส × ล (มม.)</th><th class="n">พัดลม</th><th>ลมออก</th></tr>${rows}`;
 }
 
 /* ───────── เริ่มต้น ───────── */

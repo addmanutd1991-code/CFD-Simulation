@@ -106,11 +106,15 @@ export class GridPrep {
     let fanRate = 0, fanVmax = 0;
     for (const m of this.mods) {
       if (!m.active) continue;
+      // หน้าลมออก: แกน 1 = หน้า v (เป่าขึ้น/ลง), 0 = หน้า u, 2 = หน้า w (เป่าออกด้านข้าง / Hood หัก 90°)
       for (let a = 0; a < m.fanFaces.length; a++) {
-        const f = m.fanFaces[a], j = ((f / sy) | 0) % NY;
-        fixV[f] = 1; vF[f] = m.fanVel[a];
-        fanVmax = Math.max(fanVmax, m.fanVel[a]);
-        fanRate = Math.max(fanRate, m.fanVel[a] * this.ax(1, AXT.RD, j));
+        const f = m.fanFaces[a], ax = m.fanAxis ? m.fanAxis[a] : 1, vel = m.fanVel[a], sp = Math.abs(vel);
+        const idx = ax === 0 ? f % sy : ax === 1 ? ((f / sy) | 0) % NY : (f / sz) | 0;
+        if (ax === 0) { fixU[f] = 1; uF[f] = vel; }
+        else if (ax === 1) { fixV[f] = 1; vF[f] = vel; }
+        else { fixW[f] = 1; wF[f] = vel; }
+        fanVmax = Math.max(fanVmax, sp);
+        fanRate = Math.max(fanRate, sp * this.ax(ax, AXT.RD, idx));
       }
       for (let a = 0; a < m.inFaces.length; a++) {
         const f = m.inFaces[a];

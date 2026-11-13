@@ -8,13 +8,20 @@
  *   v[c] หน้าด้าน −y, w[c] หน้าด้าน −z
  *
  * CDU แต่ละโมดูลกลายเป็น
- *   - กล่องทึบ (ตัวเครื่อง + ฐาน + ท่อเป่าลมถ้ามี)
- *   - หน้าพัดลม: หน้า v ด้านบนของเครื่อง ความเร็วขึ้นคงที่ = อัตราลม / พื้นที่หน้าพัดลม
- *   - หน้าคอยล์ดูดลม: หน้าด้านข้างฝั่ง หลัง/ซ้าย/ขวา ในช่วงความสูงของคอยล์ ความเร็วดูดเข้าคงที่
+ *   - กล่องทึบ (ตัวเครื่อง + ฐาน + Hood ถ้ามี)
+ *   - หน้าพัดลม (ลมออก): หน้าเซลล์ที่กำหนดความเร็วคงที่ = อัตราลม / พื้นที่หน้าลมออก
+ *       รุ่นเป่าขึ้น (VRV 6A)      : หน้า v ด้านบนเครื่อง หรือปากท่อ Hood ตรง
+ *                                  Hood หัก 90°: หน้าด้านข้างของช่วงบนสุดของ Hood ตามทิศที่เลือก (ลมออกแนวนอน)
+ *       รุ่นเป่าหน้า (VRV IV S / S Hi): หน้า u/w ด้านหน้าเครื่องตรงหน้ากากพัดลม หรือปลาย Hood ที่ยื่นออกไป
+ *                                  ใบเบี่ยงลม 45°: ปลายลมออกเป็นระนาบเอียง 45° แทนด้วยลิ่มขั้นบันได
+ *                                  ลมออกทั้งหน้าตามแนวพุ่ง (n) และหน้าตามทิศเบี่ยง (d) ด้วยความเร็วเท่ากัน
+ *                                  พื้นที่ฉายสองทิศเท่ากัน → ทิศเฉลี่ยของลำลม = (n + d)/√2 คือเอียง 45°
+ *   - หน้าคอยล์ดูดลม: หน้าด้านข้างในช่วงความสูงของคอยล์ ความเร็วดูดเข้าคงที่
+ *       รุ่นเป่าขึ้น: หลัง/ซ้าย/ขวา · รุ่นเป่าหน้า: หลัง/ซ้าย (ด้านขวาเป็นแผงบริการ)
  *   มวลอากาศเข้า = ออก ทุกโมดูล
  */
 
-import { unitModules, unitSize, FAN_AREA } from './models.js';
+import { unitModules, unitSize, getModel, FAN_AREA, DEFLECT_DIRS, HOOD_DIRS, ELBOW_OPEN } from './models.js';
 import { domainOf, cloneBC, slabRange, insideRect } from './scene.js';
 import { cellIndex } from './grid.js';
 
@@ -147,11 +154,16 @@ export function buildMesh(scene) {
 
   cdus.forEach((o, ui) => {
     const sz0 = unitSize(o);
+    const M = getModel(o.model);
+    const front = M.discharge === 'front';
+    const L = Math.max(0, o.duct || 0);   // Hood: ความสูง (เป่าขึ้น) หรือความยาวที่ยื่นออกด้านหน้า (เป่าหน้า)
     const rot = ((o.rot % 360) + 360) % 360;
     const r = rot * Math.PI / 180, c = Math.round(Math.cos(r)), s = Math.round(Math.sin(r));
     // local → world: (lx, lz) → (x + lx·c + lz·s, z − lx·s + lz·c)
     const toW = (lx, lz) => [o.x + lx * c + lz * s, o.z - lx * s + lz * c];
     const toL = (dx, dz) => [dx * c - dz * s, dx * s + dz * c];
+    // ทิศในแกนเฉพาะ (lx, y, lz) → ทิศของดัชนีกริด (di, dj, dk)
+    const dirW = (vx, vy, vz) => [vx * c + vz * s, vy, -vx * s + vz * c];
     const mods = unitModules(o);
     const hw = sz0.w / 2, hd = sz0.d / 2;
     const ex = Math.abs(hw * c) + Math.abs(hd * s), ez = Math.abs(hw * s) + Math.abs(hd * c);
@@ -162,6 +174,22 @@ export function buildMesh(scene) {
       if (s.type === 'slab' && s.y <= yb + 1e-6 && insideRect(s, o.x, o.z)) ySup = Math.max(ySup, slabRange(s).y0);
     const gBase = modules.length;
     unitBoxes.push({ ui, gBase, n: mods.length });
+
+    /** วนเซลล์ที่กึ่งกลางอยู่ในกล่องตามแกนเฉพาะของเครื่อง: fn(i, j, k, lx, y, lz, id) */
+    const forLocal = (lx0, lx1, y0, y1, lz0, lz1, fn) => {
+      const [ax, az] = toW(lx0, lz0), [bx, bz] = toW(lx1, lz1);
+      forBox(Math.min(ax, bx), Math.max(ax, bx), y0, y1, Math.min(az, bz), Math.max(az, bz), (i, j, k, x, y, z, id) => {
+        if (y < y0 || y > y1) return;
+        const [lx, lz] = toL(x - o.x, z - o.z);
+        if (lx < lx0 - 1e-9 || lx > lx1 + 1e-9 || lz < lz0 - 1e-9 || lz > lz1 + 1e-9) return;
+        fn(i, j, k, lx, y, lz, id);
+      });
+    };
+    /** หน้าเซลล์ลมออกจากเซลล์ทึบ id ไปทิศ (di, dj, dk) → [ดัชนีหน้า, แกน, เครื่องหมายความเร็ว, พื้นที่] */
+    const outFace = (id, i, j, k, di, dj, dk) =>
+      di === 1 ? [id + 1, 0, 1, DY(j) * DZ(k)] : di === -1 ? [id, 0, -1, DY(j) * DZ(k)]
+        : dj === 1 ? [id + sy, 1, 1, DX(i) * DZ(k)] : dj === -1 ? [id, 1, -1, DX(i) * DZ(k)]
+          : dk === 1 ? [id + sz, 2, 1, DX(i) * DY(j)] : [id, 2, -1, DX(i) * DY(j)];
 
     // ฐาน (ทึบ) และตัวเครื่อง — ทั้งชุดทึบรวมช่องว่างระหว่างโมดูล
     forBox(o.x - ex, o.x + ex, ySup, yt, o.z - ez, o.z + ez, (i, j, k, x, y, z, id) => {
@@ -176,6 +204,44 @@ export function buildMesh(scene) {
       }
     });
 
+    // ── Hood / ใบเบี่ยงลม: เซลล์ทึบของ Hood (ภายใน Hood แทนด้วยของแข็ง ลมออกที่ปลาย Hood) ──
+    const hoodSet = new Set(), rampSet = new Set();
+    const mark = (set) => (i, j, k, lx, y, lz, id) => {
+      if (type[id] === SOLID) return;
+      type[id] = SOLID; kp[id] = 0; set.add(id);
+    };
+    const F = M.fan;
+    const dv = front && o.deflect && o.deflect !== 'none' ? DEFLECT_DIRS[o.deflect] : null;
+    if (front) {
+      const fx = F.lx, yc = yb + F.y, hs = F.s / 2, lzE = hd + L;
+      if (L > 0) forLocal(fx - hs, fx + hs, yc - hs, yc + hs, hd, lzE, mark(hoodSet));
+      if (dv) {
+        // ลิ่ม 45°: t = ระยะพุ่งจากปากลม, e = ระยะตามทิศเบี่ยงจากขอบฝั่งตรงข้าม → ทึบเมื่อ t + e < s
+        const fill = mark(rampSet);
+        forLocal(fx - hs, fx + hs, yc - hs, yc + hs, lzE, lzE + F.s, (i, j, k, lx, y, lz, id) => {
+          const t = lz - lzE, e = (dv[1] ? (y - yc) * dv[1] : (lx - fx) * dv[0]) + hs;
+          if (t + e < F.s) fill(i, j, k, lx, y, lz, id);
+        });
+      }
+    }
+    let elbow = null;
+    if (!front && L > 0 && o.hoodType === 'elbow') {
+      let dir = o.hoodDir || 'front';
+      if (mods.length > 1 && (dir === 'left' || dir === 'right')) {
+        warnings.push(`${o.name}: Hood หัก 90° ไปด้านข้างใช้ได้กับโมดูลเดี่ยว — ใช้ทิศด้านหน้าแทน`);
+        dir = 'front';
+      }
+      const [vx, vz] = HOOD_DIRS[dir];
+      // Hood ต่อเนื่องคลุมทั้งชุด แบ่งเขตของแต่ละโมดูลที่กึ่งกลางช่องว่างระหว่างโมดูล
+      const sets = mods.map((md, mi) => {
+        const set = new Set();
+        const a = mi === 0 ? -hw : (mods[mi - 1].x1 + md.x0) / 2, b = mi === mods.length - 1 ? hw : (md.x1 + mods[mi + 1].x0) / 2;
+        forLocal(a, b, yt, yt + L, -hd, hd, mark(set));
+        return set;
+      });
+      elbow = { sets, dir: dirW(vx, 0, vz), y0: yt + L - Math.min(L, ELBOW_OPEN), y1: yt + L };
+    }
+
     const unit = { id: o.id, name: o.name, model: o.model, modules: [] };
     units.push(unit);
 
@@ -184,7 +250,7 @@ export function buildMesh(scene) {
       const q = md.cmm / 60;   // m³/s
       const rec = {
         unit: ui, unitId: o.id, index: mi, hp: md.hp, kw: md.kw, eer: md.eer, q,
-        fanFaces: [], fanVel: [], fanCells: [], inAxis: [], inFaces: [], inVel: [], inCells: [], inArea: [],
+        fanFaces: [], fanAxis: [], fanVel: [], fanCells: [], inAxis: [], inFaces: [], inVel: [], inCells: [], inArea: [],
         blockedPct: 0, fanAreaGrid: 0, fanAreaReal: md.fans * FAN_AREA, active: true,
       };
 
@@ -204,51 +270,112 @@ export function buildMesh(scene) {
         return;
       }
 
-      // ── พัดลม ──
-      const aCol = DX(Math.min(nx, Math.max(1, I(o.x)))) * DZ(Math.min(nz, Math.max(1, K(o.z))));   // พื้นที่หน้าเซลล์บริเวณเครื่อง
-      const nWant = Math.max(1, Math.round(FAN_AREA / aCol));
-      const used = new Set();
-      const fanCenters = [];
-      for (let f = 0; f < md.fans; f++) {
-        const fx = mx0 + (mx1 - mx0) * (f + 0.5) / md.fans;
-        fanCenters.push(toW(fx, 0));
-      }
-      const qFan = q / md.fans;
-      for (const [fx, fz] of fanCenters) {
-        const cand = [...cols.values()].filter(cc => !used.has(cc.i + cc.k * 100000))
-          .sort((a, b) => Math.hypot(a.x - fx, a.z - fz) - Math.hypot(b.x - fx, b.z - fz));
-        const pick = cand.slice(0, nWant);
-        if (!pick.length) continue;
-        const faces = [];
-        let area = 0;
-        for (const cc of pick) {
-          used.add(cc.i + cc.k * 100000);
-          let jt = cc.j;
-          // ท่อเป่าลม: ต่อเซลล์ทึบขึ้นไปจนถึงปากท่อ แล้วย้ายหน้าพัดลมไปไว้ที่ปากท่อ
-          if (o.duct > 0) {
-            const top = yt + o.duct;
-            while (jt + 1 <= ny && Y(jt + 1) <= top) { jt++; type[cc.i + jt * sy + cc.k * sz] = SOLID; }
-          }
-          const above = cc.i + (jt + 1) * sy + cc.k * sz;
-          if (jt + 1 > ny || type[above] === SOLID) continue;
-          faces.push(above);   // v[above] = หน้าด้านล่างของเซลล์เหนือพัดลม
-          area += DX(cc.i) * DZ(cc.k);
+      /** ใส่รายการหน้าลมออก [{id, f: outFace(...)}] ด้วยความเร็วเท่ากันทุกหน้า ให้อัตราลมรวม = q */
+      const setOutflow = (list) => {
+        const area = list.reduce((a, e) => a + e.f[3], 0);
+        if (!(area > 0)) return;
+        const vel = q / area;
+        for (const { id, f } of list) {
+          rec.fanFaces.push(f[0]); rec.fanAxis.push(f[1]); rec.fanVel.push(f[2] * vel); rec.fanCells.push(id);
         }
-        if (!faces.length) continue;
-        const vel = qFan / area;
-        // fanCells = เซลล์ทึบใต้หน้าพัดลม: solver เก็บอุณหภูมิลมเป่าไว้ที่นี่ (ค่าต้นลมของหน้าพัดลม)
-        for (const f of faces) { rec.fanFaces.push(f); rec.fanVel.push(vel); rec.fanCells.push(f - sy); }
         rec.fanAreaGrid += area;
-        rec.fanQ = (rec.fanQ || 0) + vel * area;
+      };
+
+      if (front) {
+        // ── พัดลมหน้าเครื่อง (+ Hood + ใบเบี่ยงลม) ──
+        const fx = F.lx, yc = yb + F.y, hs = F.s / 2, lzE = hd + L, pad = h;
+        const nW = dirW(0, 0, 1), dW = dv ? dirW(dv[0], dv[1], 0) : null;
+        const src = id => owner[id] === g || hoodSet.has(id) || rampSet.has(id);
+        const nCand = [], dList = [];
+        forLocal(fx - hs - pad, fx + hs + pad, yc - hs - pad, yc + hs + pad, -hd, lzE + F.s + pad, (i, j, k, lx, y, lz, id) => {
+          if (!src(id)) return;
+          if (type[id + nW[0] + nW[2] * sz] === FLUID)
+            nCand.push({ id, f: outFace(id, i, j, k, nW[0], 0, nW[2]), du: lx - fx, dv: y - yc });
+          if (dW && rampSet.has(id) && type[id + dW[0] + dW[1] * sy + dW[2] * sz] === FLUID)
+            dList.push({ id, f: outFace(id, i, j, k, dW[0], dW[1], dW[2]) });
+        });
+        nCand.sort((a, b) => Math.hypot(a.du, a.dv) - Math.hypot(b.du, b.dv));
+        let nList;
+        const shaped = L > 0 || dv;
+        if (shaped) nList = nCand.filter(e => Math.abs(e.du) <= hs + 1e-6 && Math.abs(e.dv) <= hs + 1e-6);
+        if (!shaped || !nList.length) {
+          // หน้ากากพัดลมกลม (หรือกริดหยาบกว่าปลาย Hood): เลือกหน้าที่ใกล้ศูนย์กลางจนพื้นที่ใกล้เคียงช่องลมออก
+          const want = shaped ? F.s * F.s : Math.PI * F.dia * F.dia / 4;
+          nList = []; let a = 0;
+          for (const e of nCand) { if (nList.length && a + e.f[3] / 2 > want) break; nList.push(e); a += e.f[3]; }
+        }
+        setOutflow([...nList, ...dList]);
+        // ใบเบี่ยงลม: พื้นที่ฉายตามแนวพุ่ง + ตามทิศเบี่ยง = 2·s² (ระนาบเอียงจริง √2·s² × ความเร็วตามแนวเอียง √2 เท่าของหน้าแต่ละหน้า)
+        rec.fanAreaReal = dv ? 2 * F.s * F.s : L > 0 ? F.s * F.s : Math.PI * F.dia * F.dia / 4;
+        if (!rec.fanFaces.length) {
+          rec.active = false;
+          warnings.push(`${o.name}: ด้านหน้าพัดลม${L > 0 || dv ? '/ปลาย Hood' : ''}ถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
+        } else if (dv && !dList.length) {
+          warnings.push(`${o.name}: ใบเบี่ยงลมเล็กกว่าเซลล์ — ลมออกตรงไม่เบี่ยง (ลดขนาดเซลล์)`);
+        }
+      } else if (elbow) {
+        // ── Hood หัก 90°: ลมออกแนวนอนจากช่วงบนสุดของ Hood ──
+        const [di, , dk] = elbow.dir, list = [];
+        for (const id of elbow.sets[mi]) {
+          const j = ((id / sy) | 0) % NY, y = Y(j);
+          if (y < elbow.y0 || y > elbow.y1) continue;
+          if (type[id + di + dk * sz] !== FLUID) continue;
+          const i = id % sy, k = (id / sz) | 0;
+          list.push({ id, f: outFace(id, i, j, k, di, 0, dk) });
+        }
+        setOutflow(list);
+        rec.fanAreaReal = md.w * Math.min(L, ELBOW_OPEN);
+        if (!rec.fanFaces.length) {
+          rec.active = false;
+          warnings.push(`${o.name}: ปากลม Hood หัก 90° ถูกปิดทึบหรือเล็กกว่าเซลล์ — ไม่คำนวณโมดูลนี้`);
+        }
+      } else {
+        // ── พัดลมด้านบน ──
+        const aCol = DX(Math.min(nx, Math.max(1, I(o.x)))) * DZ(Math.min(nz, Math.max(1, K(o.z))));   // พื้นที่หน้าเซลล์บริเวณเครื่อง
+        const nWant = Math.max(1, Math.round(FAN_AREA / aCol));
+        const used = new Set();
+        const fanCenters = [];
+        for (let f = 0; f < md.fans; f++) {
+          const fx = mx0 + (mx1 - mx0) * (f + 0.5) / md.fans;
+          fanCenters.push(toW(fx, 0));
+        }
+        const qFan = q / md.fans;
+        for (const [fx, fz] of fanCenters) {
+          const cand = [...cols.values()].filter(cc => !used.has(cc.i + cc.k * 100000))
+            .sort((a, b) => Math.hypot(a.x - fx, a.z - fz) - Math.hypot(b.x - fx, b.z - fz));
+          const pick = cand.slice(0, nWant);
+          if (!pick.length) continue;
+          const faces = [];
+          let area = 0;
+          for (const cc of pick) {
+            used.add(cc.i + cc.k * 100000);
+            let jt = cc.j;
+            // Hood ตรง (ท่อเป่าลม): ต่อเซลล์ทึบขึ้นไปจนถึงปากท่อ แล้วย้ายหน้าพัดลมไปไว้ที่ปากท่อ
+            if (L > 0) {
+              const top = yt + L;
+              while (jt + 1 <= ny && Y(jt + 1) <= top) { jt++; type[cc.i + jt * sy + cc.k * sz] = SOLID; }
+            }
+            const above = cc.i + (jt + 1) * sy + cc.k * sz;
+            if (jt + 1 > ny || type[above] === SOLID) continue;
+            faces.push(above);   // v[above] = หน้าด้านล่างของเซลล์เหนือพัดลม
+            area += DX(cc.i) * DZ(cc.k);
+          }
+          if (!faces.length) continue;
+          const vel = qFan / area;
+          // fanCells = เซลล์ทึบใต้หน้าพัดลม: solver เก็บอุณหภูมิลมเป่าไว้ที่นี่ (ค่าต้นลมของหน้าพัดลม)
+          for (const f of faces) { rec.fanFaces.push(f); rec.fanAxis.push(1); rec.fanVel.push(vel); rec.fanCells.push(f - sy); }
+          rec.fanAreaGrid += area;
+          rec.fanQ = (rec.fanQ || 0) + vel * area;
+        }
+        if (!rec.fanFaces.length) {
+          rec.active = false;
+          warnings.push(`${o.name}: ด้านบนพัดลมถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
+        }
+        // ถ้าบางใบพัดหาหน้าไม่ได้ ให้อัตราลมรวมยังถูกต้อง
+        const fanQ = rec.fanQ || 0;
+        delete rec.fanQ;
+        if (fanQ > 0 && Math.abs(fanQ - q) > 1e-6) rec.fanVel = rec.fanVel.map(v => v * q / fanQ);
       }
-      if (!rec.fanFaces.length) {
-        rec.active = false;
-        warnings.push(`${o.name}: ด้านบนพัดลมถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
-      }
-      // ถ้าบางใบพัดหาหน้าไม่ได้ ให้อัตราลมรวมยังถูกต้อง
-      const fanQ = rec.fanQ || 0;
-      delete rec.fanQ;
-      if (fanQ > 0 && Math.abs(fanQ - q) > 1e-6) rec.fanVel = rec.fanVel.map(v => v * q / fanQ);
 
       // ── คอยล์ดูดลม ──
       const cy0 = yb + COIL_LO * sz0.h, cy1 = yb + COIL_HI * sz0.h;
@@ -272,7 +399,7 @@ export function buildMesh(scene) {
         });
         return out;
       };
-      const SIDES = ['back', 'left', 'right'];
+      const SIDES = front ? ['back', 'left'] : ['back', 'left', 'right'];
       let faces = collect(SIDES);
       if (!faces.length) {
         faces = collect(['front']);
@@ -308,7 +435,7 @@ export function buildMesh(scene) {
 
   const pack = modules.map(m => ({
     ...m,
-    fanFaces: Int32Array.from(m.fanFaces), fanVel: Float32Array.from(m.fanVel),
+    fanFaces: Int32Array.from(m.fanFaces), fanAxis: Uint8Array.from(m.fanAxis), fanVel: Float32Array.from(m.fanVel),
     inAxis: Uint8Array.from(m.inAxis), inFaces: Int32Array.from(m.inFaces),
     inVel: Float32Array.from(m.inVel), inCells: Int32Array.from(m.inCells),
     fanCells: Int32Array.from(m.fanCells), inArea: Float32Array.from(m.inArea),

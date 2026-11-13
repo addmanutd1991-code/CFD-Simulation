@@ -17,7 +17,7 @@
  * เส้นกริดเก็บเป็นพิกัดหน้าเซลล์: xf[0..nx], yf[0..ny], zf[0..nz]  (เซลล์ i ครอบ xf[i-1]..xf[i])
  */
 
-import { unitSize } from './models.js';
+import { unitExtent } from './models.js';
 
 export const GRADE = {
   growth: 0.2,        // g — อัตราขยายขนาดเซลล์ต่อระยะทาง (≈ อัตราส่วนเซลล์ติดกัน 1.2)
@@ -32,13 +32,8 @@ export const GRADE = {
   maxSize: 1.0,       // ม.
 };
 
-/** ขนาดของ CDU ตามแนวแกนโลก (หลังหมุน) — สำเนาจาก scene.js เพื่อไม่ให้ import วนกัน */
-function cduBox(o) {
-  const s = unitSize(o);
-  const swap = o.rot === 90 || o.rot === 270;
-  const sx = swap ? s.d : s.w, sz = swap ? s.w : s.d;
-  return { x0: o.x - sx / 2, x1: o.x + sx / 2, z0: o.z - sz / 2, z1: o.z + sz / 2, y0: o.elev || 0, y1: (o.elev || 0) + s.h + (o.duct || 0) };
-}
+/** กรอบของ CDU ตามแนวแกนโลก (หลังหมุน) รวม Hood / ใบเบี่ยงลม */
+const cduBox = unitExtent;
 
 /** ช่วงที่ต้องการความละเอียดของแต่ละแกน: { x: [{a, b, s}], y: [...], z: [...] } */
 export function gradeFeatures(scene, h) {
