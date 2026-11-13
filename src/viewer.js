@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { unitModules, unitSize, getModel } from './models.js';
+import { unitModules, unitSize, getModel, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
 import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
 import { axisLocator } from './grid.js';
@@ -319,7 +319,45 @@ export class Viewer {
     const fanMat = new THREE.MeshStandardMaterial({ color: 0x23282e, roughness: 0.5 });
     const guardMat = new THREE.MeshStandardMaterial({ color: 0x8b939b, roughness: 0.4, metalness: 0.4, side: THREE.DoubleSide });
     g.userData.modMats = [];
-    for (const m of mods) {
+    const M = getModel(o.model), L = Math.max(0, o.duct || 0);
+    const hoodMat = new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide });
+    const hidden = new THREE.MeshBasicMaterial({ visible: false });
+    if (M.discharge === 'front') {
+      // ── รุ่นเป่าหน้า: คอยล์ด้านหลัง/ซ้าย พัดลมหน้าเครื่อง ──
+      const m = mods[0], F = M.fan, hd = sz.d / 2;
+      const coilM = new THREE.MeshStandardMaterial({ map: T.coil, roughness: 0.7, metalness: 0.15 });
+      const panel = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.1 });
+      const top = new THREE.MeshStandardMaterial({ color: 0xe9ecef, roughness: 0.6 });
+      g.userData.modMats.push([coilM, panel, top]);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(sz.w, sz.h, sz.d), [panel, coilM, top, bottom, panel, coilM]);
+      body.position.set((m.x0 + m.x1) / 2, yb + sz.h / 2, 0);
+      body.castShadow = body.receiveShadow = true;
+      g.add(body);
+      const fx = F.lx, yc = yb + F.y, rf = F.dia / 2;
+      const grille = new THREE.Mesh(new THREE.PlaneGeometry(F.s, F.s), new THREE.MeshStandardMaterial({ color: 0xd5dade, roughness: 0.6 }));
+      grille.position.set(fx, yc, hd + 0.003);
+      g.add(grille);
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(rf, 40), fanMat);
+      disc.position.set(fx, yc, hd + 0.006);
+      g.add(disc);
+      for (const k of [0.38, 0.68, 0.97]) {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(rf * k - 0.012, rf * k, 48), guardMat);
+        ring.position.set(fx, yc, hd + 0.012);
+        g.add(ring);
+      }
+      // Hood: ท่อสี่เหลี่ยมหน้าตัดเท่าหน้ากากพัดลม ยื่นออกด้านหน้า
+      if (L > 0) {
+        const hood = new THREE.Mesh(new THREE.BoxGeometry(F.s, F.s, L), [hoodMat, hoodMat, hoodMat, hoodMat, hidden, hidden]);
+        hood.position.set(fx, yc, hd + L / 2);
+        hood.castShadow = true;
+        g.add(hood);
+      }
+      // ทิศทางลมร้อนออกจากเครื่อง: ลูกศรชี้ทิศ (ใบเบี่ยงลมติดอยู่กับเครื่อง ไม่วาดรูปทรง)
+      const dv = o.deflect && o.deflect !== 'none' ? DEFLECT_DIRS[o.deflect] : [0, 0, 0];
+      const arrow = new THREE.ArrowHelper(new THREE.Vector3(dv[0], dv[1], 1).normalize(),
+        new THREE.Vector3(fx, yc, hd + L + 0.02), Math.max(0.35, F.s * 0.9), 0xff7a3d, 0.14, 0.09);
+      g.add(arrow);
+    } else for (const m of mods) {
       const w = m.x1 - m.x0;
       // วัสดุแยกต่อโมดูล เพื่อระบายสีตามอุณหภูมิลมเข้าของโมดูลนั้น
       const side = new THREE.MeshStandardMaterial({ map: T.coil, roughness: 0.7, metalness: 0.15 });
@@ -343,13 +381,43 @@ export class Viewer {
           ring.position.set(fx, yb + sz.h + 0.012, 0);
           g.add(ring);
         }
-        if (o.duct > 0) {
-          const duct = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, o.duct, 32, 1, true),
-            new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }));
-          duct.position.set(fx, yb + sz.h + o.duct / 2, 0);
-          duct.castShadow = true;
-          g.add(duct);
-        }
+      }
+      // Hood ตรง: ท่อสี่เหลี่ยมขนาดเท่าโมดูล เปิดด้านบน แยกรายโมดูล
+      if (L > 0 && o.hoodType !== 'elbow') {
+        const duct = new THREE.Mesh(new THREE.BoxGeometry(w, L, sz.d), [hoodMat, hoodMat, hidden, hidden, hoodMat, hoodMat]);
+        duct.position.set((m.x0 + m.x1) / 2, yb + sz.h + L / 2, 0);
+        duct.castShadow = true;
+        g.add(duct);
+      }
+    }
+    // Hood หัก 90° (รุ่นเป่าขึ้น): ท่อขึ้นจากเครื่อง โค้งด้านบน แล้วยื่นแนวนอนพ้นตัวเครื่องไปทางปากลม — แยกรายโมดูล
+    if (M.discharge !== 'front' && L > 0 && o.hoodType === 'elbow') {
+      const [vx, vz] = HOOD_DIRS[elbowDir(o)];
+      const yt = yb + sz.h, eo = elbowOpen(o), out = Math.max(0, o.hoodOut || 0);
+      const ventMat = new THREE.MeshStandardMaterial({ color: 0x1d2329, side: THREE.DoubleSide, roughness: 0.7 });
+      for (const m of mods) {
+        const mw = m.x1 - m.x0;
+        const len = vx ? mw : sz.d, span = vx ? sz.d : mw, R = Math.min(eo, len);
+        // หน้าตัดด้านข้างในระนาบ (t, y): t = ระยะตามทิศปากลมจากขอบด้านตรงข้าม
+        const sh = new THREE.Shape();
+        sh.moveTo(0, 0); sh.lineTo(len, 0);
+        if (out > 0) { sh.lineTo(len, L - eo); sh.lineTo(len + out, L - eo); }
+        sh.lineTo(len + out, L); sh.lineTo(R, L);
+        sh.absarc(R, L - R, R, Math.PI / 2, Math.PI, false);
+        sh.lineTo(0, 0);
+        const geo = new THREE.ExtrudeGeometry(sh, { depth: span, bevelEnabled: false, curveSegments: 16 });
+        geo.translate(-len / 2, 0, -span / 2);
+        const hood = new THREE.Mesh(geo, hoodMat);
+        hood.castShadow = true;
+        const vent = new THREE.Mesh(new THREE.PlaneGeometry(span - 0.06, eo - 0.06), ventMat);
+        vent.rotation.y = Math.PI / 2;
+        vent.position.set(len / 2 + out + 0.006, L - eo / 2, 0);
+        const hg = new THREE.Group();
+        hg.add(hood, vent);
+        // แกน t ของหน้าตัด (+x ของกลุ่ม) → ทิศปากลมในแกนของเครื่อง
+        hg.rotation.y = Math.atan2(-vz, vx);
+        hg.position.set((m.x0 + m.x1) / 2, yt, 0);
+        g.add(hg);
       }
     }
     // ลูกศรบอกด้านหน้าเครื่อง (ด้านบริการ) บนพื้น
@@ -846,9 +914,24 @@ export class Viewer {
     for (const o of this.objects) {
       if (o.type !== 'cdu') continue;
       const sz = unitSize(o), r = o.rot * Math.PI / 180, c = Math.cos(r), sn = Math.sin(r);
-      for (const m of unitModules(o)) for (let f = 0; f < m.fans; f++) {
+      // local (lx, y, lz) → world  (ด้านหน้าเครื่อง = +lz)
+      const W = (lx, y, lz) => [o.x + lx * c + lz * sn, y, o.z - lx * sn + lz * c];
+      const M = getModel(o.model), L = Math.max(0, o.duct || 0), yb = o.elev || 0;
+      const mods = unitModules(o);
+      if (M.discharge === 'front') {
+        // ปากลมหน้าเครื่อง / ปลาย Hood / ระนาบเอียงของใบเบี่ยง — ปล่อยอนุภาคถัดออกไปตามทิศลำลม
+        const F = M.fan, dv = o.deflect && o.deflect !== 'none' ? DEFLECT_DIRS[o.deflect] : [0, 0, 0];
+        const k = dv[0] || dv[1] ? Math.SQRT1_2 : 0, n = dv[0] || dv[1] ? Math.SQRT1_2 : 1, off = 0.4;
+        s.push(W(F.lx + dv[0] * k * off, yb + F.y + dv[1] * k * off, sz.d / 2 + L + n * off));
+      } else if (L > 0 && o.hoodType === 'elbow') {
+        const [vx, vz] = HOOD_DIRS[elbowDir(o)], yo = yb + sz.h + L - elbowOpen(o) / 2, out = Math.max(0, o.hoodOut || 0) + 0.4;
+        if (vx) s.push(W(vx * (sz.w / 2 + out), yo, 0));
+        else for (const m of mods) s.push(W((m.x0 + m.x1) / 2, yo, vz * (sz.d / 2 + out)));
+      } else if (L > 0) {
+        for (const m of mods) s.push(W((m.x0 + m.x1) / 2, yb + sz.h + L + 0.15, 0));
+      } else for (const m of mods) for (let f = 0; f < m.fans; f++) {
         const lx = m.x0 + (m.x1 - m.x0) * (f + 0.5) / m.fans;
-        s.push([o.x + lx * c, (o.elev || 0) + sz.h + (o.duct || 0) + 0.15, o.z - lx * sn]);
+        s.push([o.x + lx * c, yb + sz.h + L + 0.15, o.z - lx * sn]);
       }
     }
     this._seeds = s; this._seedsFor = this.objects;

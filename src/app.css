@@ -331,3 +331,7 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
 /* ปุ่มคำสั่งแก้ไขแบบ AutoCAD — กะทัดรัด ให้แถบเครื่องมืออยู่บรรทัดเดียว */
 .toolbar .tool.cmd { padding-left: 8px; padding-right: 8px; font-size: 12.5px; }
 .toolbar #btn-ortho { padding-left: 8px; padding-right: 8px; font-size: 12.5px; }
+/* ปุ่มเลือกหลายตัวเลือก (เช่นใบเบี่ยงลม 5 ทิศ) ขึ้นบรรทัดใหม่เต็มความกว้างแผง */
+.form .row.row-block { display: block; }
+.row-block .seg { display: flex; margin-top: 4px; }
+.row-block .seg button { flex: 1; padding: 3px 4px; }
