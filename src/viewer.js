@@ -381,39 +381,44 @@ export class Viewer {
           ring.position.set(fx, yb + sz.h + 0.012, 0);
           g.add(ring);
         }
-        if (L > 0 && o.hoodType !== 'elbow') {
-          const duct = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, L, 32, 1, true), hoodMat);
-          duct.position.set(fx, yb + sz.h + L / 2, 0);
-          duct.castShadow = true;
-          g.add(duct);
-        }
+      }
+      // Hood ตรง: ท่อสี่เหลี่ยมขนาดเท่าโมดูล เปิดด้านบน แยกรายโมดูล
+      if (L > 0 && o.hoodType !== 'elbow') {
+        const duct = new THREE.Mesh(new THREE.BoxGeometry(w, L, sz.d), [hoodMat, hoodMat, hidden, hidden, hoodMat, hoodMat]);
+        duct.position.set((m.x0 + m.x1) / 2, yb + sz.h + L / 2, 0);
+        duct.castShadow = true;
+        g.add(duct);
       }
     }
-    // Hood หัก 90° (รุ่นเป่าขึ้น): ท่อขึ้นจากเครื่อง โค้งด้านบน แล้วยื่นแนวนอนพ้นตัวเครื่องไปทางปากลม
+    // Hood หัก 90° (รุ่นเป่าขึ้น): ท่อขึ้นจากเครื่อง โค้งด้านบน แล้วยื่นแนวนอนพ้นตัวเครื่องไปทางปากลม — แยกรายโมดูล
     if (M.discharge !== 'front' && L > 0 && o.hoodType === 'elbow') {
       const [vx, vz] = HOOD_DIRS[elbowDir(o)];
       const yt = yb + sz.h, eo = elbowOpen(o), out = Math.max(0, o.hoodOut || 0);
-      const len = vx ? sz.w : sz.d, span = vx ? sz.d : sz.w, R = Math.min(eo, len);
-      // หน้าตัดด้านข้างในระนาบ (t, y): t = ระยะตามทิศปากลมจากขอบด้านตรงข้าม
-      const sh = new THREE.Shape();
-      sh.moveTo(0, 0); sh.lineTo(len, 0);
-      if (out > 0) { sh.lineTo(len, L - eo); sh.lineTo(len + out, L - eo); }
-      sh.lineTo(len + out, L); sh.lineTo(R, L);
-      sh.absarc(R, L - R, R, Math.PI / 2, Math.PI, false);
-      sh.lineTo(0, 0);
-      const geo = new THREE.ExtrudeGeometry(sh, { depth: span, bevelEnabled: false, curveSegments: 16 });
-      geo.translate(-len / 2, 0, -span / 2);
-      const hood = new THREE.Mesh(geo, hoodMat);
-      hood.castShadow = true;
-      const vent = new THREE.Mesh(new THREE.PlaneGeometry(span - 0.06, eo - 0.06), new THREE.MeshStandardMaterial({ color: 0x1d2329, side: THREE.DoubleSide, roughness: 0.7 }));
-      vent.rotation.y = Math.PI / 2;
-      vent.position.set(len / 2 + out + 0.006, L - eo / 2, 0);
-      const hg = new THREE.Group();
-      hg.add(hood, vent);
-      // แกน t ของหน้าตัด (+x ของกลุ่ม) → ทิศปากลมในแกนของเครื่อง
-      hg.rotation.y = Math.atan2(-vz, vx);
-      hg.position.set(0, yt, 0);
-      g.add(hg);
+      const ventMat = new THREE.MeshStandardMaterial({ color: 0x1d2329, side: THREE.DoubleSide, roughness: 0.7 });
+      for (const m of mods) {
+        const mw = m.x1 - m.x0;
+        const len = vx ? mw : sz.d, span = vx ? sz.d : mw, R = Math.min(eo, len);
+        // หน้าตัดด้านข้างในระนาบ (t, y): t = ระยะตามทิศปากลมจากขอบด้านตรงข้าม
+        const sh = new THREE.Shape();
+        sh.moveTo(0, 0); sh.lineTo(len, 0);
+        if (out > 0) { sh.lineTo(len, L - eo); sh.lineTo(len + out, L - eo); }
+        sh.lineTo(len + out, L); sh.lineTo(R, L);
+        sh.absarc(R, L - R, R, Math.PI / 2, Math.PI, false);
+        sh.lineTo(0, 0);
+        const geo = new THREE.ExtrudeGeometry(sh, { depth: span, bevelEnabled: false, curveSegments: 16 });
+        geo.translate(-len / 2, 0, -span / 2);
+        const hood = new THREE.Mesh(geo, hoodMat);
+        hood.castShadow = true;
+        const vent = new THREE.Mesh(new THREE.PlaneGeometry(span - 0.06, eo - 0.06), ventMat);
+        vent.rotation.y = Math.PI / 2;
+        vent.position.set(len / 2 + out + 0.006, L - eo / 2, 0);
+        const hg = new THREE.Group();
+        hg.add(hood, vent);
+        // แกน t ของหน้าตัด (+x ของกลุ่ม) → ทิศปากลมในแกนของเครื่อง
+        hg.rotation.y = Math.atan2(-vz, vx);
+        hg.position.set((m.x0 + m.x1) / 2, yt, 0);
+        g.add(hg);
+      }
     }
     // ลูกศรบอกด้านหน้าเครื่อง (ด้านบริการ) บนพื้น
     const arrow = new THREE.Mesh(arrowShape(0.28), new THREE.MeshBasicMaterial({ color: 0x4f5b66, transparent: true, opacity: 0.55 }));
@@ -922,6 +927,8 @@ export class Viewer {
         const [vx, vz] = HOOD_DIRS[elbowDir(o)], yo = yb + sz.h + L - elbowOpen(o) / 2, out = Math.max(0, o.hoodOut || 0) + 0.4;
         if (vx) s.push(W(vx * (sz.w / 2 + out), yo, 0));
         else for (const m of mods) s.push(W((m.x0 + m.x1) / 2, yo, vz * (sz.d / 2 + out)));
+      } else if (L > 0) {
+        for (const m of mods) s.push(W((m.x0 + m.x1) / 2, yb + sz.h + L + 0.15, 0));
       } else for (const m of mods) for (let f = 0; f < m.fans; f++) {
         const lx = m.x0 + (m.x1 - m.x0) * (f + 0.5) / m.fans;
         s.push([o.x + lx * c, yb + sz.h + L + 0.15, o.z - lx * sn]);

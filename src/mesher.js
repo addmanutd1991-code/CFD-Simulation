@@ -10,7 +10,8 @@
  * CDU แต่ละโมดูลกลายเป็น
  *   - กล่องทึบ (ตัวเครื่อง + ฐาน + Hood ถ้ามี)
  *   - หน้าพัดลม (ลมออก): หน้าเซลล์ที่กำหนดความเร็วคงที่ = อัตราลม / พื้นที่หน้าลมออก
- *       รุ่นเป่าขึ้น (VRV 6A)      : หน้า v ด้านบนเครื่อง หรือปากท่อ Hood ตรง
+ *       รุ่นเป่าขึ้น (VRV 6A)      : หน้า v ด้านบนเครื่อง · Hood แยกรายโมดูล (เว้นช่องว่างระหว่างโมดูลเท่าตัวเครื่อง)
+ *                                  Hood ตรง: ท่อสี่เหลี่ยมขนาดเท่าโมดูล ลมออกขึ้นทั้งหน้าตัดที่ปากท่อ
  *                                  Hood หัก 90° (ท่อโค้ง): ท่อขึ้นจากเครื่อง โค้งแล้วยื่นแนวนอนพ้นตัวเครื่องตามทิศที่เลือก
  *                                  ลมออกแนวนอนที่ปลายท่อ (หน้าตัดสูงเท่าความลึกเครื่อง ไม่เกินความสูง Hood)
  *       รุ่นเป่าหน้า (VRV IV S / S Hi / Split): หน้า u/w ด้านหน้าเครื่องตรงหน้ากากพัดลม หรือปลาย Hood ที่ยื่นออกไป
@@ -224,10 +225,10 @@ export function buildMesh(scene) {
       const [vx, vz] = HOOD_DIRS[elbowDir(o)];
       const eo = elbowOpen(o), out = Math.max(0, o.hoodOut || 0);
       const half = vx ? hw : hd, R = Math.min(eo, 2 * half), yTop = yt + L;
-      // Hood ต่อเนื่องคลุมทั้งชุด แบ่งเขตของแต่ละโมดูลที่กึ่งกลางช่องว่างระหว่างโมดูล
-      const sets = mods.map((md, mi) => {
+      // Hood แยกรายโมดูล กว้างเท่าโมดูล (ช่องว่างระหว่างโมดูลยังเป็นอากาศ)
+      const sets = mods.map((md) => {
         const set = new Set(), fill = mark(set);
-        const a = mi === 0 ? -hw : (mods[mi - 1].x1 + md.x0) / 2, b = mi === mods.length - 1 ? hw : (md.x1 + mods[mi + 1].x0) / 2;
+        const a = md.x0, b = md.x1;
         forLocal(vx < 0 ? a - out : a, vx > 0 ? b + out : b, yt, yTop, vz < 0 ? -hd - out : -hd, vz > 0 ? hd + out : hd, (i, j, k, lx, y, lz, id) => {
           // t = ระยะตามทิศปากลมวัดจากขอบด้านตรงข้ามของตัวเครื่อง
           const t = (vx ? lx * vx : lz * vz) + half;
@@ -239,6 +240,10 @@ export function buildMesh(scene) {
       });
       elbow = { sets, dir: dirW(vx, 0, vz), y0: yTop - eo, y1: yTop, span: vx ? sz0.d : 0, eo };
     }
+    // Hood ตรง (รุ่นเป่าขึ้น): ท่อสี่เหลี่ยมขนาดเท่าโมดูล แยกรายโมดูล
+    let straight = null;
+    if (!front && L > 0 && !elbow)
+      straight = mods.map((md) => { const set = new Set(); forLocal(md.x0, md.x1, yt, yt + L, -hd, hd, mark(set)); return set; });
 
     const unit = { id: o.id, name: o.name, model: o.model, modules: [] };
     units.push(unit);
@@ -331,6 +336,20 @@ export function buildMesh(scene) {
           rec.active = false;
           warnings.push(`${o.name}: ปากลม Hood หัก 90° ถูกปิดทึบหรือเล็กกว่าเซลล์ — ไม่คำนวณโมดูลนี้`);
         }
+      } else if (straight && straight[mi].size) {
+        // ── Hood ตรงสี่เหลี่ยม: ลมออกขึ้นทั้งหน้าตัดที่ปากท่อ ──
+        const list = [];
+        for (const id of straight[mi]) {
+          if (type[id + sy] !== FLUID) continue;
+          const i = id % sy, j = ((id / sy) | 0) % NY, k = (id / sz) | 0;
+          list.push({ id, f: outFace(id, i, j, k, 0, 1, 0) });
+        }
+        setOutflow(list);
+        rec.fanAreaReal = md.w * sz0.d;
+        if (!rec.fanFaces.length) {
+          rec.active = false;
+          warnings.push(`${o.name}: ปากลม Hood ถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
+        }
       } else {
         // ── พัดลมด้านบน ──
         const aCol = DX(Math.min(nx, Math.max(1, I(o.x)))) * DZ(Math.min(nz, Math.max(1, K(o.z))));   // พื้นที่หน้าเซลล์บริเวณเครื่อง
@@ -351,12 +370,7 @@ export function buildMesh(scene) {
           let area = 0;
           for (const cc of pick) {
             used.add(cc.i + cc.k * 100000);
-            let jt = cc.j;
-            // Hood ตรง (ท่อเป่าลม): ต่อเซลล์ทึบขึ้นไปจนถึงปากท่อ แล้วย้ายหน้าพัดลมไปไว้ที่ปากท่อ
-            if (L > 0) {
-              const top = yt + L;
-              while (jt + 1 <= ny && Y(jt + 1) <= top) { jt++; type[cc.i + jt * sy + cc.k * sz] = SOLID; }
-            }
+            const jt = cc.j;
             const above = cc.i + (jt + 1) * sy + cc.k * sz;
             if (jt + 1 > ny || type[above] === SOLID) continue;
             faces.push(above);   // v[above] = หน้าด้านล่างของเซลล์เหนือพัดลม

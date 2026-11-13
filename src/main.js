@@ -374,7 +374,7 @@ function renderProps() {
       ${o.hoodType === 'elbow' ? `
       <label class="row">ระยะยื่นออกด้านปากลม (ม.) <input type="number" step="0.1" min="0" max="3" data-k="hoodOut" value="${fmt(o.hoodOut || 0)}"></label>
       <div class="row">ปากลม Hood หันไป ${seg('hoodDir', o.hoodDir || 'front', [['front', 'หน้า'], ['back', 'หลัง'], ['left', 'ซ้าย'], ['right', 'ขวา']])}</div>` : ''}
-      <p class="note">ความสูง 0 = ไม่มี Hood · Hood ตรง: ปากลมสูงขึ้นตามความสูงที่ตั้ง
+      <p class="note">ความสูง 0 = ไม่มี Hood · Hood แยกรายโมดูล · Hood ตรง: ท่อสี่เหลี่ยมขนาดเท่าเครื่อง ปากลมสูงขึ้นตามความสูงที่ตั้ง
         ${o.hoodType === 'elbow' ? `· ท่อโค้ง 90°: ท่อขึ้นจากเครื่องถึงความสูงที่ตั้ง โค้งด้านบน แล้วยื่นพ้นตัวเครื่องตามระยะยื่น
         ลมออกแนวนอนที่ปลายท่อ (หน้าตัดสูง ${Math.round(1000 * elbowOpen(o))} มม.)` : ''}
         ${o.hoodType === 'elbow' && m.modules.length > 1 ? '· ปากลมซ้าย/ขวาใช้ได้กับเครื่องโมดูลเดี่ยว' : ''}</p>`;
