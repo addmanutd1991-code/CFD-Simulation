@@ -2,7 +2,7 @@
  * main.js — ตัวควบคุมหลัก: เชื่อมหน้าจอ ↔ ข้อมูลฉาก ↔ มุมมอง 3D ↔ ตัวคำนวณ
  */
 
-import { MODELS, SERIES, getModel, unitSize, status as unitStatus, ELBOW_OPEN } from './models.js';
+import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, status as unitStatus } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import { buildMesh } from './mesher.js';
 import { Solver } from './solver.js';
@@ -352,8 +352,10 @@ function renderProps() {
     <label class="row">ชื่อ <input type="text" data-k="name" value="${esc(o.name)}"></label>`;
   if (o.type === 'cdu') {
     const m = getModel(o.model);
-    const opt = x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.id} — ${x.hp} HP · ${x.kw.toFixed(1)} kW</option>`;
-    const groups = SERIES.flatMap(sr => {
+    const opt = x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.indoor ? x.indoor + ' / ' : ''}${x.id} — ${x.hp} HP · ${x.kw.toFixed(1)} kW</option>`;
+    // หมวดหมู่ (VRV / Split type) เลือกก่อน แล้วรายการรุ่นแสดงเฉพาะหมวดนั้น
+    const cat = seriesOf(m).cat;
+    const groups = SERIES.filter(sr => sr.cat === cat).flatMap(sr => {
       const list = MODELS.filter(x => x.series === sr.key);
       if (sr.key !== '6A') return [[`${sr.label} (${sr.code}) — เป่าลมหน้า`, list]];
       return [[`${sr.label} — โมดูลเดี่ยว`, list.filter(x => x.modules.length === 1)], [`${sr.label} — ชุดคอมบิเนชัน`, list.filter(x => x.modules.length > 1)]];
@@ -363,17 +365,21 @@ function renderProps() {
     const seg = (key, cur, items) => `<div class="seg" data-seg="${key}">${items.map(([v, l]) =>
       `<button data-v="${v}" class="${cur === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
     const hoodHtml = front ? `
+      <div class="row row-block">ทิศทางลมร้อนออกจากเครื่อง ${seg('deflect', o.deflect || 'none', [['none', 'ตรง'], ['up', 'ขึ้น 45°'], ['down', 'ลง 45°'], ['left', 'ซ้าย 45°'], ['right', 'ขวา 45°']])}</div>
       <label class="row">Hood ยื่นจากหน้าพัดลม (ม.) <input type="number" step="0.1" min="0" max="3" data-k="duct" value="${fmt(o.duct || 0)}"></label>
-      <div class="row row-block">ใบเบี่ยงลมร้อน 45° ${seg('deflect', o.deflect || 'none', [['none', 'ไม่มี'], ['up', 'ขึ้น'], ['down', 'ลง'], ['left', 'ซ้าย'], ['right', 'ขวา']])}</div>
-      <p class="note">Hood = ท่อสี่เหลี่ยม ${Math.round(m.fan.s * 1000)} × ${Math.round(m.fan.s * 1000)} มม. ครอบหน้ากากพัดลม (0 = ไม่มี Hood)
-        · ใบเบี่ยงติดที่ปากลม (หรือปลาย Hood) เบี่ยงลมร้อน 45° · ซ้าย/ขวามองจากด้านหน้าเครื่อง</p>` : `
+      <p class="note">ทิศทางลมร้อน = ใบเบี่ยงลมที่ติดกับเครื่อง (ไม่วาดรูปทรง ลูกศรสีส้มแสดงทิศ) · ซ้าย/ขวามองจากด้านหน้าเครื่อง
+        · Hood = ท่อสี่เหลี่ยม ${Math.round(m.fan.s * 1000)} × ${Math.round(m.fan.s * 1000)} มม. ครอบหน้ากากพัดลม (0 = ไม่มี Hood)</p>` : `
+      <div class="row">รูปแบบ Hood ${seg('hoodType', o.hoodType || 'straight', [['straight', 'ตรง (เป่าขึ้น)'], ['elbow', 'ท่อโค้ง 90°']])}</div>
       <label class="row">ความสูง Hood (ม.) <input type="number" step="0.1" min="0" max="3" data-k="duct" value="${fmt(o.duct || 0)}"></label>
-      <div class="row">รูปแบบ Hood ${seg('hoodType', o.hoodType || 'straight', [['straight', 'ตรง (เป่าขึ้น)'], ['elbow', 'หัก 90°']])}</div>
-      ${o.hoodType === 'elbow' ? `<div class="row">ปากลม Hood หันไป ${seg('hoodDir', o.hoodDir || 'front', [['front', 'หน้า'], ['back', 'หลัง'], ['left', 'ซ้าย'], ['right', 'ขวา']])}</div>` : ''}
-      <p class="note">0 = ไม่มี Hood · Hood ตรง: ปากลมสูงขึ้นตามความสูงที่ตั้ง
-        · Hood หัก 90°: กล่องคลุมด้านบนทั้งชุด ช่องลมออกด้านข้างสูง ${Math.round(1000 * Math.min(ELBOW_OPEN, Math.max(o.duct || 0, 0)))} มม. ที่ช่วงบนสุด
-        ${m.modules.length > 1 ? '· ปากลมซ้าย/ขวาใช้ได้กับเครื่องโมดูลเดี่ยว' : ''}</p>`;
+      ${o.hoodType === 'elbow' ? `
+      <label class="row">ระยะยื่นออกด้านปากลม (ม.) <input type="number" step="0.1" min="0" max="3" data-k="hoodOut" value="${fmt(o.hoodOut || 0)}"></label>
+      <div class="row">ปากลม Hood หันไป ${seg('hoodDir', o.hoodDir || 'front', [['front', 'หน้า'], ['back', 'หลัง'], ['left', 'ซ้าย'], ['right', 'ขวา']])}</div>` : ''}
+      <p class="note">ความสูง 0 = ไม่มี Hood · Hood ตรง: ปากลมสูงขึ้นตามความสูงที่ตั้ง
+        ${o.hoodType === 'elbow' ? `· ท่อโค้ง 90°: ท่อขึ้นจากเครื่องถึงความสูงที่ตั้ง โค้งด้านบน แล้วยื่นพ้นตัวเครื่องตามระยะยื่น
+        ลมออกแนวนอนที่ปลายท่อ (หน้าตัดสูง ${Math.round(1000 * elbowOpen(o))} มม.)` : ''}
+        ${o.hoodType === 'elbow' && m.modules.length > 1 ? '· ปากลมซ้าย/ขวาใช้ได้กับเครื่องโมดูลเดี่ยว' : ''}</p>`;
     html += `
+      <div class="row">หมวด ${seg('cat', cat, CATEGORIES.map(c => [c.key, c.label]))}</div>
       <label class="row">รุ่น <select data-k="model">${groups}</select></label>
       <div class="row">ตำแหน่ง x, z (ม.) <span class="xz"><input type="number" step="0.1" data-k="x" value="${fmt(o.x)}"><input type="number" step="0.1" data-k="z" value="${fmt(o.z)}"></span></div>
       <div class="row">ด้านหน้าเครื่องหันไป <div class="seg" data-seg="rot">
@@ -383,7 +389,7 @@ function renderProps() {
       ${hoodHtml}
       <label class="row">อัตราลม (m³/min) <input type="number" step="1" min="30" max="2000" data-k="airflow" value="${fmt(o.airflow || m.cmm)}"></label>
       <div class="spec">
-        ${SERIES.find(q => q.key === m.series)?.label || ''} · ${front ? 'เป่าลมออกด้านหน้า' : 'เป่าลมขึ้นด้านบน'}<br>
+        ${seriesOf(m).label}${m.indoor ? ` · คอยล์เย็น <b>${m.indoor}</b>` : ''} · ${front ? 'เป่าลมออกด้านหน้า' : 'เป่าลมขึ้นด้านบน'}<br>
         ${m.modules.length > 1 ? `ชุด <b>${m.modules.map(h => h + 'HP').join(' + ')}</b> · ` : ''}ทำความเย็น <b>${m.kw.toFixed(1)} kW</b> · EER <b>${m.eer.toFixed(2)}</b><br>
         ขนาด (ก × ส × ล) <b>${Math.round(sz.w * 1000)} × ${Math.round(sz.h * 1000)} × ${Math.round(sz.d * 1000)}</b> มม. · พัดลม <b>${m.fans}</b> ใบ<br>
         อัตราลมมาตรฐาน <b>${m.cmm}</b> m³/min${o.airflow ? ` · <a href="#" data-reset-air>ใช้ค่ามาตรฐาน</a>` : ''}
@@ -440,7 +446,7 @@ function renderProps() {
     </div>`;
   box.innerHTML = html;
 
-  const NUM = new Set(['x', 'z', 'elev', 'duct', 'airflow', 'x1', 'z1', 'x2', 'z2', 'height', 'thick', 'gap', 'louver', 'w', 'd', 'h', 'rot', 'y', 'open']);
+  const NUM = new Set(['x', 'z', 'elev', 'duct', 'hoodOut', 'airflow', 'x1', 'z1', 'x2', 'z2', 'height', 'thick', 'gap', 'louver', 'w', 'd', 'h', 'rot', 'y', 'open']);
   $$('[data-k]', box).forEach(inp => {
     const k = inp.dataset.k;
     const ev = inp.type === 'range' ? 'input' : 'change';
@@ -449,7 +455,7 @@ function renderProps() {
       if (NUM.has(k)) {
         v = parseFloat(v);
         if (!isFinite(v)) { renderProps(); return; }
-        if (k === 'elev' || k === 'duct' || k === 'gap' || k === 'y') v = Math.max(0, v);
+        if (k === 'elev' || k === 'duct' || k === 'hoodOut' || k === 'gap' || k === 'y') v = Math.max(0, v);
         if (k === 'height' || k === 'h' || k === 'w' || k === 'd' || k === 'thick') v = Math.max(0.05, v);
       }
       if (inp.type === 'range') {
@@ -487,6 +493,16 @@ function renderProps() {
   $$('[data-seg="anchor"] button', box).forEach(b => b.addEventListener('click', () => {
     wallAnchor = b.dataset.v;
     $$('[data-seg="anchor"] button', box).forEach(q => q.classList.toggle('on', q === b));
+  }));
+  // เปลี่ยนหมวด: สลับไปรุ่นแรกของหมวดนั้น (ล้างค่า Hood/อัตราลมที่ความหมายต่างกัน)
+  $$('[data-seg="cat"] button', box).forEach(b => b.addEventListener('click', () => {
+    if (seriesOf(getModel(o.model)).cat === b.dataset.v) return;
+    const first = MODELS.find(x => seriesOf(x).cat === b.dataset.v);
+    if (!first) return;
+    edit(() => {
+      if (first.discharge !== getModel(o.model).discharge) { o.duct = 0; o.deflect = 'none'; o.hoodType = 'straight'; }
+      o.model = first.id; o.airflow = null; lastUsed.model = first.id;
+    });
   }));
   for (const key of ['deflect', 'hoodType', 'hoodDir'])
     $$(`[data-seg="${key}"] button`, box).forEach(b => b.addEventListener('click', () => edit(() => { o[key] = b.dataset.v; })));
@@ -1025,8 +1041,8 @@ function renderAdvice(units) {
     const near = walls.filter(w => distToSeg(o.x, o.z, w) < 4);
     const tall = near.filter(w => (w.gap || 0) + w.height > top - 0.1);
     if (frontUnit) {
-      if ((!o.deflect || o.deflect === 'none') && (tall.length || u.Cin > 0.1)) tips.push('ติด Hood + ใบเบี่ยงลมร้อน 45° เบี่ยงลมขึ้น (หรือไปทางที่โล่ง) ให้ลมร้อนพ้นผนัง/เครื่องข้างเคียง');
-    } else if (!(o.duct > 0) && (tall.length || u.Cin > 0.1)) tips.push(`ติด Hood ให้ปากลมสูงกว่า${tall.length ? 'ผนังรอบข้าง' : 'เดิม'} ≥ 0.5–1 ม. — ใต้หลังคา/ชายคาใช้ Hood หัก 90° เป่าออกทางด้านที่โล่ง`);
+      if ((!o.deflect || o.deflect === 'none') && (tall.length || u.Cin > 0.1)) tips.push('ติดใบเบี่ยงลม: ตั้งทิศทางลมร้อนเบี่ยง 45° ขึ้นหรือไปทางที่โล่ง ให้ลมร้อนพ้นผนัง/เครื่องข้างเคียง');
+    } else if (!(o.duct > 0) && (tall.length || u.Cin > 0.1)) tips.push(`ติด Hood ให้ปากลมสูงกว่า${tall.length ? 'ผนังรอบข้าง' : 'เดิม'} ≥ 0.5–1 ม. — ใต้หลังคา/ชายคาใช้ Hood ท่อโค้ง 90° ยื่นออกทางด้านที่โล่ง`);
     const lowLouver = near.filter(w => w.louver > 0 && w.louver < 60);
     if (lowLouver.length) tips.push(`เพิ่มพื้นที่เปิดของ ${lowLouver.map(w => esc(w.name)).join(', ')} (ตอนนี้ ${lowLouver.map(w => w.louver + '%').join(', ')})`);
     const solidNear = near.filter(w => !(w.louver > 0));
@@ -1632,11 +1648,11 @@ function bindUI() {
 }
 
 function renderModelTable() {
-  const label = k => SERIES.find(q => q.key === k)?.label || k;
-  const rows = MODELS.map(m => `<tr><td>${label(m.series)}</td><td>${m.id}</td><td class="n">${m.hp}</td><td>${m.modules.length > 1 ? m.modules.join(' + ') : '—'}</td>
+  const cat = m => CATEGORIES.find(c => c.key === seriesOf(m).cat).label;
+  const rows = MODELS.map(m => `<tr><td>${cat(m)}</td><td>${seriesOf(m).label}</td><td>${m.indoor ? m.indoor + ' / ' : ''}${m.id}</td><td class="n">${m.hp}</td><td>${m.modules.length > 1 ? m.modules.join(' + ') : '—'}</td>
     <td class="n">${m.kw.toFixed(1)}</td><td class="n">${m.cmm}</td><td class="n">${m.eer.toFixed(2)}</td>
     <td class="n">${m.width} × ${m.height} × ${m.depth}</td><td class="n">${m.fans}</td><td>${m.discharge === 'front' ? 'หน้า' : 'บน'}</td></tr>`).join('');
-  $('#model-table').innerHTML = `<tr><th>ซีรีส์</th><th>รุ่น</th><th class="n">HP</th><th>โมดูล</th><th class="n">kW</th><th class="n">m³/min</th><th class="n">EER</th><th class="n">ก × ส × ล (มม.)</th><th class="n">พัดลม</th><th>ลมออก</th></tr>${rows}`;
+  $('#model-table').innerHTML = `<tr><th>หมวด</th><th>ซีรีส์</th><th>รุ่น</th><th class="n">HP</th><th>โมดูล</th><th class="n">kW</th><th class="n">m³/min</th><th class="n">EER</th><th class="n">ก × ส × ล (มม.)</th><th class="n">พัดลม</th><th>ลมออก</th></tr>${rows}`;
 }
 
 /* ───────── เริ่มต้น ───────── */

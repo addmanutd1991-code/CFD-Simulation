@@ -116,6 +116,13 @@ export class GridPrep {
         fanVmax = Math.max(fanVmax, sp);
         fanRate = Math.max(fanRate, sp * this.ax(ax, AXT.RD, idx));
       }
+      // ทิศทางลมร้อนของรุ่นเป่าหน้า: ความเร็วตามทิศเบี่ยงที่หน้าเซลล์ระหว่างเซลล์อากาศชั้นแรกหน้าปากลม
+      for (let a = 0; a < (m.dirFaces ? m.dirFaces.length : 0); a++) {
+        const f = m.dirFaces[a], ax = m.dirAxis[a], vel = m.dirVel[a];
+        if (ax === 0) { fixU[f] = 1; uF[f] = vel; }
+        else if (ax === 1) { fixV[f] = 1; vF[f] = vel; }
+        else { fixW[f] = 1; wF[f] = vel; }
+      }
       for (let a = 0; a < m.inFaces.length; a++) {
         const f = m.inFaces[a];
         if (m.inAxis[a] === 0) { fixU[f] = 1; uF[f] = m.inVel[a]; }

@@ -9,7 +9,9 @@
  *   VRV S Hi (RSUQ-AYM)     catalog EDTRMT332104A — เป่าลมออกด้านหน้า (side discharge) 870 × 1,100 × 460 mm
  *     ลมเข้า: ด้านหลังและด้านซ้าย (มองจากด้านหน้า — ด้านขวาเป็นแผงบริการ/ท่อน้ำยา) · ลมออก: พัดลมหน้าเครื่อง
  *     ตำแหน่งและขนาดหน้ากากพัดลมประมาณจากแบบ Dimensions ของ catalog
- * EER ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
+ *   Split type FTKB-A (คอยล์ร้อน RKB09/12AV2S) catalog EDTTH042558 — เป่าลมออกด้านหน้า 461 × 650 × 244 mm
+ *     EER ใช้ COP ที่พิกัดจาก catalog (3.09 / 3.10)
+ * EER ของ VRV ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
  */
 
 const EER = 3.5;
@@ -49,7 +51,7 @@ const COMBOS = {
  * ซีรีส์เป่าลมหน้าเครื่อง (side discharge): ขนาดตัวเครื่องและหน้ากากพัดลม
  *   fan.lx  = ศูนย์กลางพัดลมตามความกว้าง (ม., เทียบกึ่งกลางเครื่อง, ลบ = ซ้ายเมื่อมองจากด้านหน้า)
  *   fan.y   = ความสูงศูนย์กลางพัดลมจากฐานเครื่อง (ม.)
- *   fan.s   = ขนาดหน้ากากพัดลมสี่เหลี่ยมจัตุรัส (ม.) — ใช้เป็นหน้าตัดของ Hood และใบเบี่ยงลม
+ *   fan.s   = ขนาดหน้ากากพัดลมสี่เหลี่ยมจัตุรัส (ม.) — ใช้เป็นหน้าตัดของ Hood
  *   fan.dia = เส้นผ่านศูนย์กลางช่องลมออกของพัดลม (ม.)
  */
 const FRONT_SERIES = {
@@ -71,22 +73,47 @@ const FRONT_SERIES = {
       { id: 'RSUQ9AYM', hp: 9, kw: 24.0, cmm: 137 },
     ],
   },
+  FTKB: {
+    label: 'FTKB-A', code: 'RKB-AV2S', h: 461, w: 650, d: 244,
+    fan: { lx: -0.07, y: 0.23, s: 0.42, dia: 0.40 },
+    units: [
+      { id: 'RKB09AV2S', indoor: 'FTKB09AV2S', hp: 1, kw: 2.7, cmm: 26.0, eer: 3.09 },
+      { id: 'RKB12AV2S', indoor: 'FTKB12AV2S', hp: 1.5, kw: 3.6, cmm: 26.9, eer: 3.10 },
+    ],
+  },
 };
+
+/** หมวดหมู่เครื่อง — เมนูเลือกรุ่นแยก VRV กับ Split type */
+export const CATEGORIES = [
+  { key: 'vrv', label: 'VRV' },
+  { key: 'split', label: 'Split type' },
+];
 
 /** รายชื่อซีรีส์ตามลำดับที่แสดงในเมนูเลือกรุ่น */
 export const SERIES = [
-  { key: '6A', label: 'VRV 6A', code: 'RXQ-BY1S', discharge: 'top', catalog: 'EDTRTH342529A' },
-  { key: 'IVS', label: 'VRV IV S', code: 'RXMQ', discharge: 'front', catalog: 'EDTRMT332049' },
-  { key: 'SHI', label: 'VRV S Hi', code: 'RSUQ-AYM', discharge: 'front', catalog: 'EDTRMT332104A' },
+  { key: '6A', cat: 'vrv', label: 'VRV 6A', code: 'RXQ-BY1S', discharge: 'top', catalog: 'EDTRTH342529A' },
+  { key: 'IVS', cat: 'vrv', label: 'VRV IV S', code: 'RXMQ', discharge: 'front', catalog: 'EDTRMT332049' },
+  { key: 'SHI', cat: 'vrv', label: 'VRV S Hi', code: 'RSUQ-AYM', discharge: 'front', catalog: 'EDTRMT332104A' },
+  { key: 'FTKB', cat: 'split', label: 'Split FTKB-A', code: 'RKB-AV2S', discharge: 'front', catalog: 'EDTTH042558' },
 ];
+export function seriesOf(model) { return SERIES.find(s => s.key === model.series) || SERIES[0]; }
 
-/** ทิศเบี่ยงลมร้อนของใบเบี่ยงหน้าเครื่องรุ่นเป่าหน้า (มองจากด้านหน้าเครื่อง) → เวกเตอร์ในแกนเฉพาะของเครื่อง */
+/**
+ * ทิศทางลมร้อนออกจากเครื่องรุ่นเป่าหน้า (ใบเบี่ยงลมที่ติดกับเครื่อง — ไม่มีรูปทรงในแบบจำลอง)
+ * เบี่ยง 45° จากแนวตั้งฉากหน้าเครื่อง มองจากด้านหน้าเครื่อง → เวกเตอร์ในแกนเฉพาะของเครื่อง
+ */
 export const DEFLECT_DIRS = {
   up: [0, 1, 0], down: [0, -1, 0], left: [-1, 0, 0], right: [1, 0, 0],
 };
 /** ทิศปากลมของ Hood หักฉาก 90° (รุ่นเป่าขึ้น) → เวกเตอร์ (lx, lz) ในแกนเฉพาะของเครื่อง (+lz = ด้านหน้า) */
 export const HOOD_DIRS = { front: [0, 1], back: [0, -1], left: [-1, 0], right: [1, 0] };
-export const ELBOW_OPEN = 0.6;   // ม. — ความสูงช่องลมออกด้านข้างของ Hood หัก 90° (ไม่เกินความสูง Hood)
+/** Hood หัก 90° (ท่อโค้ง): ความสูงหน้าตัดท่อช่วงแนวนอน = ความลึกตัวเครื่อง แต่ไม่เกินความสูง Hood */
+export function elbowOpen(unit) { return Math.min(Math.max(0, unit.duct || 0), unitSize(unit).d); }
+/** ทิศปากลม Hood หัก 90° ที่ใช้จริง — ด้านข้างใช้ได้เฉพาะเครื่องโมดูลเดี่ยว */
+export function elbowDir(unit) {
+  const d = HOOD_DIRS[unit.hoodDir] ? unit.hoodDir : 'front';
+  return getModel(unit.model).modules.length > 1 && (d === 'left' || d === 'right') ? 'front' : d;
+}
 
 function build() {
   const list = [];
@@ -94,10 +121,11 @@ function build() {
   for (const hp of Object.keys(COMBOS).map(Number)) list.push(makeModel(hp, COMBOS[hp][1], COMBOS[hp][0]));
   for (const [key, sr] of Object.entries(FRONT_SERIES))
     for (const u of sr.units) {
-      const spec = { hp: u.hp, kw: u.kw, cmm: u.cmm, w: sr.w, fans: 1, eer: EER };
+      const eer = u.eer || EER;
+      const spec = { hp: u.hp, kw: u.kw, cmm: u.cmm, w: sr.w, fans: 1, eer };
       list.push({
-        id: u.id, series: key, discharge: 'front',
-        hp: u.hp, kw: u.kw, cmm: u.cmm, eer: EER, kwScale: 1,
+        id: u.id, indoor: u.indoor || null, series: key, discharge: 'front',
+        hp: u.hp, kw: u.kw, cmm: u.cmm, eer, kwScale: 1,
         modules: [u.hp], mods: [spec],
         width: sr.w, height: sr.h, depth: sr.d, fans: 1,
         fan: { ...sr.fan },
@@ -157,32 +185,39 @@ export function unitSize(unit) {
 }
 
 /**
- * ระยะที่ Hood / ใบเบี่ยงลมยื่นออกจากตัวเครื่อง (ม.)
- *   front = ยื่นออกด้านหน้า (รุ่นเป่าหน้า: ความยาว Hood + ใบเบี่ยง) · top = สูงเหนือตัวเครื่อง (รุ่นเป่าขึ้น: ความสูง Hood)
+ * กล่องของเครื่องรวม Hood ในแกนเฉพาะของเครื่อง (ม.): lx ตามความกว้าง, lz ไปทางด้านหน้า, top = ความสูงเหนือฐาน
+ *   รุ่นเป่าหน้า: Hood ยื่นออกด้านหน้า (duct = ความยาว)
+ *   รุ่นเป่าขึ้น: Hood สูงเหนือเครื่อง (duct = ความสูง) · Hood หัก 90° ยื่นพ้นตัวเครื่องตามทิศปากลมอีก hoodOut
  */
-export function hoodReach(unit) {
-  const m = getModel(unit.model);
+export function unitLocalBox(unit) {
+  const m = getModel(unit.model), s = unitSize(unit);
   const L = Math.max(0, unit.duct || 0);
-  if (m.discharge === 'front') return { front: L + (unit.deflect && unit.deflect !== 'none' ? m.fan.s : 0), top: 0 };
-  return { front: 0, top: L };
+  const b = { lx0: -s.w / 2, lx1: s.w / 2, lz0: -s.d / 2, lz1: s.d / 2, top: s.h };
+  if (m.discharge === 'front') { b.lz1 += L; return b; }
+  b.top += L;
+  if (L > 0 && unit.hoodType === 'elbow') {
+    const [vx, vz] = HOOD_DIRS[elbowDir(unit)], out = Math.max(0, unit.hoodOut || 0);
+    if (vx < 0) b.lx0 -= out; else if (vx > 0) b.lx1 += out;
+    if (vz < 0) b.lz0 -= out; else if (vz > 0) b.lz1 += out;
+  }
+  return b;
 }
 
 /**
- * กรอบสี่เหลี่ยมตามแกนโลก (AABB) ของเครื่องรวม Hood / ใบเบี่ยงลม — rot เป็นพหุคูณของ 90°
- * ด้านหน้าเครื่องหันไป +z เมื่อ rot = 0 (แกนเฉพาะ: lx ตามความกว้าง, lz ไปทางด้านหน้า)
+ * กรอบสี่เหลี่ยมตามแกนโลก (AABB) ของเครื่องรวม Hood — rot เป็นพหุคูณของ 90°
+ * ด้านหน้าเครื่องหันไป +z เมื่อ rot = 0
  */
 export function unitExtent(unit) {
-  const s = unitSize(unit), r = hoodReach(unit);
+  const b = unitLocalBox(unit);
   const rot = (((unit.rot || 0) % 360) + 360) % 360;
   const a = rot * Math.PI / 180, c = Math.round(Math.cos(a)), sn = Math.round(Math.sin(a));
-  const lz0 = -s.d / 2, lz1 = s.d / 2 + r.front, lx = s.w / 2;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-  for (const px of [-lx, lx]) for (const pz of [lz0, lz1]) {
+  for (const px of [b.lx0, b.lx1]) for (const pz of [b.lz0, b.lz1]) {
     const wx = unit.x + px * c + pz * sn, wz = unit.z - px * sn + pz * c;
     x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); z0 = Math.min(z0, wz); z1 = Math.max(z1, wz);
   }
   const y0 = unit.elev || 0;
-  return { x0, x1, z0, z1, y0, y1: y0 + s.h + r.top };
+  return { x0, x1, z0, z1, y0, y1: y0 + b.top };
 }
 
 export const DEFAULT_PERF = {

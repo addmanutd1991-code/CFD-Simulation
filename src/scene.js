@@ -7,8 +7,9 @@
  *            — rot เป็นพหุคูณของ 90°, ด้านหน้าเครื่องหันไป +z เมื่อ rot = 0
  *            — duct = Hood: รุ่นเป่าขึ้น (VRV 6A) คือความสูง Hood เหนือเครื่อง, รุ่นเป่าหน้า (VRV IV S / S Hi)
  *              คือความยาว Hood ที่ยื่นจากหน้ากากพัดลม (0 = ไม่มี Hood)
- *            — hoodType 'straight' | 'elbow' (หัก 90°) และ hoodDir 'front'|'back'|'left'|'right' (ทิศปากลมของ Hood หัก) — รุ่นเป่าขึ้น
- *            — deflect 'none'|'up'|'down'|'left'|'right' ใบเบี่ยงลมร้อน 45° — รุ่นเป่าหน้า
+ *            — hoodType 'straight' | 'elbow' (ท่อโค้งหัก 90°), hoodDir 'front'|'back'|'left'|'right' (ทิศปากลมของ Hood หัก)
+ *              และ hoodOut = ระยะที่ Hood หักยื่นพ้นตัวเครื่องไปทางปากลม (ม.) — รุ่นเป่าขึ้น
+ *            — deflect 'none'|'up'|'down'|'left'|'right' ทิศทางลมร้อนออกจากเครื่อง (ตรง หรือเบี่ยง 45°) — รุ่นเป่าหน้า
  *   wall     {x1, z1, x2, z2, height, thick, louver, gap} — louver = % พื้นที่เปิด (0 = ผนังทึบ)
  *   building {x, z, w, d, h, rot}
  *   slab     {x, z, w, d, y, thick, rot, open}         — แผ่นพื้นยก/หลังคา: y = ระดับผิวบน, open = % ช่องเปิด (0 = ทึบ)
@@ -74,7 +75,8 @@ export function makeObject(scene, type, input = {}) {
   const { id, name, type: _t, ...props } = input;
   const base = { id: Number.isFinite(id) ? id : nextId(scene), type, name: name || nextName(scene, type) };
   if (type === 'cdu') {
-    const o = { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, hoodType: 'straight', hoodDir: 'front', deflect: 'none', airflow: null, ...props };
+    const o = { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, hoodType: 'straight', hoodDir: 'front', hoodOut: 0.4, deflect: 'none', airflow: null, ...props };
+    o.hoodOut = Math.max(0, Number(o.hoodOut) || 0);
     if (!['straight', 'elbow'].includes(o.hoodType)) o.hoodType = 'straight';
     if (!['front', 'back', 'left', 'right'].includes(o.hoodDir)) o.hoodDir = 'front';
     if (!['none', 'up', 'down', 'left', 'right'].includes(o.deflect)) o.deflect = 'none';
@@ -256,9 +258,9 @@ export const PRESETS = [
   },
   {
     key: 'canopy-elbow',
-    label: 'VRV 6A ใต้หลังคา + Hood หัก 90° ปากลมหันหน้า',
+    label: 'VRV 6A ใต้หลังคา + Hood ท่อโค้ง 90° ยื่นหน้า',
     build() {
-      const hood = { duct: 1.2, hoodType: 'elbow', hoodDir: 'front' };
+      const hood = { duct: 1.2, hoodType: 'elbow', hoodDir: 'front', hoodOut: 0.5 };
       return {
         name: 'VRV 6A ใต้หลังคา — Hood หัก 90°',
         site: { ambient: 35, windSpeed: 0, windDir: 0 },
@@ -274,11 +276,11 @@ export const PRESETS = [
   },
   {
     key: 'side-deflect',
-    label: 'VRV S Hi / IV S เป่าหน้าชิดรั้ว + Hood ใบเบี่ยงลมขึ้น 45°',
+    label: 'VRV S Hi / IV S เป่าหน้าชิดรั้ว — ลมร้อนเบี่ยงขึ้น 45°',
     build() {
-      const hood = { duct: 0.3, deflect: 'up' };
+      const hood = { deflect: 'up' };
       return {
-        name: 'VRV S Hi / IV S เป่าหน้า — ใบเบี่ยงลมขึ้น',
+        name: 'VRV S Hi / IV S เป่าหน้า — ลมร้อนเบี่ยงขึ้น',
         site: { ambient: 35, windSpeed: 0, windDir: 0 },
         objects: withIds([
           bldg('อาคาร', 5.0, 0.5, 12.0, 1.0, 6.0),
@@ -287,6 +289,26 @@ export const PRESETS = [
           cdu('CDU-2', 3.5, 1.5, 0, 'RSUQ8AYM', hood),
           cdu('CDU-3', 5.5, 1.4, 0, 'RXMQ6BVM', hood),
           cdu('CDU-4', 7.5, 1.4, 0, 'RXMQ5BVM', { duct: 0, deflect: 'none' }),
+        ]),
+      };
+    },
+  },
+  {
+    key: 'split-balcony',
+    label: 'Split FTKB 2 ชุดในระเบียง — ลมร้อนเบี่ยงออกนอกระเบียง',
+    build() {
+      // ระเบียงกว้าง 1.6 ม. ลึก 1.2 ม. เปิดด้านใต้ (ราวกันตก) เครื่องวางซ้อนสองชั้นเป่าขนานผนังเข้าหาผนังข้าง
+      return {
+        name: 'Split FTKB ในระเบียง — เบี่ยงลมออกนอก',
+        site: { ambient: 35, windSpeed: 0, windDir: 0 },
+        objects: withIds([
+          bldg('ผนังห้อง', 0.8, -0.5, 4.0, 1.0, 6.0),
+          wall('ผนังข้างซ้าย', 0.0, 0.0, 0.0, 1.2, 3.0, 0),
+          wall('ผนังข้างขวา', 1.6, 0.0, 1.6, 1.2, 3.0, 0),
+          wall('ราวกันตก', 0.0, 1.2, 1.6, 1.2, 1.0, 60, { thick: 0.05 }),
+          { type: 'slab', name: 'เพดานระเบียง', x: 0.8, z: 0.6, w: 1.6, d: 1.2, y: 3.0, thick: 0.15, rot: 0, open: 0 },
+          cdu('CDU-1', 0.35, 0.6, 90, 'RKB12AV2S', { elev: 0.3, deflect: 'left' }),
+          cdu('CDU-2', 0.35, 0.6, 90, 'RKB12AV2S', { elev: 1.1, deflect: 'left' }),
         ]),
       };
     },
