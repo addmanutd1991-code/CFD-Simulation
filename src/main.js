@@ -74,6 +74,45 @@ const runner = new Runner(onEngineMessage);
 
 /* ───────── การแก้ไขฉาก ───────── */
 
+/* ───────── ล็อกโมเดลเมื่อมีผลคำนวณ ─────────
+ * หลังกดคำนวณ แบบถูกล็อกไว้: คลิกวัตถุในภาพได้แค่เลือกดู ไม่ย้าย/แก้/ลบ — ผลจึงไม่หายเพราะคลิกพลาด
+ * ต้องการปรับแบบ → กดปุ่ม แก้ไขโมเดล (ผลเดิมยังอยู่จนกว่าจะแก้จริง) */
+let editUnlocked = false;
+const modelLocked = () => !!run.mesh && !run.stale && !editUnlocked;
+
+/** ถ้าโมเดลล็อกอยู่: แจ้งเตือน คืนค่าในแผงให้ตรงแบบ และคืน true (ผู้เรียกต้องหยุด) */
+function blockIfLocked() {
+  if (!modelLocked()) return false;
+  toast(L('โมเดลล็อกอยู่เพื่อรักษาผลคำนวณ — กดปุ่ม "แก้ไขโมเดล" ก่อนปรับแบบ', 'The model is locked to keep the results — press "Edit model" before changing it'), 3000);
+  const b = $('#btn-edit');
+  b.classList.remove('nudge'); void b.offsetWidth; b.classList.add('nudge');
+  renderProps();
+  renderSettings();
+  return true;
+}
+
+function setEditUnlocked(on) {
+  editUnlocked = on;
+  if (on) toast(L('ปลดล็อกแล้ว — ผลคำนวณยังอยู่ แต่ถ้าแก้แบบ ผลเดิมจะเป็นผลเก่าและต้องคำนวณใหม่', 'Unlocked — the results stay until you change the model; any change marks them stale and needs a new run'), 4500);
+  updateLockUI();
+}
+
+function updateLockUI() {
+  const locked = modelLocked();
+  viewer.setLocked(locked);
+  if (locked && tool !== 'select') setTool('select');
+  document.body.classList.toggle('model-locked', locked);
+  const b = $('#btn-edit');
+  b.hidden = !run.mesh || run.stale;
+  b.classList.toggle('on', !locked && !b.hidden);
+  $('#edit-ic').setAttribute('href', locked ? '#i-lock' : '#i-unlock');
+  $('#edit-label').textContent = locked ? L('แก้ไขโมเดล', 'Edit model') : L('ล็อกโมเดล', 'Lock model');
+  b.title = locked
+    ? L('ปลดล็อกเพื่อปรับแบบ (ผลคำนวณยังอยู่จนกว่าจะแก้จริง)', 'Unlock to change the model (results stay until you actually change something)')
+    : L('ล็อกโมเดลอีกครั้งเพื่อกันผลคำนวณหายจากการคลิกพลาด', 'Lock the model again so a stray click cannot clear the results');
+  renderProps();
+}
+
 function pushUndo() {
   undoStack.push(JSON.stringify(scene));
   if (undoStack.length > 120) undoStack.shift();
@@ -81,7 +120,8 @@ function pushUndo() {
   updateUndoButtons();
 }
 
-function edit(fn, geom = true) {
+function edit(fn, geom = true, force = false) {
+  if (geom && !force && blockIfLocked()) return;
   pushUndo();
   fn();
   afterChange(geom);
@@ -103,7 +143,7 @@ function afterChange(geom = true) {
 }
 
 function undo() {
-  if (!undoStack.length) return;
+  if (!undoStack.length || blockIfLocked()) return;
   redoStack.push(JSON.stringify(scene));
   scene = JSON.parse(undoStack.pop());
   updateUndoButtons();
@@ -111,7 +151,7 @@ function undo() {
 }
 
 function redo() {
-  if (!redoStack.length) return;
+  if (!redoStack.length || blockIfLocked()) return;
   undoStack.push(JSON.stringify(scene));
   scene = JSON.parse(redoStack.pop());
   updateUndoButtons();
@@ -124,6 +164,7 @@ function updateUndoButtons() {
 }
 
 function createObject(type, props) {
+  if (blockIfLocked()) return;
   pushUndo();
   let o;
   if (type === 'cdu') {
@@ -319,6 +360,7 @@ const TOOL_HINT = () => ({
 });
 
 function setTool(t) {
+  if (t !== 'select' && blockIfLocked()) t = 'select';
   tool = t;
   viewer.setTool(t);
   $$('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
@@ -449,6 +491,17 @@ function renderProps() {
       <button data-act="close" class="ghost" title="Esc">${L('ปิด', 'Close')}</button>
     </div>`;
   box.innerHTML = html;
+  if (modelLocked()) {
+    // มีผลคำนวณอยู่ → ดูค่าได้ แก้ไม่ได้ (ยกเว้นชื่อ) จนกว่าจะกด แก้ไขโมเดล
+    box.insertAdjacentHTML('afterbegin', `<div class="lock-note"><svg class="ic"><use href="#i-lock"/></svg>
+      <span>${L('โมเดลล็อกอยู่เพื่อรักษาผลคำนวณ', 'Model locked to keep the results')}</span>
+      <button data-act="unlock">${L('แก้ไขโมเดล', 'Edit model')}</button></div>`);
+    $$('input, select, textarea, button', box).forEach(el => {
+      if (el.dataset.k === 'name' || el.dataset.act === 'close' || el.dataset.act === 'unlock') return;
+      el.disabled = true;
+    });
+    $('[data-act="unlock"]', box).addEventListener('click', () => setEditUnlocked(true));
+  }
 
   const NUM = new Set(['x', 'z', 'elev', 'duct', 'hoodOut', 'airflow', 'x1', 'z1', 'x2', 'z2', 'height', 'thick', 'gap', 'louver', 'w', 'd', 'h', 'rot', 'y', 'open']);
   $$('[data-k]', box).forEach(inp => {
@@ -464,7 +517,7 @@ function renderProps() {
       }
       if (inp.type === 'range') {
         // เลื่อนแถบ: บันทึก undo ครั้งเดียวต่อการลาก
-        if (!inp._pushed) { pushUndo(); inp._pushed = true; }
+        if (!inp._pushed) { if (blockIfLocked()) return; pushUndo(); inp._pushed = true; }
         o[k] = v;
         if (k === 'louver') lastUsed.louver = v;
         inp.previousElementSibling?.querySelector('.val') && (inp.previousElementSibling.querySelector('.val').textContent = v > 0 ? v + '%' : L('ทึบ', 'solid'));
@@ -484,7 +537,7 @@ function renderProps() {
         if (k === 'height' && o.type === 'wall') lastUsed.wallHeight = v;
       }, k !== 'name');
     });
-    if (inp.type === 'range') inp.addEventListener('change', () => { inp._pushed = false; afterChange(true); });
+    if (inp.type === 'range') inp.addEventListener('change', () => { if (!inp._pushed) return; inp._pushed = false; afterChange(true); });
   });
   // ผนัง: แก้ความยาว/มุมโดยพิมพ์ค่า — คงตำแหน่งจุดยึดที่เลือกไว้
   $$('[data-wall]', box).forEach(inp => inp.addEventListener('change', () => {
@@ -733,6 +786,7 @@ function startOrToggle() {
   run.report = null;
   run.stale = false;
   run.sceneJSON = JSON.stringify(scene);
+  editUnlocked = false;
   run.state = 'running';
   run.startWall = run.lastWall = performance.now();
   run.lastT = 0; run.rate = null;
@@ -751,6 +805,7 @@ function resetResults() {
   runner.send({ cmd: 'dispose' });
   run.state = 'idle';
   run.mesh = null; run.report = null; run.fields = null; run.stale = false;
+  editUnlocked = false;
   viewer.setResults(null);
   renderResults();
   updateRunUI();
@@ -924,6 +979,7 @@ function updateRunUI() {
   else if (run.state === 'done' && !run.stale) r?.converged ? setRun('check', L('ลู่เข้าแล้ว', 'Converged')) : setRun('play', L('คำนวณต่อจนลู่เข้า', 'Continue to convergence'));
   else setRun('play', L('คำนวณ', 'Run'));
   $('#btn-reset').hidden = !run.mesh;
+  updateLockUI();
 
   const t = r?.time ?? 0;
   const ck = r?.checks;
@@ -1219,7 +1275,7 @@ function renderCompare() {
     <td class="n">${(c.cap * 100).toFixed(1)}%</td><td><button data-i="${i}" title="${L('เปิดแบบของทางเลือกนี้', 'Open the model of this option')}">${L('เปิด', 'Open')}</button></td></tr>`).join('');
   $$('button', tb).forEach(b => b.addEventListener('click', () => {
     const c = compare[Number(b.dataset.i)];
-    edit(() => { scene = normalizeScene(JSON.parse(c.sceneJSON)); });
+    edit(() => { scene = normalizeScene(JSON.parse(c.sceneJSON)); }, true, true);
     toast(L(`เปิดแบบ "${c.name}" — กดคำนวณเพื่อดูผลอีกครั้ง`, `Opened "${c.name}" — press Run to see the results again`));
   }));
 }
@@ -1412,7 +1468,7 @@ function openProject(file) {
   rd.onload = () => {
     try {
       const s = normalizeScene(JSON.parse(rd.result));
-      edit(() => { scene = s; selectedId = null; });
+      edit(() => { scene = s; selectedId = null; }, true, true);
       showTab('tool');
       viewer.setView(viewer.view);
       initSection();
@@ -1614,7 +1670,7 @@ function bindMenus() {
 }
 
 function loadPreset(key) {
-  edit(() => { scene = presetScene(key); selectedId = null; });
+  edit(() => { scene = presetScene(key); selectedId = null; }, true, true);
   resetResults();
   showTab('tool');
   viewer.setView(viewer.view);
@@ -1682,12 +1738,13 @@ function bindUI() {
   $('#btn-redo').addEventListener('click', redo);
   $('#btn-run').addEventListener('click', startOrToggle);
   $('#btn-reset').addEventListener('click', resetResults);
+  $('#btn-edit').addEventListener('click', () => setEditUnlocked(modelLocked()));
   $('#btn-save').addEventListener('click', saveProject);
   $('#btn-open').addEventListener('click', () => $('#file-open').click());
   $('#file-open').addEventListener('change', (e) => { if (e.target.files[0]) openProject(e.target.files[0]); e.target.value = ''; });
   $('#btn-new').addEventListener('click', () => {
     if (scene.objects.length && !confirm(L('เริ่มโปรเจกต์ใหม่? (แบบปัจจุบันยังเลิกทำกลับได้ด้วย Ctrl+Z)', 'Start a new project? (the current model can still be restored with Ctrl+Z)'))) return;
-    edit(() => { scene = newScene(); selectedId = null; });
+    edit(() => { scene = newScene(); selectedId = null; }, true, true);
     resetResults();
     showTab('tool');
   });

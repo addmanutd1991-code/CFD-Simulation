@@ -39,6 +39,8 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5v14l11.5-7z" fill="currentColor"/></symbol>
   <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5.5v13M15.5 5.5v13" stroke-width="2.8"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="1.8"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3M12 14.5v2.5"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="1.8"/><path d="M8 10.5V7.5a4 4 0 0 1 7.8-1.3M12 14.5v2.5"/></symbol>
   <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 3.5V9h5.5"/></symbol>
   <symbol id="i-new" viewBox="0 0 24 24"><path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4M12 11v6M9 14h6"/></symbol>
   <symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7a1 1 0 0 1 1-1h5l2 2.5h9a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></symbol>
@@ -103,6 +105,7 @@
           </div>
         </div>
       </div>
+      <button id="btn-edit" class="quiet" hidden><svg class="ic"><use id="edit-ic" href="#i-lock"/></svg><span id="edit-label">แก้ไขโมเดล</span></button>
       <button id="btn-reset" class="quiet" title="ล้างผลการคำนวณ" data-en-title="Clear the calculation results" hidden><svg class="ic"><use href="#i-reset"/></svg><span data-en="Reset results">รีเซ็ตผล</span></button>
       <button id="btn-run" class="primary" title="สร้างเมชและเริ่มคำนวณ (Space)" data-en-title="Build the mesh and start the calculation (Space)"><svg class="ic"><use id="run-ic" href="#i-play"/></svg><span id="run-label">คำนวณ</span></button>
     </div>

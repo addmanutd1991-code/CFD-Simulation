@@ -625,3 +625,15 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
   .rail { flex-wrap: wrap; }
   .tab { padding: 6px 9px; }
 }
+
+/* ล็อกโมเดลเมื่อมีผลคำนวณ */
+#btn-edit.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--text); font-weight: 500; filter: none; }
+#btn-edit.on .ic { color: var(--accent); }
+#btn-edit.nudge { animation: nudge .45s ease-in-out 2; }
+@keyframes nudge { 50% { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line); } }
+body.model-locked .tool:not([data-tool="select"]) { opacity: .4; }
+.lock-note { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--accent-line); border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }
+.lock-note .ic { color: var(--accent); flex: none; }
+.lock-note span { flex: 1; }
+.lock-note button { padding: 4px 9px; font-size: 12px; }
+#props input:disabled, #props select:disabled { opacity: .6; cursor: not-allowed; }

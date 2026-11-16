@@ -1259,6 +1259,9 @@ export class Viewer {
 
   /* ───────── การโต้ตอบ ───────── */
 
+  /** ล็อกโมเดล (มีผลคำนวณอยู่): คลิกวัตถุได้แค่เลือกดู — ลาก/ย้าย/ยืดผนังไม่ได้ */
+  setLocked(on) { this.locked = !!on; }
+
   setTool(tool) {
     this.tool = tool;
     this.draw = null;
@@ -1429,14 +1432,14 @@ export class Viewer {
       }
       const ray = this.#pick(e);
       // 1) ตัวจับลากของผนัง / ระนาบหน้าตัด
-      const hh = ray.intersectObjects([...this.gHandles.children, this.secGroup.visible ? this.secKnob : null].filter(Boolean), false);
+      const hh = ray.intersectObjects([this.locked ? null : this.gHandles.children, this.secGroup.visible ? this.secKnob : null].flat().filter(Boolean), false);
       if (hh.length) {
         e.stopPropagation();
         const obj = hh[0].object;
         if (obj === this.secKnob) drag = { kind: 'section' };
         else {
           const hd = obj.userData.handle;
-          drag = { kind: 'end', id: hd.id, end: hd.end, moved: false };
+          drag = { kind: 'end', id: hd.id, end: hd.end, moved: false, sx: e.clientX, sy: e.clientY };
         }
         el.setPointerCapture(e.pointerId);
         return;
@@ -1453,9 +1456,9 @@ export class Viewer {
           this.cb.onSelect(id);
           const o = this.objects.find(q => q.id === id);
           const g = this.#ground(e);
-          if (o && g) {
+          if (o && g && !this.locked) {
             const ref = o.type === 'wall' ? { x: o.x1, z: o.z1 } : { x: o.x, z: o.z };
-            drag = { kind: 'move', id, off: { x: ref.x - g.x, z: ref.z - g.z }, start: { ...o }, moved: false };
+            drag = { kind: 'move', id, off: { x: ref.x - g.x, z: ref.z - g.z }, start: { ...o }, moved: false, sx: e.clientX, sy: e.clientY };
             el.setPointerCapture(e.pointerId);
           }
         }
@@ -1520,7 +1523,11 @@ export class Viewer {
     const o = this.objects.find(q => q.id === d.id);
     const g = this.#ground(e);
     if (!o || !g) return;
-    if (!d.moved) { this.cb.onBeginEdit?.(); d.moved = true; }
+    if (!d.moved) {
+      // มือสั่นตอนคลิกเลือก (ขยับไม่ถึง 5 px) ไม่นับเป็นการลาก — ไม่ให้แบบเปลี่ยนและผลคำนวณหายโดยไม่ตั้งใจ
+      if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 5) return;
+      this.cb.onBeginEdit?.(); d.moved = true;
+    }
     if (d.kind === 'end') {
       let { x, z } = this.#clampXZ(snap(g.x, e), snap(g.z, e));
       const ox2 = o[d.end === 1 ? 'x2' : 'x1'], oz2 = o[d.end === 1 ? 'z2' : 'z1'];
