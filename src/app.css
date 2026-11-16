@@ -591,7 +591,10 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
   .appbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
   .tabs { grid-row: 2; grid-column: 1 / -1; justify-self: start; }
   .tabpage { overflow-y: auto; }
-  .workspace, .workspace.side-collapsed { height: auto; grid-template-columns: 1fr; }
+  /* minmax(0, 1fr): ห้ามเนื้อหาที่กว้าง (แถบเครื่องมือ ฟอร์ม) ดันคอลัมน์ให้กว้างเกินจอ — Safari บน iPhone เคยล้นจอ */
+  .workspace, .workspace.side-collapsed { height: auto; grid-template-columns: minmax(0, 1fr); }
+  .workspace > * { min-width: 0; }
+  .tabpage { overflow-x: hidden; }
   .rail { flex-direction: row; width: auto; overflow: visible; flex-wrap: wrap; }
   .rail-btn { width: 62px; }
   .rail-sep { width: 1px; height: auto; margin: 6px 2px; }
@@ -619,10 +622,13 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
   .appbar { padding: 8px 10px; gap: 8px; }
   .proj-name { flex: 1 1 70px; width: 70px; min-width: 60px; }
   .workspace { padding: 8px; gap: 8px; }
-  .rail { flex-wrap: nowrap; }
-  .rail-btn { width: auto; flex: 1 1 0; min-width: 0; padding: 9px 2px; }
+  /* แถบเครื่องมือเป็นแถวเดียว ปุ่มขนาดคงที่ เลื่อนซ้าย-ขวาได้ถ้าไม่พอ (ไม่ดันหน้าให้กว้าง) */
+  .rail { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; gap: 2px; }
+  .rail::-webkit-scrollbar { display: none; }
+  .rail-btn { width: 42px; flex: none; min-width: 0; padding: 9px 0; }
   .rail-btn > span, .rail > .spacer { display: none; }
-  .rail { flex-wrap: wrap; }
+  .rail-grid { flex: none; }
+  .rail-mini { flex: none; }
   .tab { padding: 6px 9px; }
 }
 
@@ -637,3 +643,43 @@ body.model-locked .tool:not([data-tool="select"]) { opacity: .4; }
 .lock-note span { flex: 1; }
 .lock-note button { padding: 4px 9px; font-size: 12px; }
 #props input:disabled, #props select:disabled { opacity: .6; cursor: not-allowed; }
+
+/* มือถือ: ช่องกรอกขนาดตัวอักษร ≥ 16px — กัน Safari บน iPhone ซูมหน้าเองเมื่อแตะช่องกรอก แล้วค้างซูมอยู่ */
+@media (max-width: 900px) and (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}
+
+/* มือถือ: แถบบนจัดใหม่เป็น 2 แถว — แถว 1 ชื่อ/ไฟล์/เลิกทำ/ภาษา · แถว 2 แท็บหน้า + ปุ่มคำนวณ (ปุ่มแก้ไขโมเดล/รีเซ็ตเหลือแต่ไอคอน) */
+@media (max-width: 560px) {
+  .appbar { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 8px; }
+  .bar-left { order: 0; flex: 1 1 calc(100% - 60px); min-width: 0; }
+  .bar-right { display: contents; }
+  .bar-right > .menu-wrap { order: 1; margin-left: auto; }
+  .bar-right > .menu-wrap > [data-menu] > span { display: none; }
+  .tabs { order: 2; margin-right: auto; }
+  .tab { padding: 6px 8px; gap: 5px; }
+  #btn-edit, #btn-reset { order: 3; padding: 6px 8px; }
+  #btn-edit span { display: none; }
+  #btn-run { order: 4; }
+  /* ปุ่มมุมมองเลื่อนซ้าย-ขวาได้ถ้าจอแคบมาก */
+  .vp-row { flex-wrap: nowrap; max-width: 100%; }
+  .vseg { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+  .vseg::-webkit-scrollbar { display: none; }
+  .vt { padding: 4px 8px; flex: none; }
+}
+@media (max-width: 400px) {
+  .tab .ic { display: none; }
+}
+@media (max-width: 400px) {
+  .tab { padding: 6px 7px; }
+  #btn-edit, #btn-reset { padding: 6px 6px; }
+  .vt { padding: 4px 7px; }
+  /* มีผลแล้ว (ปุ่มแก้ไขโมเดล/รีเซ็ตโผล่) → ปุ่มคำนวณเหลือแต่ไอคอน ให้อยู่แถวเดียวกับแท็บ */
+  #btn-reset:not([hidden]) ~ #btn-run #run-label { display: none; }
+}
+@media (max-width: 340px) {
+  .appbar { column-gap: 3px; padding: 8px 6px; }
+  .tab { padding: 6px 5px; font-size: 13px; }
+  #btn-edit, #btn-reset { padding: 6px 4px; }
+  #btn-run { padding: 6px 10px; }
+}
