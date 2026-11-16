@@ -6,6 +6,7 @@
  * ไม่อนุญาตให้สร้าง Worker เช่นเปิดไฟล์จาก file:// ในบางเบราว์เซอร์)
  */
 
+import { L, setLang } from './i18n.js';
 import { Solver } from './solver.js';
 import { GpuSolver } from './gpu-solver.js';
 import { createKernelsAsync, maxThreads } from './kernels.js';
@@ -80,7 +81,7 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     const avail = maxThreads();
     const threads = Math.max(1, Math.min(msg.threads || (avail > 4 ? avail - 1 : avail), avail));
     const kernels = await createKernelsAsync(Solver.memoryBytes(msg.mesh, threads), { threads });
-    if (!kernels) throw new Error('เบราว์เซอร์นี้ใช้ WebAssembly ไม่ได้ — ไม่สามารถคำนวณได้');
+    if (!kernels) throw new Error(L('เบราว์เซอร์นี้ใช้ WebAssembly ไม่ได้ — ไม่สามารถคำนวณได้', 'This browser cannot run WebAssembly — the calculation cannot start'));
     try {
       return { solver: new Solver(msg.mesh, { ...msg.params, kernels }), gpuError };
     } catch (err) {
@@ -95,6 +96,7 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
 
   const handleMsg = async (msg) => {
     if (msg.cmd === 'init') {
+      if (msg.lang) setLang(msg.lang);   // ข้อความผิดพลาดจากตัวคำนวณใช้ภาษาเดียวกับหน้าจอ
       running = false;
       clearTimeout(timer); timer = 0;
       solver?.dispose(); solver = null;

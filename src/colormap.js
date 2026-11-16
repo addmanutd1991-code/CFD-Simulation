@@ -1,5 +1,6 @@
 /* colormap.js — แถบสีของผลลัพธ์ (น้ำเงิน → ฟ้า → เหลือง → ส้ม → แดง) ใช้ร่วมกันทั้ง 3D และแถบสเกล */
 
+import { L } from './i18n.js';
 export const STOPS = [
   [0.00, 38, 70, 178],
   [0.18, 42, 128, 216],
@@ -37,9 +38,9 @@ export function cssGradient(levels = 0) {
 
 /** ตัวแปรที่แสดงผลได้ พร้อมหน่วยและวิธีกำหนดช่วงสเกล */
 export const FIELDS = {
-  T: { label: 'อุณหภูมิ', unit: '°C', digits: 1 },
-  dT: { label: 'อุณหภูมิเกินอากาศภายนอก', unit: '°C', digits: 1 },
-  C: { label: 'สัดส่วนลมร้อนจาก CDU', unit: '%', digits: 0 },
-  V: { label: 'ความเร็วลม', unit: 'm/s', digits: 2 },
-  P: { label: 'ความดันเทียบบรรยากาศ', unit: 'Pa', digits: 2 },
+  T: { get label() { return L('อุณหภูมิ', 'Temperature'); }, unit: '°C', digits: 1 },
+  dT: { get label() { return L('อุณหภูมิเกินอากาศภายนอก', 'Temperature rise above ambient'); }, unit: '°C', digits: 1 },
+  C: { get label() { return L('สัดส่วนลมร้อนจาก CDU', 'CDU discharge-air fraction'); }, unit: '%', digits: 0 },
+  V: { get label() { return L('ความเร็วลม', 'Air speed'); }, unit: 'm/s', digits: 2 },
+  P: { get label() { return L('ความดันเทียบบรรยากาศ', 'Gauge pressure'); }, unit: 'Pa', digits: 2 },
 };

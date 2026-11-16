@@ -14,6 +14,7 @@
  * EER ของ VRV ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
  */
 
+import { L } from './i18n.js';
 const EER = 3.5;
 
 /** โมดูลเดี่ยว — ความกว้างเป็นมิลลิเมตร อัตราลมเป็น m³/min */
@@ -244,10 +245,10 @@ export function modulePerf(kw, eer, Tin, perf = DEFAULT_PERF) {
 
 /** ระดับความรุนแรงจากอุณหภูมิลมเข้าคอยล์ที่สูงขึ้นเทียบอากาศภายนอก */
 export function status(dT, Tin, perf = DEFAULT_PERF) {
-  if (Tin >= perf.Tlimit) return { key: 'trip', label: 'เกินขอบเขตทำงาน', short: 'ตัด HP' };
-  if (dT >= 3) return { key: 'bad', label: 'ลมร้อนวนกลับมาก', short: 'วิกฤต' };
-  if (dT >= 1) return { key: 'watch', label: 'ควรเฝ้าระวัง', short: 'เฝ้าระวัง' };
-  return { key: 'ok', label: 'ปกติ', short: 'ปกติ' };
+  if (Tin >= perf.Tlimit) return { key: 'trip', label: L('เกินขอบเขตทำงาน', 'Beyond operating limit'), short: L('ตัด HP', 'HP trip') };
+  if (dT >= 3) return { key: 'bad', label: L('ลมร้อนวนกลับมาก', 'Heavy recirculation'), short: L('วิกฤต', 'Critical') };
+  if (dT >= 1) return { key: 'watch', label: L('ควรเฝ้าระวัง', 'Needs attention'), short: L('เฝ้าระวัง', 'Watch') };
+  return { key: 'ok', label: L('ปกติ', 'Normal'), short: L('ปกติ', 'Normal') };
 }
 
 export const AIR_CP = 1007;
