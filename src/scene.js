@@ -15,6 +15,7 @@
  *   slab     {x, z, w, d, y, thick, rot, open}         — แผ่นพื้นยก/หลังคา: y = ระดับผิวบน, open = % ช่องเปิด (0 = ทึบ)
  */
 
+import { L } from './i18n.js';
 import { DEFAULT_PERF, unitSize, unitExtent } from './models.js';
 import { gradeFeatures, gradedAxis, uniformAxis } from './grid.js';
 
@@ -35,7 +36,7 @@ export const DEFAULTS = {
 export function newScene() {
   return {
     version: 2,
-    name: 'โปรเจกต์ใหม่',
+    name: L('โปรเจกต์ใหม่', 'New project'),
     site: { ...DEFAULTS.site },
     sim: { ...DEFAULTS.sim },
     bc: cloneBC(DEFAULTS.bc),
@@ -63,7 +64,7 @@ export function nextId(scene) {
 }
 
 export function nextName(scene, type) {
-  const prefix = type === 'cdu' ? 'CDU-' : type === 'wall' ? 'ผนัง-' : type === 'slab' ? 'พื้น-' : 'อาคาร-';
+  const prefix = type === 'cdu' ? 'CDU-' : type === 'wall' ? L('ผนัง-', 'Wall-') : type === 'slab' ? L('พื้น-', 'Slab-') : L('อาคาร-', 'Building-');
   let n = 1;
   const names = new Set(scene.objects.map(o => o.name));
   while (names.has(prefix + n)) n++;
@@ -185,17 +186,17 @@ const bldg = (name, x, z, w, d, h, rot = 0) => ({ type: 'building', name, x, z, 
 export const PRESETS = [
   {
     key: 'rooftop',
-    label: 'ดาดฟ้า — CDU 6 ชุดในคอก louver 50%',
+    label: 'ดาดฟ้า — CDU 6 ชุดในคอก louver 50%', labelEn: 'Rooftop — 6 CDUs in a 50% louver enclosure',
     build() {
       return {
-        name: 'ดาดฟ้า CDU 6 ชุด',
+        name: L('ดาดฟ้า CDU 6 ชุด', 'Rooftop, 6 CDUs'),
         site: { ambient: 35, windSpeed: 0, windDir: 0 },
         objects: withIds([
-          bldg('ห้องเครื่อง / ช่องบันได', 3.0, 5.25, 5.0, 6.5, 4.5),
-          wall('Louver ด้านเหนือ', 7.0, 1.0, 19.5, 1.0, 2.4, 50),
-          wall('Louver ด้านตะวันออก', 19.5, 1.0, 19.5, 9.5, 2.4, 50),
-          wall('Louver ด้านใต้', 19.5, 9.5, 7.0, 9.5, 2.4, 50),
-          wall('Louver ด้านตะวันตก', 7.0, 9.5, 7.0, 1.0, 2.4, 50),
+          bldg(L('ห้องเครื่อง / ช่องบันได', 'Plant room / stair core'), 3.0, 5.25, 5.0, 6.5, 4.5),
+          wall(L('Louver ด้านเหนือ', 'North louver'), 7.0, 1.0, 19.5, 1.0, 2.4, 50),
+          wall(L('Louver ด้านตะวันออก', 'East louver'), 19.5, 1.0, 19.5, 9.5, 2.4, 50),
+          wall(L('Louver ด้านใต้', 'South louver'), 19.5, 9.5, 7.0, 9.5, 2.4, 50),
+          wall(L('Louver ด้านตะวันตก', 'West louver'), 7.0, 9.5, 7.0, 1.0, 2.4, 50),
           cdu('CDU-1', 9.2, 3.1, 0, 'RXQ20BY1S'),
           cdu('CDU-2', 12.6, 3.1, 0, 'RXQ28BY1S'),
           cdu('CDU-3', 16.6, 3.1, 0, 'RXQ20BY1S'),
@@ -208,10 +209,10 @@ export const PRESETS = [
   },
   {
     key: 'rooftop-duct',
-    label: 'ดาดฟ้าเดิม + ท่อเป่าลม 1 ม. และ louver 70%',
+    label: 'ดาดฟ้าเดิม + ท่อเป่าลม 1 ม. และ louver 70%', labelEn: 'Same rooftop + 1 m discharge hoods and 70% louvers',
     build() {
       const s = PRESETS[0].build();
-      s.name = 'ดาดฟ้า CDU 6 ชุด — แก้ไขด้วยท่อเป่าลม';
+      s.name = L('ดาดฟ้า CDU 6 ชุด — แก้ไขด้วยท่อเป่าลม', 'Rooftop, 6 CDUs — fixed with discharge hoods');
       for (const o of s.objects) {
         if (o.type === 'cdu') o.duct = 1.0;
         if (o.type === 'wall') o.louver = 70;
@@ -221,15 +222,15 @@ export const PRESETS = [
   },
   {
     key: 'lightwell',
-    label: 'ช่องแคบระหว่างอาคาร (ผนังทึบสูง)',
+    label: 'ช่องแคบระหว่างอาคาร (ผนังทึบสูง)', labelEn: 'Narrow gap between buildings (tall solid walls)',
     build() {
       return {
-        name: 'CDU ในช่องแคบระหว่างอาคาร',
+        name: L('CDU ในช่องแคบระหว่างอาคาร', 'CDUs in a gap between buildings'),
         site: { ambient: 35, windSpeed: 0, windDir: 0 },
         objects: withIds([
-          bldg('อาคาร A', 6.0, 2.0, 12.0, 4.0, 9.0),
-          bldg('อาคาร B', 6.0, 8.0, 12.0, 4.0, 9.0),
-          wall('ผนังปิดท้าย', 0.1, 4.0, 0.1, 6.0, 9.0, 0),
+          bldg(L('อาคาร A', 'Building A'), 6.0, 2.0, 12.0, 4.0, 9.0),
+          bldg(L('อาคาร B', 'Building B'), 6.0, 8.0, 12.0, 4.0, 9.0),
+          wall(L('ผนังปิดท้าย', 'End wall'), 0.1, 4.0, 0.1, 6.0, 9.0, 0),
           cdu('CDU-1', 2.2, 4.75, 0, 'RXQ12BY1S'),
           cdu('CDU-2', 4.6, 4.75, 0, 'RXQ12BY1S'),
           cdu('CDU-3', 7.0, 4.75, 0, 'RXQ14BY1S'),
@@ -240,33 +241,33 @@ export const PRESETS = [
   },
   {
     key: 'ground-wind',
-    label: 'ลานพื้นดิน 4 ชุด + ลม 2 m/s จากทิศเหนือ',
+    label: 'ลานพื้นดิน 4 ชุด + ลม 2 m/s จากทิศเหนือ', labelEn: 'Ground yard, 4 CDUs + 2 m/s north wind',
     build() {
       return {
-        name: 'ลานพื้นดิน มีลมพัด',
+        name: L('ลานพื้นดิน มีลมพัด', 'Ground yard with wind'),
         site: { ambient: 35, windSpeed: 2, windDir: 0 },
         objects: withIds([
-          bldg('อาคารหลัก', 8.0, 1.5, 16.0, 3.0, 7.0),
+          bldg(L('อาคารหลัก', 'Main building'), 8.0, 1.5, 16.0, 3.0, 7.0),
           cdu('CDU-1', 3.0, 4.6, 0, 'RXQ20BY1S'),
           cdu('CDU-2', 6.0, 4.6, 0, 'RXQ20BY1S'),
           cdu('CDU-3', 9.0, 4.6, 0, 'RXQ18BY1S'),
           cdu('CDU-4', 12.0, 4.6, 0, 'RXQ18BY1S'),
-          wall('รั้วบังตา', 1.5, 7.0, 13.5, 7.0, 2.0, 30),
+          wall(L('รั้วบังตา', 'Screen fence'), 1.5, 7.0, 13.5, 7.0, 2.0, 30),
         ]),
       };
     },
   },
   {
     key: 'canopy-elbow',
-    label: 'VRV 6A ใต้หลังคา + Hood ท่อโค้ง 90° ยื่นหน้า',
+    label: 'VRV 6A ใต้หลังคา + Hood ท่อโค้ง 90° ยื่นหน้า', labelEn: 'VRV 6A under a canopy + 90° elbow hoods to the front',
     build() {
       const hood = { duct: 1.2, hoodType: 'elbow', hoodDir: 'front', hoodOut: 0.5 };
       return {
-        name: 'VRV 6A ใต้หลังคา — Hood หัก 90°',
+        name: L('VRV 6A ใต้หลังคา — Hood หัก 90°', 'VRV 6A under canopy — 90° elbow hood'),
         site: { ambient: 35, windSpeed: 0, windDir: 0 },
         objects: withIds([
-          bldg('อาคาร', 4.0, 1.0, 10.0, 2.0, 6.0),
-          { type: 'slab', name: 'หลังคาคลุม', x: 4.0, z: 3.5, w: 10.0, d: 3.0, y: 4.0, thick: 0.2, rot: 0, open: 0 },
+          bldg(L('อาคาร', 'Building'), 4.0, 1.0, 10.0, 2.0, 6.0),
+          { type: 'slab', name: L('หลังคาคลุม', 'Canopy roof'), x: 4.0, z: 3.5, w: 10.0, d: 3.0, y: 4.0, thick: 0.2, rot: 0, open: 0 },
           cdu('CDU-1', 2.5, 3.0, 0, 'RXQ12BY1S', hood),
           cdu('CDU-2', 4.0, 3.0, 0, 'RXQ12BY1S', hood),
           cdu('CDU-3', 5.5, 3.0, 0, 'RXQ12BY1S', hood),
@@ -276,15 +277,15 @@ export const PRESETS = [
   },
   {
     key: 'side-deflect',
-    label: 'VRV S Hi / IV S เป่าหน้าชิดรั้ว — ลมร้อนเบี่ยงขึ้น 45°',
+    label: 'VRV S Hi / IV S เป่าหน้าชิดรั้ว — ลมร้อนเบี่ยงขึ้น 45°', labelEn: 'VRV S Hi / IV S front discharge near a fence — deflected 45° up',
     build() {
       const hood = { deflect: 'up' };
       return {
-        name: 'VRV S Hi / IV S เป่าหน้า — ลมร้อนเบี่ยงขึ้น',
+        name: L('VRV S Hi / IV S เป่าหน้า — ลมร้อนเบี่ยงขึ้น', 'VRV S Hi / IV S front discharge — deflected up'),
         site: { ambient: 35, windSpeed: 0, windDir: 0 },
         objects: withIds([
-          bldg('อาคาร', 5.0, 0.5, 12.0, 1.0, 6.0),
-          wall('รั้วทึบ', -1.0, 3.0, 11.0, 3.0, 2.0, 0),
+          bldg(L('อาคาร', 'Building'), 5.0, 0.5, 12.0, 1.0, 6.0),
+          wall(L('รั้วทึบ', 'Solid fence'), -1.0, 3.0, 11.0, 3.0, 2.0, 0),
           cdu('CDU-1', 1.5, 1.5, 0, 'RSUQ9AYM', hood),
           cdu('CDU-2', 3.5, 1.5, 0, 'RSUQ8AYM', hood),
           cdu('CDU-3', 5.5, 1.4, 0, 'RXMQ6BVM', hood),
@@ -295,18 +296,18 @@ export const PRESETS = [
   },
   {
     key: 'split-balcony',
-    label: 'Split FTKB 2 ชุดในระเบียง — ลมร้อนเบี่ยงออกนอกระเบียง',
+    label: 'Split FTKB 2 ชุดในระเบียง — ลมร้อนเบี่ยงออกนอกระเบียง', labelEn: 'Two Split FTKB units on a balcony — deflected outward',
     build() {
       // ระเบียงกว้าง 1.6 ม. ลึก 1.2 ม. เปิดด้านใต้ (ราวกันตก) เครื่องวางซ้อนสองชั้นเป่าขนานผนังเข้าหาผนังข้าง
       return {
-        name: 'Split FTKB ในระเบียง — เบี่ยงลมออกนอก',
+        name: L('Split FTKB ในระเบียง — เบี่ยงลมออกนอก', 'Split FTKB on a balcony — deflected outward'),
         site: { ambient: 35, windSpeed: 0, windDir: 0 },
         objects: withIds([
-          bldg('ผนังห้อง', 0.8, -0.5, 4.0, 1.0, 6.0),
-          wall('ผนังข้างซ้าย', 0.0, 0.0, 0.0, 1.2, 3.0, 0),
-          wall('ผนังข้างขวา', 1.6, 0.0, 1.6, 1.2, 3.0, 0),
-          wall('ราวกันตก', 0.0, 1.2, 1.6, 1.2, 1.0, 60, { thick: 0.05 }),
-          { type: 'slab', name: 'เพดานระเบียง', x: 0.8, z: 0.6, w: 1.6, d: 1.2, y: 3.0, thick: 0.15, rot: 0, open: 0 },
+          bldg(L('ผนังห้อง', 'Room wall'), 0.8, -0.5, 4.0, 1.0, 6.0),
+          wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 1.2, 3.0, 0),
+          wall(L('ผนังข้างขวา', 'Right side wall'), 1.6, 0.0, 1.6, 1.2, 3.0, 0),
+          wall(L('ราวกันตก', 'Balustrade'), 0.0, 1.2, 1.6, 1.2, 1.0, 60, { thick: 0.05 }),
+          { type: 'slab', name: L('เพดานระเบียง', 'Balcony ceiling'), x: 0.8, z: 0.6, w: 1.6, d: 1.2, y: 3.0, thick: 0.15, rot: 0, open: 0 },
           cdu('CDU-1', 0.35, 0.6, 90, 'RKB12AV2S', { elev: 0.3, deflect: 'left' }),
           cdu('CDU-2', 0.35, 0.6, 90, 'RKB12AV2S', { elev: 1.1, deflect: 'left' }),
         ]),

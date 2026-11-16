@@ -18,6 +18,7 @@
  * ไม่มีการอ้างถึง DOM — ใช้ได้ทั้งใน Web Worker และ main thread
  */
 
+import { L } from './i18n.js';
 import { modulePerf, airRho, AIR_CP, DEFAULT_PERF } from './models.js';
 import { createKernels, ALIGN_SLACK } from './kernels.js';
 import { SolverBase, CONV, SAMPLE_DT } from './monitor.js';
@@ -71,7 +72,7 @@ export class Solver extends SolverBase {
     // engine.js — อาจเป็นแบบหลายเธรด; ถ้าไม่ส่งมาจะสร้างแบบเธรดเดียวที่นี่)
     const N = this.N;
     this.k = params.kernels || createKernels(Solver.memoryBytes(mesh, 1));
-    if (!this.k) throw new Error('เบราว์เซอร์นี้ใช้ WebAssembly ไม่ได้ — ไม่สามารถคำนวณได้');
+    if (!this.k) throw new Error(L('เบราว์เซอร์นี้ใช้ WebAssembly ไม่ได้ — ไม่สามารถคำนวณได้', 'This browser cannot run WebAssembly — the calculation cannot start'));
     this.threads = this.k.threads || 1;
     const A = (T, n) => this.k.alloc(T, n);
     for (const n of F32) this[n] = A(Float32Array, N);

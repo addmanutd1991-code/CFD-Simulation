@@ -23,6 +23,7 @@
  *   มวลอากาศเข้า = ออก ทุกโมดูล
  */
 
+import { L as tr } from './i18n.js';
 import { unitModules, unitSize, getModel, FAN_AREA, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
 import { domainOf, cloneBC, slabRange, insideRect } from './scene.js';
 import { cellIndex } from './grid.js';
@@ -221,7 +222,7 @@ export function buildMesh(scene) {
     let elbow = null;
     if (!front && L > 0 && o.hoodType === 'elbow') {
       if (mods.length > 1 && (o.hoodDir === 'left' || o.hoodDir === 'right'))
-        warnings.push(`${o.name}: Hood หัก 90° ไปด้านข้างใช้ได้กับโมดูลเดี่ยว — ใช้ทิศด้านหน้าแทน`);
+        warnings.push(tr(`${o.name}: Hood หัก 90° ไปด้านข้างใช้ได้กับโมดูลเดี่ยว — ใช้ทิศด้านหน้าแทน`, `${o.name}: a sideways 90° elbow hood only works on single-module units — using the front direction instead`));
       const [vx, vz] = HOOD_DIRS[elbowDir(o)];
       const eo = elbowOpen(o), out = Math.max(0, o.hoodOut || 0);
       const half = vx ? hw : hd, R = Math.min(eo, 2 * half), yTop = yt + L;
@@ -268,7 +269,7 @@ export function buildMesh(scene) {
       });
       if (!cols.size) {
         rec.active = false;
-        warnings.push(`${o.name}: โมดูล ${md.hp}HP เล็กกว่าเซลล์ — ลดขนาดเซลล์`);
+        warnings.push(tr(`${o.name}: โมดูล ${md.hp}HP เล็กกว่าเซลล์ — ลดขนาดเซลล์`, `${o.name}: the ${md.hp}HP module is smaller than a cell — reduce the cell size`));
         modules.push(rec); unit.modules.push(rec);
         return;
       }
@@ -306,7 +307,7 @@ export function buildMesh(scene) {
         rec.fanAreaReal = L > 0 ? F.s * F.s : Math.PI * F.dia * F.dia / 4;
         if (!rec.fanFaces.length) {
           rec.active = false;
-          warnings.push(`${o.name}: ด้านหน้าพัดลม${L > 0 ? '/ปลาย Hood' : ''}ถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
+          warnings.push(tr(`${o.name}: ด้านหน้าพัดลม${L > 0 ? '/ปลาย Hood' : ''}ถูกปิดทึบ — ไม่คำนวณโมดูลนี้`, `${o.name}: the fan front${L > 0 ? ' / hood outlet' : ''} is fully blocked — module skipped`));
         } else if (dv) {
           // ทิศทางลมร้อนเบี่ยง 45°: กำหนดความเร็วตามทิศเบี่ยง = ความเร็วพุ่ง ที่หน้าเซลล์ระหว่างเซลล์อากาศชั้นแรกหน้าปากลม
           const dW = dirW(dv[0], dv[1], 0), dOff = dW[0] + dW[1] * sy + dW[2] * sz;
@@ -318,7 +319,7 @@ export function buildMesh(scene) {
             if (!layer.has(c2) || type[c2] !== FLUID) continue;
             rec.dirFaces.push(sign > 0 ? c2 : c); rec.dirAxis.push(ax); rec.dirVel.push(sign * vel);
           }
-          if (!rec.dirFaces.length) warnings.push(`${o.name}: ปากลมกว้างเพียงเซลล์เดียว — กำหนดทิศทางลมร้อนไม่ได้ ลมออกตรง (ลดขนาดเซลล์)`);
+          if (!rec.dirFaces.length) warnings.push(tr(`${o.name}: ปากลมกว้างเพียงเซลล์เดียว — กำหนดทิศทางลมร้อนไม่ได้ ลมออกตรง (ลดขนาดเซลล์)`, `${o.name}: the outlet is only one cell wide — discharge direction cannot be set, blowing straight (reduce the cell size)`));
         }
       } else if (elbow) {
         // ── Hood หัก 90°: ลมออกแนวนอนจากช่วงบนสุดของ Hood ──
@@ -334,7 +335,7 @@ export function buildMesh(scene) {
         rec.fanAreaReal = (elbow.span || md.w) * elbow.eo;
         if (!rec.fanFaces.length) {
           rec.active = false;
-          warnings.push(`${o.name}: ปากลม Hood หัก 90° ถูกปิดทึบหรือเล็กกว่าเซลล์ — ไม่คำนวณโมดูลนี้`);
+          warnings.push(tr(`${o.name}: ปากลม Hood หัก 90° ถูกปิดทึบหรือเล็กกว่าเซลล์ — ไม่คำนวณโมดูลนี้`, `${o.name}: the elbow hood outlet is blocked or smaller than a cell — module skipped`));
         }
       } else if (straight && straight[mi].size) {
         // ── Hood ตรงสี่เหลี่ยม: ลมออกขึ้นทั้งหน้าตัดที่ปากท่อ ──
@@ -348,7 +349,7 @@ export function buildMesh(scene) {
         rec.fanAreaReal = md.w * sz0.d;
         if (!rec.fanFaces.length) {
           rec.active = false;
-          warnings.push(`${o.name}: ปากลม Hood ถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
+          warnings.push(tr(`${o.name}: ปากลม Hood ถูกปิดทึบ — ไม่คำนวณโมดูลนี้`, `${o.name}: the hood outlet is fully blocked — module skipped`));
         }
       } else {
         // ── พัดลมด้านบน ──
@@ -385,7 +386,7 @@ export function buildMesh(scene) {
         }
         if (!rec.fanFaces.length) {
           rec.active = false;
-          warnings.push(`${o.name}: ด้านบนพัดลมถูกปิดทึบ — ไม่คำนวณโมดูลนี้`);
+          warnings.push(tr(`${o.name}: ด้านบนพัดลมถูกปิดทึบ — ไม่คำนวณโมดูลนี้`, `${o.name}: the top of the fan is fully blocked — module skipped`));
         }
         // ถ้าบางใบพัดหาหน้าไม่ได้ ให้อัตราลมรวมยังถูกต้อง
         const fanQ = rec.fanQ || 0;
@@ -419,14 +420,14 @@ export function buildMesh(scene) {
       let faces = collect(SIDES);
       if (!faces.length) {
         faces = collect(['front']);
-        if (faces.length) warnings.push(`${o.name}: คอยล์ด้านหลัง/ข้างถูกบังทั้งหมด — ใช้ช่องด้านหน้าแทน`);
+        if (faces.length) warnings.push(tr(`${o.name}: คอยล์ด้านหลัง/ข้างถูกบังทั้งหมด — ใช้ช่องด้านหน้าแทน`, `${o.name}: rear/side coil faces are fully blocked — using the front opening instead`));
       }
       rec.blockedPct = potential ? 100 * (1 - Math.min(potential, faces.length) / potential) : 100;
       if (!faces.length) {
         rec.active = false;
-        warnings.push(`${o.name}: คอยล์ถูกบังทั้งหมด — ไม่คำนวณโมดูลนี้`);
+        warnings.push(tr(`${o.name}: คอยล์ถูกบังทั้งหมด — ไม่คำนวณโมดูลนี้`, `${o.name}: the coil is fully blocked — module skipped`));
       } else if (rec.blockedPct > 25) {
-        warnings.push(`${o.name}: หน้าคอยล์ถูกบัง ${rec.blockedPct.toFixed(0)}%`);
+        warnings.push(tr(`${o.name}: หน้าคอยล์ถูกบัง ${rec.blockedPct.toFixed(0)}%`, `${o.name}: coil face ${rec.blockedPct.toFixed(0)}% blocked`));
       }
       const coilArea = faces.reduce((a, f) => a + f.area, 0);
       const vin = q / coilArea;

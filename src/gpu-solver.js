@@ -14,6 +14,7 @@
  *   = 84 ไบต์ + สำเนาสำหรับแสดงผล 28 ไบต์
  */
 
+import { L as tr } from './i18n.js';
 import { modulePerf, airRho, AIR_CP, DEFAULT_PERF } from './models.js';
 import { GridPrep, AXT, SOLID } from './prep.js';
 import { SolverBase } from './monitor.js';
@@ -492,13 +493,13 @@ function shaderSource(def) {
 export class GpuSolver extends SolverBase {
   /** สร้างและเตรียมพร้อม (asynchronous) — โยนข้อผิดพลาดถ้าใช้ WebGPU ไม่ได้หรือหน่วยความจำการ์ดจอไม่พอ */
   static async create(mesh, params) {
-    if (!gpuAvailable()) throw new Error('เบราว์เซอร์นี้ไม่มี WebGPU');
+    if (!gpuAvailable()) throw new Error(tr('เบราว์เซอร์นี้ไม่มี WebGPU', 'This browser has no WebGPU'));
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-    if (!adapter) throw new Error('ไม่พบการ์ดจอที่ใช้ WebGPU ได้');
+    if (!adapter) throw new Error(tr('ไม่พบการ์ดจอที่ใช้ WebGPU ได้', 'No WebGPU-capable graphics adapter found'));
     const need = mesh.N * 16;
     const L = adapter.limits;
     if (L.maxBufferSize < need || L.maxStorageBufferBindingSize < need) {
-      throw new Error(`เมชใหญ่เกินขีดจำกัดบัฟเฟอร์ของการ์ดจอนี้ (ต้องการ ${(need / 2 ** 20).toFixed(0)} MB ต่อบัฟเฟอร์)`);
+      throw new Error(tr(`เมชใหญ่เกินขีดจำกัดบัฟเฟอร์ของการ์ดจอนี้ (ต้องการ ${(need / 2 ** 20).toFixed(0)} MB ต่อบัฟเฟอร์)`, `The mesh exceeds this GPU's buffer limit (needs ${(need / 2 ** 20).toFixed(0)} MB per buffer)`));
     }
     const device = await adapter.requestDevice({
       requiredLimits: {
@@ -542,7 +543,7 @@ export class GpuSolver extends SolverBase {
     this.cp = AIR_CP;
     this.beta = 1 / (this.amb + 273.15);
     this.lost = null;
-    device.lost.then((e) => { if (!this.disposed) this.lost = e?.message || 'การ์ดจอหยุดทำงาน'; });
+    device.lost.then((e) => { if (!this.disposed) this.lost = e?.message || tr('การ์ดจอหยุดทำงาน', 'GPU device lost'); });
   }
 
   dispose() {
@@ -759,7 +760,7 @@ export class GpuSolver extends SolverBase {
     enc.copyBufferToBuffer(B.mout, 0, this.staging, 3 * n, 16 * Math.max(1, this.mods.length));
     this.device.queue.submit([enc.finish()]);
     await this.staging.mapAsync(GPUMapMode.READ);
-    if (this.lost) throw new Error('การ์ดจอหยุดทำงานระหว่างคำนวณ: ' + this.lost);
+    if (this.lost) throw new Error(tr('การ์ดจอหยุดทำงานระหว่างคำนวณ: ', 'GPU device lost during the calculation: ') + this.lost);
     this.res = new Float32Array(this.staging.getMappedRange()).slice();
     this.staging.unmap();
   }
@@ -778,7 +779,7 @@ export class GpuSolver extends SolverBase {
     this.rate = Math.max(mr, this.fanRate);
     this.vmax = Math.max(this.maxU, this.maxV, this.maxW);
     this.divErr = Math.sqrt(e2 / Math.max(1, this.nFluid)) / Math.max(0.5, this.vmax);
-    if (!Number.isFinite(this.vmax)) throw new Error('การคำนวณบน GPU ให้ค่าไม่ถูกต้อง (NaN)');
+    if (!Number.isFinite(this.vmax)) throw new Error(tr('การคำนวณบน GPU ให้ค่าไม่ถูกต้อง (NaN)', 'The GPU calculation produced invalid values (NaN)'));
   }
 
   /* ───────── สเต็ปเวลา ───────── */

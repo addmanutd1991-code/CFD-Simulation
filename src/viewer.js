@@ -14,12 +14,14 @@ import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
 import { axisLocator } from './grid.js';
 
+import { L as tr } from './i18n.js';
+
 const ACCENT = 0x4fc3f7;
 /** สีสถานะ CDU ตามอุณหภูมิลมเข้า */
 export const BAND = { green: 0x3ecf6e, yellow: 0xf5c518, red: 0xe5433b };
 const SNAP = 0.1;
 /** คำสั่งแก้ไขแบบ AutoCAD ที่ทำงานกับวัตถุที่เลือก */
-const CMD_TOOLS = ['move', 'copy', 'offset', 'mirror', 'rotate'];
+const CMD_TOOLS = ['move', 'copy', 'offset', 'mirror', 'rotate', 'pull'];
 const norm360 = a => Math.round((((a % 360) + 360) % 360) * 10) / 10 % 360;
 const MAX_STREAKS = 3200;
 /** จำนวนขั้นสีของภาพ contour */
@@ -59,6 +61,7 @@ export class Viewer {
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.setClearColor(0x1a2530);
+    this.light = false;
     host.appendChild(r.domElement);
     r.domElement.classList.add('gl');
 
@@ -206,6 +209,22 @@ export class Viewer {
     if (first) this.setView(this.view);
   }
 
+  /** ธีมสว่าง/มืด: สีพื้นหลังและพื้นรอบนอกโดเมน */
+  setTheme(light) {
+    if (this.light === !!light) return;
+    this.light = !!light;
+    this.renderer.setClearColor(this.light ? 0xe3e9ee : 0x1a2530);
+    if (this.dom) { this.#buildGround(); this.#buildWindArrow(); }
+  }
+
+  /** สลับภาษา: สร้างข้อความที่ฝังในภาพ 3D และป้ายชื่อใหม่ */
+  refreshTexts() {
+    if (this.dom) { this.#buildGround(); this.#buildWindArrow(); }
+    this.refreshLabels();
+    this.#fillPopup();
+    if (this.lastEvt && this.cmd) this.#cmdHover(this.lastEvt, this.snapFn);
+  }
+
   setSelected(id) {
     if (id !== this.selectedId) this.popupClosed = false;
     this.selectedId = id;
@@ -286,9 +305,9 @@ export class Viewer {
       const r = this.results?.units?.find(u => u.id === o.id);
       if (r) html += `<span class="lbl-res st-${r.status.key}">${r.Tin.toFixed(1)} °C · +${r.dT.toFixed(1)} °C</span>`;
     } else if (o.type === 'wall') {
-      html = `${esc(o.name)} · ${fmt(o.height)} m · ${o.louver > 0 ? 'louver ' + o.louver + '%' : 'ทึบ'}`;
+      html = `${esc(o.name)} · ${fmt(o.height)} m · ${o.louver > 0 ? 'louver ' + o.louver + '%' : tr('ทึบ', 'solid')}`;
     } else if (o.type === 'slab') {
-      html = `${esc(o.name)} · +${fmt(o.y)} m${o.open > 0 ? ' · เปิด ' + o.open + '%' : ''}`;
+      html = `${esc(o.name)} · +${fmt(o.y)} m${o.open > 0 ? tr(' · เปิด ', ' · open ') + o.open + '%' : ''}`;
     } else html = `${esc(o.name)} · ${fmt(o.h)} m`;
     el.innerHTML = html;
   }
@@ -625,8 +644,8 @@ export class Viewer {
     const tg = new THREE.BufferGeometry();
     tg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     this.gGround.add(new THREE.LineSegments(tg, tickMat));
-    this.gGround.add(textSprite('x (ม.)', ox + W / 2, 0.02, oz + D + 1.3, 0.5, '#8fb4cf'));
-    this.gGround.add(textSprite('z (ม.)', ox + W + 1.4, 0.02, oz + D / 2, 0.5, '#8fb4cf'));
+    this.gGround.add(textSprite(tr('x (ม.)', 'x (m)'), ox + W / 2, 0.02, oz + D + 1.3, 0.5, '#8fb4cf'));
+    this.gGround.add(textSprite(tr('z (ม.)', 'z (m)'), ox + W + 1.4, 0.02, oz + D / 2, 0.5, '#8fb4cf'));
 
     // ทิศเหนือ
     const n = new THREE.Mesh(arrowShape(0.9), new THREE.MeshBasicMaterial({ color: 0x3c5566 }));
@@ -638,7 +657,7 @@ export class Viewer {
 
     // พื้นรอบนอกโดเมน
     const outer = new THREE.Mesh(new THREE.PlaneGeometry(W + 400, D + 400),
-      new THREE.MeshBasicMaterial({ color: 0x22303c }));
+      new THREE.MeshBasicMaterial({ color: this.light ? 0xcfd8df : 0x22303c }));
     outer.rotation.x = -Math.PI / 2;
     outer.position.set(ox + W / 2, -0.02, oz + D / 2);
     outer.raycast = () => {};
@@ -661,7 +680,7 @@ export class Viewer {
     const a = new THREE.Mesh(arrowShape(1.6), new THREE.MeshBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.55 }));
     a.rotation.x = -Math.PI / 2;
     g.add(a);
-    const lab = textSprite(`ลม ${s.windSpeed} m/s`, 0, 0.03, 1.5, 0.5, '#4fc3f7');
+    const lab = textSprite(tr(`ลม ${s.windSpeed} m/s`, `Wind ${s.windSpeed} m/s`), 0, 0.03, 1.5, 0.5, '#4fc3f7');
     g.add(lab);
     const r = s.windDir * Math.PI / 180;
     const vx = -Math.sin(r), vz = Math.cos(r);
@@ -1189,19 +1208,19 @@ export class Viewer {
     const b = this.sceneData?.bands || { green: 40, red: 46 };
     const band = t => (t <= b.green ? 'green' : t <= b.red ? 'yellow' : 'red');
     const chip = t => `<i class="chip chip-${band(t)}"></i>`;
-    let html = `<button class="pop-x" title="ปิด">×</button>
+    let html = `<button class="pop-x" title="${tr('ปิด', 'Close')}">×</button>
       <div class="pop-h"><span class="muted">No. CDU</span> <b>${esc(o.name)}</b></div>
-      <div class="pop-row"><span>รุ่นเครื่อง</span><b>${esc(m.id)}</b></div>
-      <div class="pop-row"><span>ขนาด</span><span class="mono">${m.hp} HP · ${m.kw.toFixed(1)} kW</span></div>`;
+      <div class="pop-row"><span>${tr('รุ่นเครื่อง', 'Model')}</span><b>${esc(m.id)}</b></div>
+      <div class="pop-row"><span>${tr('ขนาด', 'Size')}</span><span class="mono">${m.hp} HP · ${m.kw.toFixed(1)} kW</span></div>`;
     if (u) {
       const tMax = Math.max(...u.modules.map(q => q.Tin));
-      html += `<div class="pop-row pop-big"><span>อุณหภูมิลมกลับ</span><b class="mono">${chip(tMax)}${u.Tin.toFixed(1)} °C</b></div>
-        <div class="pop-row"><span>จุดร้อนสุดหน้าคอยล์</span><span class="mono">${u.TinMax.toFixed(1)} °C</span></div>
-        <div class="pop-row"><span>สูงกว่าอากาศภายนอก</span><span class="mono st-${u.status.key}">+${u.dT.toFixed(2)} °C</span></div>
-        <div class="pop-row"><span>capacity ที่ได้</span><span class="mono">${(u.capF * 100).toFixed(1)}%</span></div>`;
+      html += `<div class="pop-row pop-big"><span>${tr('อุณหภูมิลมกลับ', 'Return-air temperature')}</span><b class="mono">${chip(tMax)}${u.Tin.toFixed(1)} °C</b></div>
+        <div class="pop-row"><span>${tr('จุดร้อนสุดหน้าคอยล์', 'Coil hot spot')}</span><span class="mono">${u.TinMax.toFixed(1)} °C</span></div>
+        <div class="pop-row"><span>${tr('สูงกว่าอากาศภายนอก', 'Above ambient')}</span><span class="mono st-${u.status.key}">+${u.dT.toFixed(2)} °C</span></div>
+        <div class="pop-row"><span>${tr('capacity ที่ได้', 'Available capacity')}</span><span class="mono">${(u.capF * 100).toFixed(1)}%</span></div>`;
       if (u.modules.length > 1)
-        html += `<div class="pop-mods">${u.modules.map((q, i) => `<span>${chip(q.Tin)}โมดูล ${i + 1}: <b class="mono">${q.Tin.toFixed(1)} °C</b></span>`).join('')}</div>`;
-    } else html += `<div class="pop-row muted">ยังไม่มีผล — กด คำนวณ เพื่อดูอุณหภูมิลมกลับ</div>`;
+        html += `<div class="pop-mods">${u.modules.map((q, i) => `<span>${chip(q.Tin)}${tr('โมดูล', 'Module')} ${i + 1}: <b class="mono">${q.Tin.toFixed(1)} °C</b></span>`).join('')}</div>`;
+    } else html += `<div class="pop-row muted">${tr('ยังไม่มีผล — กด คำนวณ เพื่อดูอุณหภูมิลมกลับ', 'No results yet — press Run to see the return-air temperature')}</div>`;
     el.innerHTML = html;
     el.hidden = false;
   }
@@ -1283,7 +1302,7 @@ export class Viewer {
   #lengthHint() {
     const l = this.dimLabel;
     if (!l || !this.draw) return;
-    l.textContent = this.draw.typed ? `ความยาว ${this.draw.typed} m ↵` : 'พิมพ์ความยาว (ม.) แล้วกด Enter';
+    l.textContent = this.draw.typed ? tr(`ความยาว ${this.draw.typed} m ↵`, `Length ${this.draw.typed} m ↵`) : tr('พิมพ์ความยาว (ม.) แล้วกด Enter', 'Type a length (m), then press Enter');
     l.style.display = 'block';
   }
 
@@ -1527,8 +1546,9 @@ export class Viewer {
     const l = this.dimLabel;
     l.textContent = text;
     l.style.display = 'block';
-    l.style.left = (e.clientX - r.left + 14) + 'px';
-    l.style.top = (e.clientY - r.top + 14) + 'px';
+    // ไม่ให้ป้ายตกขอบขวา/ล่างของภาพ
+    l.style.left = Math.max(6, Math.min(e.clientX - r.left + 14, r.width - l.offsetWidth - 6)) + 'px';
+    l.style.top = Math.max(6, Math.min(e.clientY - r.top + 14, r.height - l.offsetHeight - 6)) + 'px';
   }
 
   #toolHover(e, snap) {
@@ -1561,7 +1581,7 @@ export class Viewer {
         m.position.set((ex + this.draw.x) / 2, hgt / 2, (ez + this.draw.z) / 2);
         m.rotation.y = -Math.atan2(ez - this.draw.z, ex - this.draw.x);
         this.gPreview.add(m);
-        this.#showDim(e, this.draw.typed ? `ความยาว ${this.draw.typed} m ↵` : `${fmt(L)} m · พิมพ์ค่าได้`);
+        this.#showDim(e, this.draw.typed ? tr(`ความยาว ${this.draw.typed} m ↵`, `Length ${this.draw.typed} m ↵`) : `${fmt(L)} m · ${tr('พิมพ์ค่าได้', 'type a value')}`);
       } else this.#showDim(e, `x ${fmt(x)} · z ${fmt(z)}`);
     } else if (this.tool === 'building' || this.tool === 'slab') {
       if (this.draw) {
@@ -1730,43 +1750,45 @@ export class Viewer {
     this.hover = { ...p, lock: this.#lock(e) };
     const typed = c.typed ? ` · ${c.typed} ↵` : '';
     const NAME = { move: 'Move', copy: 'Copy', offset: 'Offset', mirror: 'Mirror', rotate: 'Rotate' }[t];
+    if (t === 'pull') { this.#pullHover(e, o, p); return; }
     if (!o) {
-      this.#showDim(e, t === 'offset' ? `Offset ${fmt(this.offsetDist)} m: คลิกเลือกวัตถุ · พิมพ์ระยะใหม่ + Enter${typed}`
-        : `${NAME}: คลิกเลือกวัตถุ`);
+      this.#showDim(e, t === 'offset' ? tr(`Offset ${fmt(this.offsetDist)} m: คลิกเลือกวัตถุ · พิมพ์ระยะใหม่ + Enter${typed}`, `Offset ${fmt(this.offsetDist)} m: click an object · type a new distance + Enter${typed}`)
+        : tr(`${NAME}: คลิกเลือกวัตถุ`, `${NAME}: click an object`));
       return;
     }
     if (t === 'offset') {
       const d = this.#offsetDelta(o, p, this.offsetDist);
       this.#ghost(this.#shifted(o, d.dx, d.dz));
-      this.#showDim(e, `Offset ${fmt(this.offsetDist)} m: คลิกฝั่งที่ต้องการ${typed}`);
+      this.#showDim(e, tr(`Offset ${fmt(this.offsetDist)} m: คลิกฝั่งที่ต้องการ${typed}`, `Offset ${fmt(this.offsetDist)} m: click the side you want${typed}`));
       return;
     }
     if (!c.base) {
-      this.#showDim(e, t === 'mirror' ? `Mirror ${o.name}: คลิกจุดแรกของเส้นสะท้อน`
-        : `${NAME} ${o.name}: คลิกจุดฐาน (base point)`);
+      this.#showDim(e, t === 'mirror' ? tr(`Mirror ${o.name}: คลิกจุดแรกของเส้นสะท้อน`, `Mirror ${o.name}: click the first point of the mirror line`)
+        : tr(`${NAME} ${o.name}: คลิกจุดฐาน (base point)`, `${NAME} ${o.name}: click the base point`));
       return;
     }
     if (t === 'move' || t === 'copy') {
       const q = this.#lockTo(c.base, p, this.hover.lock);
       this.#ghost(this.#shifted(o, q.x - c.base.x, q.z - c.base.z));
       this.#previewLine(c.base, q);
-      this.#showDim(e, c.typed ? `ระยะ ${c.typed} m ↵` : `${NAME} · จุดที่สอง · ${fmt(Math.hypot(q.x - c.base.x, q.z - c.base.z))} m · พิมพ์ระยะได้`);
+      this.#showDim(e, c.typed ? tr(`ระยะ ${c.typed} m ↵`, `Distance ${c.typed} m ↵`) : tr(`${NAME} · จุดที่สอง · ${fmt(Math.hypot(q.x - c.base.x, q.z - c.base.z))} m · พิมพ์ระยะได้`, `${NAME} · second point · ${fmt(Math.hypot(q.x - c.base.x, q.z - c.base.z))} m · or type a distance`));
     } else if (t === 'mirror') {
       const q = this.#lockTo(c.base, p, this.hover.lock);
       this.#previewLine(c.base, q);
       if (Math.hypot(q.x - c.base.x, q.z - c.base.z) > 0.05) this.#ghost(this.#mirrored(o, c.base, q));
-      this.#showDim(e, 'Mirror: คลิกจุดที่สองของเส้นสะท้อน (F8 Ortho)');
+      this.#showDim(e, tr('Mirror: คลิกจุดที่สองของเส้นสะท้อน (F8 Ortho)', 'Mirror: click the second point of the mirror line (F8 Ortho)'));
     } else if (t === 'rotate') {
       const a = this.#angleTo(o, c.base, p, this.hover.lock);
       this.#previewLine(c.base, p);
       this.#ghost(this.#rotated(o, c.base, a));
-      this.#showDim(e, c.typed ? `มุม ${c.typed}° ↵` : `Rotate ${fmt(a)}° · คลิก หรือพิมพ์มุม + Enter (ทวนเข็ม +)${o.type === 'cdu' ? ' · CDU ทีละ 90°' : ''}`);
+      this.#showDim(e, c.typed ? tr(`มุม ${c.typed}° ↵`, `Angle ${c.typed}° ↵`) : tr(`Rotate ${fmt(a)}° · คลิก หรือพิมพ์มุม + Enter (ทวนเข็ม +)${o.type === 'cdu' ? ' · CDU ทีละ 90°' : ''}`, `Rotate ${fmt(a)}° · click, or type an angle + Enter (counter-clockwise +)${o.type === 'cdu' ? ' · CDUs in 90° steps' : ''}`));
     }
   }
 
   #cmdClick(e, snap) {
     const c = this.cmd, t = this.tool;
     const o = this.#cmdObj();
+    if (t === 'pull') { this.#pullClick(e, snap, o); return; }
     if (!o) {
       const h = this.#hitObject(e);
       if (h) { c.id = h.id; c.base = null; this.cb.onSelect(h.id); this.#cmdHover(e, snap); }
@@ -1798,6 +1820,85 @@ export class Viewer {
     }
   }
 
+  /* ── Pull: ยืด/หดผนัง · louver · อาคาร · พื้น-หลังคา โดยด้านตรงข้ามอยู่กับที่ ── */
+
+  /**
+   * จุดจับที่ใกล้จุด p ที่สุด: ปลายผนัง หรือด้านใดด้านหนึ่งของอาคาร/พื้น
+   * คืน { pt: กึ่งกลางของปลาย/ด้าน, (ax, az): ทิศชี้ออกจากวัตถุ, span: ครึ่งความกว้างของเส้นไฮไลต์ }
+   */
+  #pullGrip(o, p) {
+    if (o.type === 'wall') {
+      const len = Math.hypot(o.x2 - o.x1, o.z2 - o.z1) || 1, ux = (o.x2 - o.x1) / len, uz = (o.z2 - o.z1) / len;
+      const end = Math.hypot(p.x - o.x1, p.z - o.z1) < Math.hypot(p.x - o.x2, p.z - o.z2) ? 1 : 2;
+      return end === 1 ? { end, pt: { x: o.x1, z: o.z1 }, ax: -ux, az: -uz, span: 0.5 }
+        : { end, pt: { x: o.x2, z: o.z2 }, ax: ux, az: uz, span: 0.5 };
+    }
+    // แกนท้องถิ่นของสี่เหลี่ยม: กว้าง (w) ตาม (cos r, −sin r) · ลึก (d) ตาม (sin r, cos r) — ตรงกับ insideRect
+    const r = o.rot * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
+    const dx = p.x - o.x, dz = p.z - o.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+    const onW = Math.abs(lx) / (o.w / 2) >= Math.abs(lz) / (o.d / 2);
+    const sg = Math.sign(onW ? lx : lz) || 1;
+    const ax = (onW ? cs : sn) * sg, az = (onW ? -sn : cs) * sg, half = (onW ? o.w : o.d) / 2;
+    return { dim: onW ? 'w' : 'd', pt: { x: o.x + ax * half, z: o.z + az * half }, ax, az, span: (onW ? o.d : o.w) / 2 };
+  }
+
+  /** วัตถุหลังดึงจุดจับ g ออกไป delta เมตร (ลบ = หด) — ความยาวขั้นต่ำ ผนัง 0.1 ม. อาคาร/พื้น 0.3 ม. */
+  #pulled(o, g, delta) {
+    const q = { ...o };
+    if (o.type === 'wall') {
+      const d = Math.max(0.1 - Math.hypot(o.x2 - o.x1, o.z2 - o.z1), delta);
+      q['x' + g.end] = o['x' + g.end] + g.ax * d;
+      q['z' + g.end] = o['z' + g.end] + g.az * d;
+    } else {
+      const d = Math.max(0.3 - o[g.dim], delta);
+      q[g.dim] = Math.round((o[g.dim] + d) * 1000) / 1000;
+      q.x = o.x + g.ax * d / 2;
+      q.z = o.z + g.az * d / 2;
+    }
+    return this.#tidy(q);
+  }
+
+  #pullSize(o, g) { return o.type === 'wall' ? Math.hypot(o.x2 - o.x1, o.z2 - o.z1) : o[g.dim]; }
+
+  #pullEdge(g) {
+    this.#previewLine({ x: g.pt.x - g.az * g.span, z: g.pt.z + g.ax * g.span }, { x: g.pt.x + g.az * g.span, z: g.pt.z - g.ax * g.span });
+  }
+
+  #pullHover(e, o, p) {
+    const c = this.cmd;
+    if (o?.type === 'cdu') { c.id = null; o = null; }
+    if (!o) { this.#showDim(e, tr('Pull: คลิกเลือกผนัง / louver / อาคาร / พื้น (ใช้กับ CDU ไม่ได้)', 'Pull: click a wall / louver / building / slab (not for CDUs)')); return; }
+    if (!c.grip) {
+      this.#pullEdge(this.#pullGrip(o, p));
+      this.#showDim(e, tr(`Pull ${o.name}: คลิก${o.type === 'wall' ? 'ปลาย' : 'ด้าน'}ที่จะยืดหด (เส้นประ)`, `Pull ${o.name}: click the ${o.type === 'wall' ? 'end' : 'side'} to stretch (dashed line)`));
+      return;
+    }
+    const g = c.grip;
+    c.delta = (p.x - g.pt.x) * g.ax + (p.z - g.pt.z) * g.az;
+    const q = this.#pulled(o, g, c.delta);
+    this.#ghost(q);
+    this.#previewLine(g.pt, { x: g.pt.x + g.ax * c.delta, z: g.pt.z + g.az * c.delta });
+    const size = this.#pullSize(q, g), d = size - this.#pullSize(o, g);
+    this.#showDim(e, c.typed ? tr(`ระยะ ${c.typed} m ↵`, `Distance ${c.typed} m ↵`)
+      : tr(`Pull ${d >= 0 ? '+' : ''}${fmt(d)} m → ${fmt(size)} m · คลิก หรือพิมพ์ระยะ + Enter`, `Pull ${d >= 0 ? '+' : ''}${fmt(d)} m → ${fmt(size)} m · click, or type a distance + Enter`));
+  }
+
+  #pullClick(e, snap, o) {
+    const c = this.cmd;
+    if (!o || o.type === 'cdu') {
+      const h = this.#hitObject(e);
+      if (h && h.type !== 'cdu') { c.id = h.id; c.grip = null; c.base = null; this.cb.onSelect(h.id); }
+      this.#cmdHover(e, snap);
+      return;
+    }
+    const p = this.#cmdPoint(e, snap);
+    if (!p) return;
+    if (!c.grip) { c.grip = this.#pullGrip(o, p); c.base = c.grip.pt; this.#cmdHover(e, snap); return; }
+    const delta = (p.x - c.grip.pt.x) * c.grip.ax + (p.z - c.grip.pt.z) * c.grip.az;
+    if (Math.abs(delta) < 1e-6) return;
+    this.#finish(o.id, this.#pulled(o, c.grip, delta), false);
+  }
+
   /** จบคำสั่ง: copy = สร้างวัตถุใหม่จาก q, ไม่ใช่ = แทนที่วัตถุเดิม */
   #finish(id, q, copy) {
     this.cmd = null;
@@ -1825,7 +1926,7 @@ export class Viewer {
     const c = this.cmd, o = this.#cmdObj(), t = this.tool;
     const active = t === 'offset' || (o && c.base && t !== 'mirror');
     if (!active) return false;
-    if (/^[0-9.]$/.test(key) || (key === '-' && t === 'rotate' && !c.typed)) c.typed += key;
+    if (/^[0-9.]$/.test(key) || (key === '-' && (t === 'rotate' || t === 'pull') && !c.typed)) c.typed += key;
     else if (key === 'Backspace' && c.typed) c.typed = c.typed.slice(0, -1);
     else if (key === 'Enter' && c.typed) {
       const L = parseFloat(c.typed);
@@ -1833,6 +1934,12 @@ export class Viewer {
       if (!Number.isFinite(L)) return true;
       if (t === 'offset') { if (L > 0) this.offsetDist = L; }
       else if (t === 'rotate') { this.#finish(o.id, this.#rotated(o, c.base, this.#snapAngle(o, L)), false); return true; }
+      else if (t === 'pull') {
+        // ค่าบวก = ไปทางที่เมาส์ชี้ (ยืดเมื่อเมาส์อยู่ด้านนอก หดเมื่ออยู่ด้านใน) · ค่าลบ = หดเสมอ
+        const d = L < 0 ? L : L * ((c.delta ?? 1) < 0 ? -1 : 1);
+        if (c.grip && Math.abs(d) > 1e-6) this.#finish(o.id, this.#pulled(o, c.grip, d), false);
+        return true;
+      }
       else if (L > 0 && this.hover) {
         const q = this.#lockTo(c.base, this.hover, this.hover.lock);
         const ux = q.x - c.base.x, uz = q.z - c.base.z, n = Math.hypot(ux, uz);
