@@ -136,12 +136,14 @@ function createObject(type, props) {
   else o = makeObject(scene, 'building', props);
   scene.objects.push(o);
   selectedId = o.id;
+  showSide('obj', false);
   afterChange(true);
 }
 
 function select(id) {
   selectedId = id;
   viewer.setSelected(id);
+  if (id != null) showSide('obj', false);   // เลือกวัตถุ → แผงขวาแสดงคุณสมบัติ (ถ้าแผงถูกพับไว้ ไม่กางเอง)
   renderProps();
   $$('#res-table tbody tr').forEach(tr => tr.classList.toggle('sel', Number(tr.dataset.id) === id));
 }
@@ -314,10 +316,17 @@ const TOOL_HINT = {
   building: 'คลิกมุมหนึ่งของอาคาร แล้วคลิกมุมตรงข้าม · Esc เพื่อจบ',
 };
 
+/** คำสั่งแก้ไขแบบ AutoCAD — รวมอยู่ในเมนู "แก้ไข" ของแถบเครื่องมือ */
+const CMD_NAME = { move: 'Move', copy: 'Copy', offset: 'Offset', mirror: 'Mirror', rotate: 'Rotate' };
+
 function setTool(t) {
   tool = t;
   viewer.setTool(t);
   $$('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  const cmd = CMD_NAME[t];
+  $('#btn-modify').classList.toggle('on', !!cmd);
+  $('#modify-label').textContent = cmd || 'แก้ไข';
+  $('#modify-ic').setAttribute('href', cmd ? `#i-${t}` : '#i-edit');
   const th = $('#toolhint');
   th.hidden = t === 'select';
   th.textContent = TOOL_HINT[t] || '';
@@ -325,7 +334,7 @@ function setTool(t) {
 
 /* ───────── แผงคุณสมบัติ ───────── */
 
-const TYPE_ICON = { cdu: 'CDU', wall: 'W', building: 'B', slab: 'F' };
+const TYPE_ICON = { cdu: 'i-cdu', wall: 'i-wall', building: 'i-building', slab: 'i-slab' };
 const TYPE_TITLE = { cdu: 'คอยล์ร้อน (CDU)', wall: 'ผนัง / louver', building: 'อาคาร', slab: 'พื้น / หลังคา' };
 
 function renderProps() {
@@ -334,15 +343,15 @@ function renderProps() {
   if (!o) {
     $('#props-title').textContent = `วัตถุในฉาก (${scene.objects.length})`;
     if (!scene.objects.length) {
-      box.innerHTML = '<p class="muted small">ยังไม่มีวัตถุ — ใช้ปุ่ม + CDU / + ผนัง / + อาคาร / + พื้น ด้านบน</p>';
+      box.innerHTML = '<p class="muted small">ยังไม่มีวัตถุ — เลือกเครื่องมือ CDU / ผนัง / อาคาร / พื้น ที่แถบด้านซ้าย แล้วคลิกบนพื้นในภาพ</p>';
       return;
     }
     const order = { cdu: 0, wall: 1, building: 2, slab: 3 };
     const items = [...scene.objects].sort((a, b) => order[a.type] - order[b.type] || a.id - b.id);
     box.innerHTML = `<ul class="obj-list">${items.map(q => `
-      <li data-id="${q.id}"><span class="ico">${TYPE_ICON[q.type]}</span>${esc(q.name)}
+      <li data-id="${q.id}"><span class="ico"><svg class="ic"><use href="#${TYPE_ICON[q.type]}"/></svg></span>${esc(q.name)}
       <span class="sub">${q.type === 'cdu' ? esc(q.model) : q.type === 'wall' ? (q.louver > 0 ? 'louver ' + q.louver + '%' : 'ทึบ') : q.type === 'slab' ? '+' + fmt(q.y) + ' m' + (q.open > 0 ? ' · เปิด ' + q.open + '%' : '') : fmt(q.h) + ' m'}</span></li>`).join('')}</ul>
-      <p class="muted small" style="margin:8px 2px 0">คลิกรายการหรือคลิกวัตถุใน 3D เพื่อแก้ไข</p>`;
+      <p class="muted small" style="margin:10px 2px 0">คลิกรายการหรือคลิกวัตถุใน 3D เพื่อแก้ไข</p>`;
     $$('li', box).forEach(li => li.addEventListener('click', () => select(Number(li.dataset.id))));
     return;
   }
@@ -380,7 +389,7 @@ function renderProps() {
         ${o.hoodType === 'elbow' && m.modules.length > 1 ? '· ปากลมซ้าย/ขวาใช้ได้กับเครื่องโมดูลเดี่ยว' : ''}</p>`;
     html += `
       <div class="row">หมวด ${seg('cat', cat, CATEGORIES.map(c => [c.key, c.label]))}</div>
-      <label class="row">รุ่น <select data-k="model">${groups}</select></label>
+      <label class="row row-stack">รุ่น <select data-k="model">${groups}</select></label>
       <div class="row">ตำแหน่ง x, z (ม.) <span class="xz"><input type="number" step="0.1" data-k="x" value="${fmt(o.x)}"><input type="number" step="0.1" data-k="z" value="${fmt(o.z)}"></span></div>
       <div class="row">ด้านหน้าเครื่องหันไป <div class="seg" data-seg="rot">
         ${[[0, 'ใต้'], [90, 'ตอ.'], [180, 'เหนือ'], [270, 'ตต.']].map(([v, l]) => `<button data-v="${v}" class="${o.rot === v ? 'on' : ''}">${l}</button>`).join('')}
@@ -548,6 +557,7 @@ function renderSettings() {
   $('#p-kcap').value = round2(scene.perf.kCap * 100);
   $('#p-kpow').value = round2(scene.perf.kPow * 100);
   $('#proj-name').value = scene.name;
+  $('#cond').textContent = `อากาศ ${scene.site.ambient} °C · ${scene.site.windSpeed > 0 ? `ลม ${scene.site.windSpeed} m/s` : 'ไม่มีลม'}`;
   $('#b-green').value = scene.bands.green;
   $('#b-red').value = scene.bands.red;
   for (const f of BC_FACES) {
@@ -640,7 +650,7 @@ function renderBackend() {
   } else {
     note.textContent = (globalThis.crossOriginIsolated
       ? `CPU: ใช้ได้หลายเธรด (เครื่องมี ${cores} แกน)`
-      : cores > 1 ? `CPU: ใช้ได้ 1 เธรดจาก ${cores} แกน เพราะเปิดไฟล์โดยตรง — เปิดผ่าน http:// เพื่อใช้ทุกแกน (ดูแท็บ README)` : 'CPU: 1 เธรด')
+      : cores > 1 ? `CPU: ใช้ได้ 1 เธรดจาก ${cores} แกน เพราะเปิดไฟล์โดยตรง — เปิดผ่าน http:// เพื่อใช้ทุกแกน (ดูหน้า คู่มือ)` : 'CPU: 1 เธรด')
       + (gpu.ok ? '' : ` · GPU: ${gpu.reason}`);
   }
 }
@@ -651,7 +661,7 @@ function bindBackend() {
     try { localStorage.setItem(BACKEND_KEY, backend); } catch { /* ถูกบล็อก */ }
     renderBackend();
     updateEstimate();
-    if (run.mesh && !run.stale && run.state !== 'idle') toast('เครื่องคำนวณที่เลือกจะใช้กับการคำนวณครั้งถัดไป — กด ↺ รีเซ็ตผล แล้วคำนวณใหม่');
+    if (run.mesh && !run.stale && run.state !== 'idle') toast('เครื่องคำนวณที่เลือกจะใช้กับการคำนวณครั้งถัดไป — กด รีเซ็ตผล แล้วคำนวณใหม่');
   });
   renderBackend();
   probeGpu();
@@ -703,7 +713,7 @@ function startOrToggle() {
     return;
   }
   if (run.state === 'done' && run.report?.converged && !run.stale) {
-    toast('ผลลู่เข้าแล้ว — แก้แบบหรือกด ↺ รีเซ็ตผล เพื่อคำนวณใหม่');
+    toast('ผลลู่เข้าแล้ว — แก้แบบหรือกด รีเซ็ตผล เพื่อคำนวณใหม่');
     return;
   }
   if ((run.state === 'paused' || run.state === 'done') && !run.stale && run.mesh) {
@@ -713,8 +723,8 @@ function startOrToggle() {
     updateRunUI();
     return;
   }
-  if (!scene.objects.some(o => o.type === 'cdu')) { toast('ยังไม่มี CDU ในฉาก — กด + CDU แล้ววางเครื่องก่อน'); return; }
-  if (!hasOpenFace()) { toast('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน ไม่เช่นนั้นลมร้อนออกไม่ได้และผลจะไม่ลู่เข้า', 5000); return; }
+  if (!scene.objects.some(o => o.type === 'cdu')) { toast('ยังไม่มี CDU ในฉาก — เลือกเครื่องมือ CDU ที่แถบด้านซ้าย แล้ววางเครื่องก่อน'); showTab('tool'); return; }
+  if (!hasOpenFace()) { toast('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน ไม่เช่นนั้นลมร้อนออกไม่ได้และผลจะไม่ลู่เข้า', 5000); showTab('tool'); showSide('sim'); return; }
   const d = domainOf(scene);
   if (meshTooBig(d)) {
     toast(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์ ≈ ${fmtMem(meshBytes(d))}) ${meshTooBig(d)} — เพิ่มขนาดเซลล์ หรือลดระยะเผื่อขอบโดเมน`, 6000);
@@ -738,6 +748,7 @@ function startOrToggle() {
   });
   runner.send({ cmd: 'run' });
   renderWarnings(mesh.warnings);
+  if (!selected()) showSide('view', false);   // ผลเริ่มขึ้นในภาพ → เตรียมตัวเลือกการแสดงผลไว้ให้
   updateRunUI();
 }
 
@@ -763,7 +774,7 @@ function invalidate() {
 
 function onEngineMessage(msg) {
   if (msg.type === 'mode') {
-    $('#foot-mode').textContent = 'คำนวณบน main thread (เบราว์เซอร์ไม่อนุญาต Web Worker) — ผลเหมือนเดิมแต่หน้าจออาจหน่วงเล็กน้อย';
+    setFootMode('คำนวณบน main thread (เบราว์เซอร์ไม่อนุญาต Web Worker) — ผลเหมือนเดิมแต่หน้าจออาจหน่วงเล็กน้อย');
     return;
   }
   if (msg.type === 'ready') {
@@ -771,13 +782,13 @@ function onEngineMessage(msg) {
     run.threads = msg.threads;
     const cores = navigator.hardwareConcurrency || 1;
     if (msg.gpuError) toast(`ใช้ GPU ไม่ได้ (${msg.gpuError}) — คำนวณด้วย CPU แทน`, 8000);
-    $('#foot-mode').textContent = msg.backend === 'gpu'
+    setFootMode(msg.backend === 'gpu'
       ? `คำนวณบน GPU (WebGPU): ${msg.device}${msg.software ? ' — ตัวจำลองด้วยซอฟต์แวร์ ไม่ใช่การ์ดจอจริง' : ''}`
       : msg.threads > 1
         ? `คำนวณด้วย WebAssembly ${msg.threads} เธรด (เครื่องมี ${cores} แกน)`
         : runner.mode === 'main' ? 'คำนวณบน main thread เธรดเดียว (เบราว์เซอร์ไม่อนุญาต Web Worker)'
           : cores > 1 && !msg.isolated ? `คำนวณด้วย WebAssembly 1 เธรด — เปิดผ่าน http:// (เช่น npm run serve) เพื่อใช้ทั้ง ${cores} แกน หรือเลือกเครื่องคำนวณเป็น GPU`
-            : 'คำนวณด้วย WebAssembly 1 เธรด';
+            : 'คำนวณด้วย WebAssembly 1 เธรด');
     return;
   }
   if (msg.type === 'error') {
@@ -907,10 +918,12 @@ function updateRunUI() {
   st.classList.toggle('running', run.state === 'running');
   st.classList.toggle('done', run.state === 'done');
   b.classList.toggle('running', run.state === 'running');
-  if (run.state === 'running') b.textContent = '⏸ หยุด';
-  else if (run.state === 'paused' && !run.stale) b.textContent = '▶ คำนวณต่อ';
-  else if (run.state === 'done' && !run.stale) b.textContent = r?.converged ? '✓ ลู่เข้าแล้ว' : '▶ คำนวณต่อจนลู่เข้า';
-  else b.textContent = '▶ คำนวณ';
+  const setRun = (icon, label) => { $('#run-ic').setAttribute('href', `#i-${icon}`); $('#run-label').textContent = label; };
+  if (run.state === 'running') setRun('pause', 'หยุด');
+  else if (run.state === 'paused' && !run.stale) setRun('play', 'คำนวณต่อ');
+  else if (run.state === 'done' && !run.stale) r?.converged ? setRun('check', 'ลู่เข้าแล้ว') : setRun('play', 'คำนวณต่อจนลู่เข้า');
+  else setRun('play', 'คำนวณ');
+  $('#btn-reset').hidden = !run.mesh;
 
   const t = r?.time ?? 0;
   const ck = r?.checks;
@@ -939,17 +952,25 @@ function updateRunUI() {
   else if (run.state === 'paused') badge.textContent = 'หยุดชั่วคราว';
   else badge.textContent = 'ยังไม่มีผล';
   $('#btn-csv').disabled = $('#btn-report').disabled = !run.report;
+  // จุดสถานะบนแท็บ "ผลลัพธ์": กำลังคำนวณ / ลู่เข้าแล้ว / ผลเก่าหรือยังไม่ลู่เข้า
+  const dot = $('#nav-dot');
+  dot.hidden = !run.report && run.state !== 'running';
+  dot.className = 'dot ' + (run.stale ? 'stale' : run.state === 'running' ? 'run' : run.state === 'done' ? (r?.converged ? 'ok' : 'stale') : '');
+  dot.title = badge.textContent;
 }
 
 function renderResults() {
   const units = unitsNow();
   const tb = $('#res-table tbody');
   $('#res-table').classList.toggle('stale-table', run.stale);
+  const sum = $('#st-sum');
+  sum.hidden = !units;
+  $('#results').classList.toggle('empty', !units);
   if (!units) {
-    tb.innerHTML = `<tr><td colspan="13" class="muted">ยังไม่มีผล — กด ▶ คำนวณ</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="13" class="muted">ยังไม่มีผล — กด คำนวณ มุมขวาบน</td></tr>`;
     $('#kpis').innerHTML = '';
-    $('#quality').innerHTML = '';
-    $('#advice').innerHTML = '<li class="muted">กด ▶ คำนวณ เพื่อดูผล</li>';
+    $('#quality').innerHTML = '<div class="q">ยังไม่มีผล</div><div class="v">–</div>';
+    $('#advice').innerHTML = '<li class="muted">กด คำนวณ เพื่อดูผล</li>';
     $('#criteria').innerHTML = bandCriteriaHTML();
     drawChart(null);
     drawResiduals();
@@ -979,6 +1000,8 @@ function renderResults() {
   const kwR = units.reduce((s, u) => s + u.kwRated, 0), kwA = units.reduce((s, u) => s + u.kwAvail, 0);
   const avgDT = units.reduce((s, u) => s + u.dT * u.cmm, 0) / units.reduce((s, u) => s + u.cmm, 0);
   const nIssue = units.filter(u => u.status.key !== 'ok').length;
+  sum.classList.toggle('stale', run.stale);
+  sum.innerHTML = `<span>ΔT สูงสุด <b class="st-${worst.status.key}">+${worst.dT.toFixed(2)} °C</b> · ${esc(worst.name)}${run.stale ? ' (ผลเก่า)' : ''}</span><span class="go">ดูผลลัพธ์ →</span>`;
   $('#kpis').innerHTML = [
     kpi('ΔT สูงสุด', `+${worst.dT.toFixed(2)} °C`, `${esc(worst.name)} · T ลมเข้า ${worst.Tin.toFixed(1)} °C`, worst.status.key),
     kpi('ΔT เฉลี่ย (ถ่วงอัตราลม)', `+${avgDT.toFixed(2)} °C`, `อากาศภายนอก ${scene.site.ambient} °C`),
@@ -1069,6 +1092,7 @@ const PALETTE = ['#4fc3f7', '#f2c14e', '#ef6f6c', '#7bd389', '#b692f6', '#f59e42
 
 function drawChart(units) {
   const cv = $('#chart');
+  if (!cv.clientWidth) return;   // หน้าผลลัพธ์ถูกซ่อนอยู่ — วาดเมื่อเปิดหน้า (showTab)
   const dpr = window.devicePixelRatio || 1;
   const W = cv.clientWidth || 600, H = cv.clientHeight || 220;
   cv.width = W * dpr; cv.height = H * dpr;
@@ -1126,6 +1150,7 @@ function drawChart(units) {
 /* กราฟ residual (สเกล log) แบบ CFX */
 function drawResiduals() {
   const cv = $('#chart-res');
+  if (!cv.clientWidth) return;
   const dpr = window.devicePixelRatio || 1;
   const W = cv.clientWidth || 600, H = cv.clientHeight || 220;
   cv.width = W * dpr; cv.height = H * dpr;
@@ -1216,7 +1241,8 @@ function updatePlayButton(on = viewer.display.playing) {
   const b = $('#btn-play');
   b.disabled = !run.fields || run.stale;
   b.classList.toggle('on', on);
-  b.textContent = on ? '❚❚ หยุดภาพเคลื่อนไหว' : '▶ เล่นภาพเคลื่อนไหว';
+  $('#play-ic').setAttribute('href', on ? '#i-pause' : '#i-play');
+  $('#play-label').textContent = on ? 'หยุดภาพเคลื่อนไหว' : 'เล่นภาพเคลื่อนไหว';
 }
 
 /** ตัวเลขบนแถบสี [{p: 0–1, txt}] — null ถ้ายังไม่มีผล */
@@ -1241,6 +1267,8 @@ function colorbarTicks() {
 
 function updateColorbar() {
   updatePlayButton();
+  const f = FIELDS[viewer.display.field];
+  $('#cbar-title').textContent = `${f.label} (${f.unit}) · ${MODE_NAME[viewer.display.mode]}`;
   $('#cbar').style.background = cssGradient(viewer.display.mode === 'contour' ? CONTOUR_LEVELS : 0);
   const lab = $('#cbar-labels');
   const ticks = colorbarTicks();
@@ -1313,7 +1341,7 @@ async function captureView() {
   $('#viewport').appendChild(fl);
   requestAnimationFrame(() => { fl.style.opacity = '0'; setTimeout(() => fl.remove(), 400); });
   renderCaptures();
-  toast(`บันทึกภาพที่ ${captures.length} แล้ว — อยู่ในรายงาน HTML`);
+  toast(`บันทึกภาพที่ ${captures.length} แล้ว — ดูได้ที่หน้า ผลลัพธ์ และอยู่ในรายงาน HTML`);
 }
 
 function renderCaptures() {
@@ -1321,7 +1349,7 @@ function renderCaptures() {
   $('#btn-cap-all').disabled = $('#btn-cap-clear').disabled = !captures.length;
   const box = $('#cap-list');
   if (!captures.length) {
-    box.innerHTML = `<p class="muted small" style="margin:0">กด <b>📷 Capture</b> บนภาพ 3D เพื่อเก็บภาพหลายมุม (หมุน/เลือกแกน/เลื่อนหน้าตัดก่อนกด)
+    box.innerHTML = `<p class="muted small" style="margin:0">กดปุ่ม <b>Capture</b> (รูปกล้อง) บนภาพ 3D หรือคีย์ <kbd>P</kbd> เพื่อเก็บภาพหลายมุม (หมุน/เลือกแกน/เลื่อนหน้าตัดก่อนกด)
       — ทุกภาพจะอยู่ในรายงาน HTML ตามลำดับ แก้คำบรรยายใต้ภาพได้</p>`;
     return;
   }
@@ -1353,16 +1381,18 @@ function setViewUI(v) {
   $$('.vt').forEach(x => x.classList.toggle('on', x.dataset.view === viewer.view));
 }
 
-/** เต็มจอทั้งพื้นที่ทำงาน (แถบเครื่องมือ + ภาพ + แผงแก้วัตถุ) เพื่อให้แก้โมเดลต่อได้ */
+/** เต็มจอทั้งโปรแกรม (แถบบน + เครื่องมือ + ภาพ + แผงแก้วัตถุ) เพื่อให้แก้โมเดลและคำนวณต่อได้ */
 function toggleFullscreen() {
-  const ws = $('#workspace');
   if (document.fullscreenElement) document.exitFullscreen?.();
-  else ws.requestFullscreen?.().catch(() => toast('เบราว์เซอร์ไม่อนุญาตโหมดเต็มจอ'));
+  else document.documentElement.requestFullscreen?.().catch(() => toast('เบราว์เซอร์ไม่อนุญาตโหมดเต็มจอ'));
 }
 
+/** ค่าที่จุดใต้เมาส์บนระนาบหน้าตัด — แสดงที่แถบสถานะด้านล่างแทนคำแนะนำการใช้เมาส์ */
 function showProbe(info) {
   const el = $('#probe');
-  if (!info) { el.textContent = 'จุดบนระนาบ: –'; return; }
+  el.hidden = !info;
+  $('#hint').hidden = !!info;
+  if (!info) return;
   const p = info.p;
   const at = `(${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
   if (info.solid) { el.textContent = `จุดบนระนาบ ${at}: ของแข็ง`; return; }
@@ -1382,6 +1412,7 @@ function openProject(file) {
     try {
       const s = normalizeScene(JSON.parse(rd.result));
       edit(() => { scene = s; selectedId = null; });
+      showTab('tool');
       viewer.setView(viewer.view);
       initSection();
       toast(`เปิด "${s.name}" แล้ว`);
@@ -1463,6 +1494,63 @@ function toast(text, ms = 3200) {
   toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
+function setFootMode(text) {
+  const el = $('#foot-mode');
+  el.textContent = text;
+  el.title = text;
+}
+
+/* ───────── หน้า (แบบจำลอง / ผลลัพธ์ / คู่มือ) · แท็บของแผงขวา · เมนู ───────── */
+
+function showTab(name) {
+  $('#app').dataset.tab = name;
+  $$('.tab').forEach(b => { b.classList.toggle('on', b.dataset.tab === name); b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
+  // หน้าแบบจำลองไม่ถูกถอดออกจาก layout (ซ่อนด้วย visibility) — ภาพ 3D จึงยังถ่ายลงรายงานได้จากหน้าผลลัพธ์
+  $('#tab-tool').classList.toggle('covered', name !== 'tool');
+  $('#tab-results').hidden = name !== 'results';
+  $('#tab-readme').hidden = name !== 'readme';
+  if (name === 'tool') viewer.resize();
+  if (name === 'results') { drawChart(unitsNow()); drawResiduals(); }
+}
+
+const SIDE_KEY = 'cfd-side-collapsed';
+/** แท็บของแผงขวา: 'obj' วัตถุ · 'sim' ตั้งค่า · 'view' แสดงผล — expand = กางแผงถ้าถูกพับไว้ */
+function showSide(name, expand = true) {
+  if (expand) setSideCollapsed(false);
+  $$('.stab').forEach(b => { b.classList.toggle('on', b.dataset.side === name); b.setAttribute('aria-selected', String(b.dataset.side === name)); });
+  for (const k of ['obj', 'sim', 'view']) $(`#side-${k}`).hidden = k !== name;
+}
+
+function setSideCollapsed(on) {
+  $('#workspace').classList.toggle('side-collapsed', on);
+  try { localStorage.setItem(SIDE_KEY, on ? '1' : ''); } catch { /* ถูกบล็อก */ }
+}
+
+function closeMenus() {
+  $$('.menu').forEach(m => { m.hidden = true; });
+  $$('[data-menu]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+
+function bindMenus() {
+  $$('[data-menu]').forEach(b => b.addEventListener('click', () => {
+    const m = $('#' + b.dataset.menu), open = m.hidden;
+    closeMenus();
+    m.hidden = !open;
+    b.setAttribute('aria-expanded', String(open));
+  }));
+  // คลิกนอกเมนู หรือเลือกรายการแล้ว → ปิด
+  document.addEventListener('pointerdown', (e) => { if (!e.target.closest?.('.menu, [data-menu]')) closeMenus(); }, true);
+  $$('.menu').forEach(m => m.addEventListener('click', (e) => { if (e.target.closest('.mi')) closeMenus(); }));
+}
+
+function loadPreset(key) {
+  edit(() => { scene = presetScene(key); selectedId = null; });
+  resetResults();
+  showTab('tool');
+  viewer.setView(viewer.view);
+  initSection();
+}
+
 function fmt(v) { return String(Math.round(v * 100) / 100); }
 function round2(v) { return Math.round(v * 100) / 100; }
 function round3(v) { return Math.round(v * 1000) / 1000; }
@@ -1494,20 +1582,20 @@ function initSection() {
 /* ───────── เชื่อมเหตุการณ์ ───────── */
 
 function bindUI() {
-  $$('.tab').forEach(b => b.addEventListener('click', () => {
-    $$('.tab').forEach(x => x.classList.toggle('on', x === b));
-    $('#tab-tool').hidden = b.dataset.tab !== 'tool';
-    $('#tab-readme').hidden = b.dataset.tab !== 'readme';
-    if (b.dataset.tab === 'tool') { viewer.resize(); drawChart(unitsNow()); drawResiduals(); }
-  }));
+  $$('.tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  $$('.stab').forEach(b => b.addEventListener('click', () => showSide(b.dataset.side)));
+  $('#btn-side').addEventListener('click', () => setSideCollapsed(!$('#workspace').classList.contains('side-collapsed')));
+  try { if (localStorage.getItem(SIDE_KEY) === '1') setSideCollapsed(true); } catch { /* ถูกบล็อก */ }
+  bindMenus();
+  $('#st-cond').addEventListener('click', () => showSide('sim'));
+  $('#st-sum').addEventListener('click', () => showTab('results'));
   $$('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $('#btn-capture').addEventListener('click', captureView);
   $('#btn-full').addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', () => {
-    const fs = document.fullscreenElement;
-    $('#btn-full').textContent = fs ? '✕ ออกเต็มจอ' : '⛶ เต็มจอ';
-    // toast ต้องอยู่ใน element ที่เต็มจอ ไม่เช่นนั้นจะมองไม่เห็น
-    (fs || document.body).appendChild($('#toast'));
+    const fs = !!document.fullscreenElement;
+    $('#full-ic').setAttribute('href', fs ? '#i-unfull' : '#i-full');
+    $('#btn-full').title = fs ? 'ออกจากเต็มจอ (Esc)' : 'เต็มจอ (Esc เพื่อออก)';
     setTimeout(() => viewer.resize(), 60);
   });
   $('#btn-cap-all').addEventListener('click', () => captures.forEach((c, i) =>
@@ -1520,6 +1608,7 @@ function bindUI() {
   $('#btn-ortho').addEventListener('click', () => setOrtho(!ortho));
   $('#btn-keys').addEventListener('click', () => toggleKeys());
   $('#keys-pop .keys-x').addEventListener('click', () => toggleKeys(false));
+  $('#keys-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleKeys(false); });
   $('#btn-redo').addEventListener('click', redo);
   $('#btn-run').addEventListener('click', startOrToggle);
   $('#btn-reset').addEventListener('click', resetResults);
@@ -1530,18 +1619,10 @@ function bindUI() {
     if (scene.objects.length && !confirm('เริ่มโปรเจกต์ใหม่? (แบบปัจจุบันยังเลิกทำกลับได้ด้วย Ctrl+Z)')) return;
     edit(() => { scene = newScene(); selectedId = null; });
     resetResults();
+    showTab('tool');
   });
-  const ps = $('#preset');
-  for (const p of PRESETS) ps.insertAdjacentHTML('beforeend', `<option value="${p.key}">${esc(p.label)}</option>`);
-  ps.addEventListener('change', () => {
-    if (!ps.value) return;
-    const key = ps.value;
-    ps.value = '';
-    edit(() => { scene = presetScene(key); selectedId = null; });
-    resetResults();
-    viewer.setView(viewer.view);
-    initSection();
-  });
+  $('#preset-list').innerHTML = PRESETS.map(p => `<button class="mi" data-preset="${p.key}"><span class="mi-t">${esc(p.label)}</span></button>`).join('');
+  $$('[data-preset]').forEach(b => b.addEventListener('click', () => loadPreset(b.dataset.preset)));
   $('#btn-csv').addEventListener('click', exportCSV);
   $('#btn-report').addEventListener('click', exportReport);
   $('#btn-png').addEventListener('click', () => {
@@ -1606,6 +1687,7 @@ function bindUI() {
     const typed = /^[0-9.]$/.test(k) ? k : e.key;
     if (!(e.ctrlKey || e.metaKey) && viewer.typeLength(typed)) { e.preventDefault(); return; }
     const ctrl = e.ctrlKey || e.metaKey;
+    if (k === 'escape' && $$('.menu').some(m => !m.hidden)) { closeMenus(); return; }
     if (!$('#keys-pop').hidden && (k === 'escape' || k === '?')) { toggleKeys(false); return; }
     if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }

@@ -12,201 +12,184 @@
 </script>
 </head>
 <body>
-<div class="app">
 
-  <header class="top">
-    <div class="brand-row">
-      <h1>CDU Airflow CFD</h1>
-      <span class="tag">VRV · Split type · 3D</span>
-      <div class="spacer"></div>
-      <div class="proj">
-        <input id="proj-name" class="proj-name" title="ชื่อโปรเจกต์" spellcheck="false">
-        <select id="preset" title="เปิดตัวอย่างสำเร็จรูป"><option value="">ตัวอย่าง…</option></select>
-        <button id="btn-new" class="ghost" title="เริ่มโปรเจกต์ว่าง">ใหม่</button>
-        <button id="btn-open" class="ghost" title="เปิดไฟล์โปรเจกต์ .json">เปิด</button>
-        <button id="btn-save" class="ghost" title="บันทึกโปรเจกต์เป็นไฟล์ .json (Ctrl+S)">บันทึก</button>
-        <input type="file" id="file-open" accept=".json,application/json" hidden>
+<!-- ไอคอนทั้งหมด (เส้น 24×24) — เรียกใช้ด้วย <svg class="ic"><use href="#i-ชื่อ"/></svg> -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M3 8h9a3 3 0 1 0-3-3"/><path d="M3 12.5h14.5a3 3 0 1 1-3 3"/><path d="M3 17h6.5a2.2 2.2 0 1 1-2.2 2.2"/></symbol>
+  <symbol id="i-select" viewBox="0 0 24 24"><path d="M5 4l5.2 14 2.1-5.7L18 10.2z"/></symbol>
+  <symbol id="i-cdu" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="1.6"/><circle cx="9.3" cy="12" r="3.4"/><path d="M9.3 8.6v6.8M5.9 12h6.8M16 9.5h2.4M16 12h2.4M16 14.5h2.4M6 18.5v2M18 18.5v2"/></symbol>
+  <symbol id="i-wall" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1.2"/><path d="M3 9.7h18M3 14.3h18M9 5v4.7M15 9.7v4.6M9 14.3V19"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M5 20.5V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v15.5M15 10h3a1 1 0 0 1 1 1v9.5M3 20.5h18"/><path d="M8.5 8h3M8.5 11.5h3M8.5 15h3"/></symbol>
+  <symbol id="i-slab" viewBox="0 0 24 24"><path d="M12 4.5l8.5 4.3L12 13.1 3.5 8.8z"/><path d="M3.5 13.2L12 17.5l8.5-4.3"/><path d="M5.5 17.2v2.5M18.5 17.2v2.5"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M7 5h10M7 19h10M5 7v10M19 7v10"/><rect x="3" y="3" width="4" height="4" rx=".9"/><rect x="17" y="3" width="4" height="4" rx=".9"/><rect x="3" y="17" width="4" height="4" rx=".9"/><rect x="17" y="17" width="4" height="4" rx=".9"/></symbol>
+  <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11.5" height="11.5" rx="2"/><path d="M5.5 15h-.5a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 5 3.5h8.5A1.5 1.5 0 0 1 15 5v.5"/></symbol>
+  <symbol id="i-offset" viewBox="0 0 24 24"><path d="M4 20.5V9a5 5 0 0 1 5-5h11.5"/><path d="M9.5 20.5V13a3.5 3.5 0 0 1 3.5-3.5h7.5" stroke-dasharray="2.6 2.6"/></symbol>
+  <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2.6 2.6"/><path d="M8.5 7L3.5 17h5z"/><path d="M15.5 7l5 10h-5z"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.5-5.8"/><path d="M20 3.5V9h-5.5"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 6L4.5 10.5 9 15"/><path d="M4.5 10.5H14a5 5 0 0 1 0 10h-3"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 6l4.5 4.5L15 15"/><path d="M19.5 10.5H10a5 5 0 0 0 0 10h3"/></symbol>
+  <symbol id="i-ortho" viewBox="0 0 24 24"><path d="M5 3.5v16.5h16.5"/><path d="M5 14h6v6"/></symbol>
+  <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10.2 10h.01M13.8 10h.01M17.5 10h.01M6.5 14h.01M17.5 14h.01M9.5 14h5"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.4"/></symbol>
+  <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-unfull" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5v14l11.5-7z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5.5v13M15.5 5.5v13" stroke-width="2.8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 3.5V9h5.5"/></symbol>
+  <symbol id="i-new" viewBox="0 0 24 24"><path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4M12 11v6M9 14h6"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7a1 1 0 0 1 1-1h5l2 2.5h9a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8.5 16v-4M12.5 16V8M16.5 16v-6"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h8M16 7h4M4 12h2M10 12h10M4 17h10M18 17h2"/><circle cx="14" cy="7" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="17" r="2"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8.5 6h11.5M8.5 12h11.5M8.5 18h11.5M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></symbol>
+</svg>
+
+<div class="app" id="app" data-tab="tool">
+
+  <!-- ═════════════ แถบบน ═════════════ -->
+  <header class="appbar">
+    <div class="bar-left">
+      <div class="brand" title="จำลองการไหลของลมร้อนจากคอยล์ร้อน Daikin VRV และ Split type — หาการวนกลับของลมร้อน อุณหภูมิลมเข้าคอยล์ และผลต่อ capacity">
+        <span class="logo"><svg class="ic"><use href="#i-logo"/></svg></span>
+        <h1>CDU Airflow CFD</h1>
       </div>
+      <span class="bar-sep"></span>
+      <input id="proj-name" class="proj-name" title="ชื่อโปรเจกต์ — คลิกเพื่อแก้ไข" aria-label="ชื่อโปรเจกต์" spellcheck="false">
+      <div class="menu-wrap">
+        <button class="quiet" data-menu="menu-file" aria-haspopup="true" aria-expanded="false" title="ใหม่ · เปิด · บันทึก · ตัวอย่างสำเร็จรูป">ไฟล์<svg class="ic sm"><use href="#i-chev"/></svg></button>
+        <div class="menu" id="menu-file" hidden>
+          <button class="mi" id="btn-new"><svg class="ic"><use href="#i-new"/></svg><span class="mi-t">โปรเจกต์ใหม่</span></button>
+          <button class="mi" id="btn-open"><svg class="ic"><use href="#i-open"/></svg><span class="mi-t">เปิดไฟล์โปรเจกต์ (.json)</span></button>
+          <button class="mi" id="btn-save"><svg class="ic"><use href="#i-save"/></svg><span class="mi-t">บันทึกเป็นไฟล์ .json</span><kbd>Ctrl+S</kbd></button>
+          <div class="menu-h">ตัวอย่างสำเร็จรูป</div>
+          <div id="preset-list"></div>
+          <p class="menu-note">แบบที่ทำอยู่ถูกเก็บไว้ในเบราว์เซอร์นี้อัตโนมัติ — บันทึกเป็นไฟล์ .json เพื่อเก็บถาวรหรือส่งต่อ</p>
+        </div>
+      </div>
+      <input type="file" id="file-open" accept=".json,application/json" hidden>
+      <button id="btn-undo" class="icon-btn" title="เลิกทำ (Ctrl+Z)" aria-label="เลิกทำ"><svg class="ic"><use href="#i-undo"/></svg></button>
+      <button id="btn-redo" class="icon-btn" title="ทำซ้ำ (Ctrl+Y)" aria-label="ทำซ้ำ"><svg class="ic"><use href="#i-redo"/></svg></button>
     </div>
-    <p class="lead">จำลองการไหลของลมร้อนจากคอยล์ร้อน Daikin VRV (6A / IV S / S Hi) และ Split type ในลานวางเครื่อง — หาการวนกลับของลมร้อน (hot-air recirculation)
-      อุณหภูมิลมเข้าคอยล์แต่ละเครื่อง และผลต่อ capacity</p>
+
+    <nav class="tabs" role="tablist" aria-label="หน้าหลัก">
+      <button class="tab on" data-tab="tool" role="tab" aria-selected="true"><svg class="ic"><use href="#i-cube"/></svg><span>แบบจำลอง</span></button>
+      <button class="tab" data-tab="results" role="tab"><svg class="ic"><use href="#i-chart"/></svg><span>ผลลัพธ์</span><i class="dot" id="nav-dot" hidden></i></button>
+      <button class="tab" data-tab="readme" role="tab" title="วิธีใช้ ทฤษฎี และการคำนวณ"><svg class="ic"><use href="#i-book"/></svg><span>คู่มือ</span></button>
+    </nav>
+
+    <div class="bar-right">
+      <button id="btn-reset" class="quiet" title="ล้างผลการคำนวณ" hidden><svg class="ic"><use href="#i-reset"/></svg><span>รีเซ็ตผล</span></button>
+      <button id="btn-run" class="primary" title="สร้างเมชและเริ่มคำนวณ (Space)"><svg class="ic"><use id="run-ic" href="#i-play"/></svg><span id="run-label">คำนวณ</span></button>
+    </div>
   </header>
 
-  <nav class="tabs" role="tablist">
-    <button class="tab on" data-tab="tool">เครื่องมือ</button>
-    <button class="tab" data-tab="readme">README · ทฤษฎีและการคำนวณ</button>
-  </nav>
+  <main class="views">
 
-  <!-- ═════════════ เครื่องมือ ═════════════ -->
+  <!-- ═════════════ แบบจำลอง ═════════════ -->
   <section id="tab-tool" class="tabpage">
    <div class="workspace" id="workspace">
-    <div class="keys-pop" id="keys-pop" hidden>
-      <button class="keys-x" title="ปิด (Esc)">×</button>
-      <h3>คีย์ลัด</h3>
-      <div class="keys-grid">
-        <b>วาง / เครื่องมือ</b>
-        <span><kbd>V</kbd> เลือก / ย้าย</span>
-        <span><kbd>C</kbd> + CDU</span>
-        <span><kbd>W</kbd> <kbd>L</kbd> <kbd>Ctrl+L</kbd> + ผนัง (Line)</span>
-        <span><kbd>B</kbd> + อาคาร</span>
-        <span><kbd>F</kbd> + พื้น / หลังคา</span>
-        <span><kbd>M</kbd> Move — จุดฐาน → จุดที่สอง / พิมพ์ระยะ</span>
-        <span><kbd>O</kbd> Offset — ระยะ ↵ → วัตถุ → ฝั่ง</span>
-        <span><kbd>Shift+C</kbd> Copy — จุดฐาน → วางหลายครั้ง</span>
-        <span><kbd>Shift+M</kbd> Mirror — สองจุดของเส้นสะท้อน</span>
-        <span><kbd>Shift+R</kbd> Rotate — จุดฐาน → มุม ↵</span>
-        <span><kbd>F8</kbd> Ortho ล็อกแนวแกน</span>
-        <span><kbd>Shift</kbd> สลับ Ortho ชั่วคราว</span>
-        <span>ระหว่างลากผนัง พิมพ์ความยาว + <kbd>Enter</kbd></span>
-        <span><kbd>Esc</kbd> จบเส้น / ออกจากเครื่องมือ</span>
-        <b>แก้ไข</b>
-        <span><kbd>Ctrl+C</kbd> คัดลอก</span>
-        <span><kbd>Ctrl+X</kbd> ตัด</span>
-        <span><kbd>Ctrl+V</kbd> วาง ณ ตำแหน่งเมาส์</span>
-        <span><kbd>Ctrl+D</kbd> ทำสำเนา</span>
-        <span><kbd>R</kbd> หมุน 90° ทวนเข็ม</span>
-        <span><kbd>Delete</kbd> ลบ</span>
-        <span>ลูกศร ขยับ 0.1 ม. (<kbd>Shift</kbd> 1 ม.)</span>
-        <span><kbd>Tab</kbd> เลือกวัตถุถัดไป</span>
-        <span><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> เลิกทำ / ทำซ้ำ</span>
-        <b>มุมมอง / คำนวณ</b>
-        <span><kbd>1</kbd>–<kbd>6</kbd> 3D เหนือ ใต้ ออก ตก Top</span>
-        <span><kbd>P</kbd> Capture ภาพ</span>
-        <span><kbd>Space</kbd> คำนวณ / หยุด</span>
-        <span><kbd>Ctrl+S</kbd> บันทึก</span>
-        <span><kbd>?</kbd> เปิด/ปิดหน้านี้</span>
-      </div>
-    </div>
-    <div class="toolbar">
-      <div class="grp">
-        <button class="tool on" data-tool="select" title="เลือกและลากย้ายวัตถุ (V)">เลือก / ย้าย</button>
-        <button class="tool" data-tool="cdu" title="คลิกบนพื้นเพื่อวาง CDU (C)">+ CDU</button>
-        <button class="tool" data-tool="wall" title="คลิกจุดเริ่ม แล้วคลิกจุดถัดไปเพื่อลากผนังต่อเนื่อง (W / L / Ctrl+L)">+ ผนัง / louver</button>
-        <button class="tool" data-tool="building" title="คลิกมุมหนึ่ง แล้วคลิกมุมตรงข้าม (B)">+ อาคาร</button>
-        <button class="tool" data-tool="slab" title="แผ่นพื้นยก / หลังคา / ตะแกรง: คลิกมุมหนึ่ง แล้วคลิกมุมตรงข้าม (F)">+ พื้น / หลังคา</button>
-      </div>
-      <div class="grp">
-        <button class="tool cmd" data-tool="move" title="Move: จุดฐาน → จุดที่สอง หรือพิมพ์ระยะ + Enter (M)">Move</button>
-        <button class="tool cmd" data-tool="copy" title="Copy: จุดฐาน → คลิกวางสำเนาได้หลายครั้ง หรือพิมพ์ระยะ + Enter (Shift+C)">Copy</button>
-        <button class="tool cmd" data-tool="offset" title="Offset: พิมพ์ระยะ + Enter → คลิกวัตถุ → คลิกฝั่ง (O)">Offset</button>
-        <button class="tool cmd" data-tool="mirror" title="Mirror: คลิกสองจุดของเส้นสะท้อน — ได้สำเนา (Shift+M)">Mirror</button>
-        <button class="tool cmd" data-tool="rotate" title="Rotate: จุดฐาน → พิมพ์มุม + Enter (Shift+R)">Rotate</button>
-      </div>
-      <div class="grp">
-        <button id="btn-undo" class="icon" title="เลิกทำ (Ctrl+Z)">↶</button>
-        <button id="btn-redo" class="icon" title="ทำซ้ำ (Ctrl+Y)">↷</button>
-      </div>
-      <div class="grp">
-        <button id="btn-ortho" title="Ortho: ล็อกผนังตามแนวแกน X/Z (F8) — กด Shift ค้างเพื่อสลับชั่วคราว">Ortho</button>
-        <button id="btn-keys" class="icon" title="คีย์ลัดทั้งหมด (?)">⌨</button>
-      </div>
-      <div class="spacer"></div>
-      <span class="estimate mono" id="estimate"></span>
-      <button id="btn-run" class="primary" title="สร้างเมชและเริ่มคำนวณ (Space)">▶ คำนวณ</button>
-      <button id="btn-reset" title="ล้างผลการคำนวณ">↺ รีเซ็ตผล</button>
-    </div>
 
-    <div class="work">
-      <div class="stage">
-        <div id="viewport" class="viewport">
-          <div class="vtabs">
-            <button class="vt on" data-view="3d" title="มุมมอง 3 มิติแบบเฉียง (1)">3D</button>
-            <button class="vt" data-view="n" title="3 มิติ มองจากทิศเหนือ (2)">เหนือ</button>
-            <button class="vt" data-view="s" title="3 มิติ มองจากทิศใต้ (3)">ใต้</button>
-            <button class="vt" data-view="e" title="3 มิติ มองจากทิศตะวันออก (4)">ออก</button>
-            <button class="vt" data-view="w" title="3 มิติ มองจากทิศตะวันตก (5)">ตก</button>
-            <button class="vt" data-view="top" title="มองจากด้านบน (ภาพฉาย) — ทิศเหนืออยู่บน (6)">Top</button>
-            <span class="vsep"></span>
-            <button class="vact" id="btn-capture" title="บันทึกภาพมุมมองนี้ (พร้อมแถบสี) ไว้ใส่รายงาน — กดได้หลายมุม (P)">📷 Capture</button>
-            <button class="vact" id="btn-full" title="เต็มจอพร้อมเครื่องมือแก้โมเดล (Esc เพื่อออก)">⛶ เต็มจอ</button>
+    <!-- แถบเครื่องมือด้านซ้าย -->
+    <nav class="rail" aria-label="เครื่องมือสร้างแบบ">
+      <button class="rail-btn tool on" data-tool="select" data-tip="เลือก / ลากย้ายวัตถุ · V" aria-label="เลือก / ย้าย"><svg class="ic"><use href="#i-select"/></svg><span>เลือก</span></button>
+      <button class="rail-btn tool" data-tool="cdu" data-tip="วาง CDU — คลิกบนพื้น · C" aria-label="วาง CDU"><svg class="ic"><use href="#i-cdu"/></svg><span>CDU</span></button>
+      <button class="rail-btn tool" data-tool="wall" data-tip="ผนัง / louver — คลิกจุดต่อจุด · W" aria-label="ผนัง / louver"><svg class="ic"><use href="#i-wall"/></svg><span>ผนัง/louver</span></button>
+      <button class="rail-btn tool" data-tool="building" data-tip="อาคาร — คลิกสองมุม · B" aria-label="อาคาร"><svg class="ic"><use href="#i-building"/></svg><span>อาคาร</span></button>
+      <button class="rail-btn tool" data-tool="slab" data-tip="พื้นยก / หลังคา / ตะแกรง — คลิกสองมุม · F" aria-label="พื้น / หลังคา"><svg class="ic"><use href="#i-slab"/></svg><span>พื้น/หลังคา</span></button>
+      <span class="rail-sep"></span>
+      <div class="menu-wrap">
+        <button class="rail-btn" id="btn-modify" data-menu="menu-modify" aria-haspopup="true" aria-expanded="false" data-tip="Move · Copy · Offset · Mirror · Rotate" aria-label="คำสั่งแก้ไข"><svg class="ic"><use id="modify-ic" href="#i-edit"/></svg><span id="modify-label">แก้ไข</span></button>
+        <div class="menu menu-side" id="menu-modify" hidden>
+          <div class="menu-h">คำสั่งแก้ไข — เลือกวัตถุก่อนหรือหลังเรียกคำสั่งก็ได้</div>
+          <button class="mi tool cmd" data-tool="move"><svg class="ic"><use href="#i-move"/></svg><span class="mi-t"><b>Move</b><small>ย้าย: จุดฐาน → จุดที่สอง หรือพิมพ์ระยะ + Enter</small></span><kbd>M</kbd></button>
+          <button class="mi tool cmd" data-tool="copy"><svg class="ic"><use href="#i-copy"/></svg><span class="mi-t"><b>Copy</b><small>สำเนา: จุดฐาน → คลิกวางได้หลายครั้ง</small></span><kbd>Shift+C</kbd></button>
+          <button class="mi tool cmd" data-tool="offset"><svg class="ic"><use href="#i-offset"/></svg><span class="mi-t"><b>Offset</b><small>สำเนาขนาน: พิมพ์ระยะ + Enter → วัตถุ → ฝั่ง</small></span><kbd>O</kbd></button>
+          <button class="mi tool cmd" data-tool="mirror"><svg class="ic"><use href="#i-mirror"/></svg><span class="mi-t"><b>Mirror</b><small>สำเนาสะท้อน: คลิกสองจุดของเส้นสะท้อน</small></span><kbd>Shift+M</kbd></button>
+          <button class="mi tool cmd" data-tool="rotate"><svg class="ic"><use href="#i-rotate"/></svg><span class="mi-t"><b>Rotate</b><small>หมุน: จุดฐาน → พิมพ์มุม + Enter</small></span><kbd>Shift+R</kbd></button>
+        </div>
+      </div>
+      <span class="spacer"></span>
+      <button class="rail-btn" id="btn-ortho" data-tip="Ortho: ล็อกตามแนวแกน X/Z · F8 (Shift = สลับชั่วคราว)" aria-label="Ortho"><svg class="ic"><use href="#i-ortho"/></svg><span>Ortho</span></button>
+      <button class="rail-btn" id="btn-keys" data-tip="คีย์ลัดทั้งหมด · ?" aria-label="คีย์ลัด"><svg class="ic"><use href="#i-keys"/></svg><span>คีย์ลัด</span></button>
+    </nav>
+
+    <!-- ภาพ 3 มิติ -->
+    <div class="stage">
+      <div id="viewport" class="viewport">
+        <div class="vp-top">
+          <div class="vp-tl">
+            <div class="vp-row">
+              <div class="vseg glass" role="group" aria-label="มุมมอง">
+                <button class="vt on" data-view="3d" title="มุมมอง 3 มิติแบบเฉียง (1)">3D</button>
+                <button class="vt" data-view="n" title="3 มิติ มองจากทิศเหนือ (2)">เหนือ</button>
+                <button class="vt" data-view="s" title="3 มิติ มองจากทิศใต้ (3)">ใต้</button>
+                <button class="vt" data-view="e" title="3 มิติ มองจากทิศตะวันออก (4)">ออก</button>
+                <button class="vt" data-view="w" title="3 มิติ มองจากทิศตะวันตก (5)">ตก</button>
+                <button class="vt" data-view="top" title="มองจากด้านบน (ภาพฉาย) — ทิศเหนืออยู่บน (6)">Top</button>
+              </div>
+              <div class="vseg glass">
+                <button class="vact" id="btn-capture" title="Capture: บันทึกภาพมุมมองนี้ (พร้อมแถบสี) ไว้ใส่รายงาน — กดได้หลายมุม (P)" aria-label="Capture ภาพ"><svg class="ic"><use href="#i-camera"/></svg></button>
+                <button class="vact" id="btn-full" title="เต็มจอ (Esc เพื่อออก)" aria-label="เต็มจอ"><svg class="ic"><use id="full-ic" href="#i-full"/></svg></button>
+              </div>
+            </div>
+            <div class="toolhint" id="toolhint" hidden></div>
           </div>
-          <div class="status">
-            <div><span id="st-text">พร้อมคำนวณ</span> · <span id="st-time" class="mono">t 0.0/180 s</span></div>
+          <div class="status glass">
+            <div class="st-row"><i class="st-dot"></i><span id="st-text">พร้อมคำนวณ</span><span class="spacer"></span><span id="st-time" class="mono">t 0.0 s</span></div>
             <div class="bar"><i id="st-bar"></i></div>
-          </div>
-          <div class="toolhint" id="toolhint" hidden></div>
-          <div class="band-legend" id="band-legend" hidden></div>
-          <button class="play" id="btn-play" disabled title="เล่น / หยุดภาพเคลื่อนไหวของอนุภาคลมและ streamline">▶ เล่นภาพเคลื่อนไหว</button>
-          <div class="empty-hint" id="empty-hint" hidden>
-            <b>เริ่มต้นใช้งาน</b>
-            <span>กด <kbd>+ CDU</kbd> แล้วคลิกบนพื้นเพื่อวางเครื่อง · <kbd>+ ผนัง / louver</kbd> เพื่อลากผนังรอบลาน · แล้วกด <kbd>▶ คำนวณ</kbd></span>
-            <span>หรือเลือก <b>ตัวอย่าง…</b> มุมขวาบน</span>
+            <button class="st-link" id="st-cond" title="เปิดแผงตั้งค่า: สภาพแวดล้อม เมช และขอบเขตโดเมน"><span id="cond"></span><span class="estimate" id="estimate"></span></button>
+            <button class="st-link st-sum" id="st-sum" title="เปิดหน้าผลลัพธ์" hidden></button>
           </div>
         </div>
-        <div class="stage-foot">
-          <div class="hint" id="hint">คลิกเลือกวัตถุ · ลากเพื่อย้าย · ลากพื้นที่ว่างเพื่อหมุนมุมมอง · คลิกขวาลากเพื่อเลื่อน · สกรอลล์เพื่อซูม</div>
-          <div class="probe mono" id="probe">จุดบนระนาบ: –</div>
-        </div>
-        <div class="legend">
-          <div class="cbar-wrap">
+        <div class="vp-bl">
+          <div class="band-legend glass" id="band-legend" hidden></div>
+          <div class="legend glass">
+            <div class="legend-h"><b id="cbar-title">อุณหภูมิ</b><span class="sec-info" id="sec-info"></span></div>
             <div class="cbar" id="cbar"></div>
             <div class="cbar-labels mono" id="cbar-labels"></div>
           </div>
-          <div class="sec-info mono" id="sec-info"></div>
+        </div>
+        <button class="play glass" id="btn-play" disabled title="เล่น / หยุดภาพเคลื่อนไหวของอนุภาคลมและ streamline"><svg class="ic sm"><use id="play-ic" href="#i-play"/></svg><span id="play-label">เล่นภาพเคลื่อนไหว</span></button>
+        <div class="empty-hint" id="empty-hint" hidden>
+          <b>เริ่มต้นใช้งาน</b>
+          <span>เลือก <b>CDU</b> ที่แถบซ้ายแล้วคลิกบนพื้นเพื่อวางเครื่อง · <b>ผนัง/louver</b> เพื่อลากผนังรอบลาน · แล้วกด <b>คำนวณ</b> มุมขวาบน</span>
+          <span>หรือเปิด <b>ไฟล์ → ตัวอย่างสำเร็จรูป</b></span>
         </div>
       </div>
+    </div>
 
-      <aside class="side">
-        <div class="card" id="card-props">
-          <div class="card-h"><h3 id="props-title">วัตถุในฉาก</h3></div>
+    <!-- แผงด้านขวา: วัตถุ · ตั้งค่า · แสดงผล -->
+    <aside class="side" id="side">
+      <div class="side-tabs" role="tablist" aria-label="แผงด้านขวา">
+        <button class="stab on" data-side="obj" role="tab" aria-selected="true" title="วัตถุในฉากและคุณสมบัติ"><svg class="ic"><use href="#i-list"/></svg><span>วัตถุ</span></button>
+        <button class="stab" data-side="sim" role="tab" title="สภาพแวดล้อม เมช เครื่องคำนวณ และขอบเขตโดเมน"><svg class="ic"><use href="#i-sliders"/></svg><span>ตั้งค่า</span></button>
+        <button class="stab" data-side="view" role="tab" title="รูปแบบกราฟิก ตัวแปร ระนาบหน้าตัด"><svg class="ic"><use href="#i-eye"/></svg><span>แสดงผล</span></button>
+        <button class="icon-btn" id="btn-side" title="ซ่อน / แสดงแผงด้านขวา" aria-label="ซ่อนหรือแสดงแผงด้านขวา"><svg class="ic"><use href="#i-panel"/></svg></button>
+      </div>
+
+      <!-- วัตถุ -->
+      <div class="side-pane" id="side-obj" role="tabpanel">
+        <section class="sec" id="card-props">
+          <h3 class="sec-h" id="props-title">วัตถุในฉาก</h3>
           <div id="props"></div>
-        </div>
+        </section>
+      </div>
 
-        <div class="card">
-          <div class="card-h"><h3>การแสดงผล</h3></div>
-          <div class="form">
-            <div class="row">รูปแบบกราฟิก
-              <div class="seg" id="d-mode">
-                <button data-v="contour" class="on" title="ระบายสีเป็นขั้นบนระนาบหน้าตัด">Contour</button>
-                <button data-v="stream" title="เส้นทางลมที่ผ่านระนาบหน้าตัด (ไปและกลับ) สีตามตัวแปร">Streamline</button>
-                <button data-v="vector" title="ลูกศรทิศและความเร็วลมบนระนาบหน้าตัด สีตามตัวแปร">Vector</button>
-              </div>
-            </div>
-            <label class="row">ตัวแปร (สี)
-              <select id="d-field">
-                <option value="T">อุณหภูมิ (°C)</option>
-                <option value="dT">อุณหภูมิเกินอากาศภายนอก (°C)</option>
-                <option value="V">ความเร็วลม (m/s)</option>
-                <option value="P">ความดันเทียบบรรยากาศ (Pa)</option>
-                <option value="C">สัดส่วนลมร้อนจาก CDU (%)</option>
-              </select>
-            </label>
-            <div class="row">หน้าตัด
-              <div class="seg" id="d-axis">
-                <button data-v="x" class="on" title="ระนาบตั้ง ตั้งฉากแกน x">X</button>
-                <button data-v="z" title="ระนาบตั้ง ตั้งฉากแกน z">Z</button>
-                <button data-v="y" title="ระนาบนอน ที่ความสูง y">Y</button>
-              </div>
-            </div>
-            <label class="row">ตำแหน่ง <span class="mono val" id="d-pos-val">–</span></label>
-            <input type="range" id="d-pos" min="0" max="1" step="0.01" value="0.5">
-            <div class="checks">
-              <label><input type="checkbox" id="d-section" checked> ระนาบหน้าตัด</label>
-              <label><input type="checkbox" id="d-particles" checked> อนุภาคลม</label>
-              <label><input type="checkbox" id="d-iso" checked> ผิวลมร้อน</label>
-              <label title="ปิดไว้เพื่อไม่ให้ตัวหนังสือบังผล"><input type="checkbox" id="d-labels"> ป้ายชื่อ</label>
-            </div>
-            <div class="row">สี CDU ตาม T ลมเข้า (°C)
-              <span class="bands"><i class="chip chip-green"></i>≤<input type="number" id="b-green" step="0.5">
-              <i class="chip chip-red"></i>&gt;<input type="number" id="b-red" step="0.5"></span>
-            </div>
-            <p class="note">เขียว ≤ เกณฑ์แรก · เหลือง ระหว่างสองเกณฑ์ · แดง &gt; เกณฑ์ที่สอง (ค่าเริ่มต้น 40 / 46 °C ที่อากาศภายนอก 35 °C)</p>
-            <label class="row">ความทึบของวัตถุ <span class="mono val" id="d-opacity-val">ทึบ 100%</span></label>
-            <div class="opacity-row">
-              <button class="mini" data-op="0.35" title="มองทะลุเครื่องและผนัง">โปร่ง</button>
-              <input type="range" id="d-opacity" min="0.1" max="1" step="0.05" value="1">
-              <button class="mini" data-op="1">ทึบ</button>
-            </div>
-            <label class="row">ผิวลมร้อนที่ ΔT ≥ <span class="mono val" id="d-iso-val">2.0 °C</span></label>
-            <input type="range" id="d-iso-dt" min="0.5" max="8" step="0.5" value="2">
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-h"><h3>สภาพแวดล้อมและการคำนวณ</h3></div>
+      <!-- ตั้งค่า -->
+      <div class="side-pane" id="side-sim" role="tabpanel" hidden>
+        <section class="sec">
+          <h3 class="sec-h">สภาพแวดล้อม</h3>
           <div class="form">
             <label class="row">อุณหภูมิอากาศภายนอก (°C) <input type="number" id="s-amb" step="0.5" min="20" max="50"></label>
-            <label class="row">ความเร็วลม (m/s) — เท่ากันทั้งระนาบ <input type="number" id="s-wind" step="0.5" min="0" max="10"></label>
+            <label class="row" title="ความเร็วลมเข้าเท่ากันทั้งระนาบขอบต้นลม">ความเร็วลม (m/s) <input type="number" id="s-wind" step="0.5" min="0" max="10"></label>
             <label class="row">ลมพัดมาจากทิศ
               <select id="s-dir">
                 <option value="0">เหนือ (N)</option><option value="45">ตะวันออกเฉียงเหนือ</option>
@@ -215,7 +198,13 @@
                 <option value="270">ตะวันตก (W)</option><option value="315">ตะวันตกเฉียงเหนือ</option>
               </select>
             </label>
-            <label class="row">ขนาดเซลล์ (เมช)
+          </div>
+        </section>
+
+        <section class="sec">
+          <h3 class="sec-h">เมชและการคำนวณ</h3>
+          <div class="form">
+            <label class="row row-stack">ขนาดเซลล์ (เมช)
               <select id="s-cell">
                 <option value="0.5">0.50 ม. — ร่างเร็ว</option>
                 <option value="0.35">0.35 ม. — มาตรฐาน</option>
@@ -226,20 +215,21 @@
                 <option value="0.05">0.05 ม. — ละเอียดสุด (เฉพาะโดเมนเล็ก)</option>
               </select>
             </label>
-            <label class="row">รูปแบบเมช
+            <label class="row row-stack">รูปแบบเมช
               <select id="s-grade">
                 <option value="auto">ปรับความละเอียดอัตโนมัติ — ละเอียดรอบ CDU (แนะนำ)</option>
                 <option value="uniform">สม่ำเสมอ — เซลล์เท่ากันทั้งโดเมน</option>
               </select>
             </label>
-            <label class="row">เครื่องคำนวณ
-              <select id="s-backend" title="เลือกก่อนกด ▶ คำนวณ">
+            <label class="row row-stack">เครื่องคำนวณ
+              <select id="s-backend" title="เลือกก่อนกด คำนวณ">
                 <option value="cpu">CPU — WebAssembly</option>
                 <option value="gpu">GPU — การ์ดจอ (WebGPU)</option>
               </select>
             </label>
             <p class="note" id="backend-note"></p>
-            <p class="note">คำนวณจนกว่าจะลู่เข้า (ดูเกณฑ์ในแผง "คุณภาพการคำนวณ") — ไม่ต้องกำหนดเวลา</p>
+            <div class="mesh-info mono" id="mesh-info"></div>
+            <p class="note">คำนวณจนกว่าจะลู่เข้า (ดูเกณฑ์ที่หน้า ผลลัพธ์ → คุณภาพการคำนวณ) — ไม่ต้องกำหนดเวลา</p>
             <details>
               <summary>ขั้นสูง</summary>
               <label class="row">เพดานเวลาจำลอง กันไม่จบ (s) <input type="number" id="s-tmax" step="60" min="120" max="7200"></label>
@@ -249,12 +239,11 @@
               <label class="row">ขีดจำกัด T ลมเข้า (°C) <input type="number" id="p-tlim" step="0.5"></label>
               <p class="note">ค่าสมรรถนะเป็นค่าอ้างอิงโดยประมาณ ควรตรวจกับ Engineering Databook ของรุ่นที่ใช้</p>
             </details>
-            <div class="mesh-info mono" id="mesh-info"></div>
           </div>
-        </div>
+        </section>
 
-        <div class="card">
-          <div class="card-h"><h3>ขอบเขตโดเมน (Boundary)</h3></div>
+        <section class="sec">
+          <h3 class="sec-h">ขอบเขตโดเมน (Boundary)</h3>
           <table class="bc-table">
             <thead><tr><th>ด้าน</th><th>ชนิด</th><th class="n">ระยะจากวัตถุ (ม.)</th></tr></thead>
             <tbody>
@@ -268,33 +257,98 @@
           </table>
           <p class="note">เปิด = อากาศไหลเข้าออกได้ที่ความดันบรรยากาศ · ผนัง = ผนังทึบ (no-slip) · สมมาตร = ผนังลื่น ใช้แทนครึ่งโดเมนที่เหมือนกัน
             · ด้านที่เป็นผนัง/สมมาตรแสดงเป็นพื้นผิวสีในภาพ 3D</p>
-        </div>
-      </aside>
-    </div>
-   </div>
+        </section>
+      </div>
 
-    <!-- ── ผลลัพธ์ ── -->
-    <div class="results" id="results">
+      <!-- แสดงผล -->
+      <div class="side-pane" id="side-view" role="tabpanel" hidden>
+        <section class="sec">
+          <h3 class="sec-h">ผลบนระนาบหน้าตัด</h3>
+          <div class="form">
+            <div class="row row-block">รูปแบบกราฟิก
+              <div class="seg" id="d-mode">
+                <button data-v="contour" class="on" title="ระบายสีเป็นขั้นบนระนาบหน้าตัด">Contour</button>
+                <button data-v="stream" title="เส้นทางลมที่ผ่านระนาบหน้าตัด (ไปและกลับ) สีตามตัวแปร">Streamline</button>
+                <button data-v="vector" title="ลูกศรทิศและความเร็วลมบนระนาบหน้าตัด สีตามตัวแปร">Vector</button>
+              </div>
+            </div>
+            <label class="row row-stack">ตัวแปร (สี)
+              <select id="d-field">
+                <option value="T">อุณหภูมิ (°C)</option>
+                <option value="dT">อุณหภูมิเกินอากาศภายนอก (°C)</option>
+                <option value="V">ความเร็วลม (m/s)</option>
+                <option value="P">ความดันเทียบบรรยากาศ (Pa)</option>
+                <option value="C">สัดส่วนลมร้อนจาก CDU (%)</option>
+              </select>
+            </label>
+            <div class="row">หน้าตัดตั้งฉากแกน
+              <div class="seg" id="d-axis">
+                <button data-v="x" class="on" title="ระนาบตั้ง ตั้งฉากแกน x">X</button>
+                <button data-v="z" title="ระนาบตั้ง ตั้งฉากแกน z">Z</button>
+                <button data-v="y" title="ระนาบนอน ที่ความสูง y">Y</button>
+              </div>
+            </div>
+            <label class="row">ตำแหน่ง <span class="mono val" id="d-pos-val">–</span></label>
+            <input type="range" id="d-pos" min="0" max="1" step="0.01" value="0.5">
+          </div>
+        </section>
+
+        <section class="sec">
+          <h3 class="sec-h">สิ่งที่แสดงในภาพ</h3>
+          <div class="form">
+            <div class="checks">
+              <label class="chk"><input type="checkbox" id="d-section" checked><span>ระนาบหน้าตัด</span></label>
+              <label class="chk"><input type="checkbox" id="d-particles" checked><span>อนุภาคลม</span></label>
+              <label class="chk"><input type="checkbox" id="d-iso" checked><span>ผิวลมร้อน</span></label>
+              <label class="chk" title="ปิดไว้เพื่อไม่ให้ตัวหนังสือบังผล"><input type="checkbox" id="d-labels"><span>ป้ายชื่อ</span></label>
+            </div>
+            <label class="row">ผิวลมร้อนที่ ΔT ≥ <span class="mono val" id="d-iso-val">2.0 °C</span></label>
+            <input type="range" id="d-iso-dt" min="0.5" max="8" step="0.5" value="2">
+            <label class="row">ความทึบของวัตถุ <span class="mono val" id="d-opacity-val">ทึบ 100%</span></label>
+            <div class="opacity-row">
+              <button class="mini" data-op="0.35" title="มองทะลุเครื่องและผนัง">โปร่ง</button>
+              <input type="range" id="d-opacity" min="0.1" max="1" step="0.05" value="1">
+              <button class="mini" data-op="1">ทึบ</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="sec">
+          <h3 class="sec-h">สี CDU ตาม T ลมเข้า</h3>
+          <div class="form">
+            <div class="row">เกณฑ์ (°C)
+              <span class="bands"><i class="chip chip-green"></i>≤<input type="number" id="b-green" step="0.5">
+              <i class="chip chip-red"></i>&gt;<input type="number" id="b-red" step="0.5"></span>
+            </div>
+            <p class="note">เขียว ≤ เกณฑ์แรก · เหลือง ระหว่างสองเกณฑ์ · แดง &gt; เกณฑ์ที่สอง (ค่าเริ่มต้น 40 / 46 °C ที่อากาศภายนอก 35 °C)</p>
+          </div>
+        </section>
+      </div>
+    </aside>
+   </div>
+  </section>
+
+  <!-- ═════════════ ผลลัพธ์ ═════════════ -->
+  <section id="tab-results" class="tabpage page" hidden>
+    <div class="results page-inner" id="results">
       <div class="res-head">
         <h2>ผลการคำนวณ</h2>
         <span class="badge" id="res-badge">ยังไม่มีผล</span>
         <div class="spacer"></div>
-        <button id="btn-csv" class="ghost" disabled>ส่งออก CSV</button>
-        <button id="btn-report" class="ghost" disabled>รายงาน (HTML)</button>
-        <button id="btn-png" class="ghost">ภาพ 3D (PNG)</button>
+        <button id="btn-csv" disabled title="ตารางผลรายเครื่องเป็นไฟล์ CSV"><svg class="ic"><use href="#i-download"/></svg>CSV</button>
+        <button id="btn-report" disabled title="รายงาน HTML พร้อมภาพที่ Capture ไว้"><svg class="ic"><use href="#i-download"/></svg>รายงาน (HTML)</button>
+        <button id="btn-png" title="ภาพ 3 มิติของมุมมองปัจจุบัน"><svg class="ic"><use href="#i-download"/></svg>ภาพ 3D (PNG)</button>
       </div>
-      <div class="card captures" id="captures-card">
-        <div class="card-h"><h3>ภาพสำหรับรายงาน <span class="muted small" id="cap-count">(0)</span></h3>
-          <span class="cap-actions">
-            <button class="ghost mini" id="btn-cap-all" disabled>ดาวน์โหลดทุกภาพ</button>
-            <button class="ghost mini" id="btn-cap-clear" disabled>ล้างทั้งหมด</button>
-          </span>
-        </div>
-        <div class="cap-list" id="cap-list"><p class="muted small" style="margin:0">กด <b>📷 Capture</b> บนภาพ 3D เพื่อเก็บภาพหลายมุม (หมุน/เลือกแกน/เลื่อนหน้าตัดก่อนกด)
-          — ทุกภาพจะอยู่ในรายงาน HTML ตามลำดับ แก้คำบรรยายใต้ภาพได้</p></div>
+
+      <div class="empty-state" id="res-empty">
+        <svg class="ic"><use href="#i-chart"/></svg>
+        <b>ยังไม่มีผลการคำนวณ</b>
+        <span>วางแบบและตั้งค่าที่หน้า <b>แบบจำลอง</b> แล้วกด <b>คำนวณ</b> มุมขวาบน — ตาราง กราฟ และข้อสังเกตจะขึ้นที่หน้านี้ และเปลี่ยนแบบสดระหว่างคำนวณ</span>
       </div>
+
       <div class="kpis" id="kpis"></div>
-      <div class="table-wrap">
+
+      <div class="table-wrap table-card need-res">
         <table class="res-table" id="res-table">
           <thead>
             <tr>
@@ -307,76 +361,94 @@
           <tbody></tbody>
         </table>
       </div>
-      <div class="res-grid">
-        <div class="card">
-          <div class="card-h"><h3>อุณหภูมิลมเข้าคอยล์ตามเวลา</h3><span class="muted small" id="chart-note"></span></div>
-          <canvas id="chart" height="220"></canvas>
-        </div>
-        <div class="card">
-          <div class="card-h"><h3>คุณภาพการคำนวณ</h3></div>
-          <div id="quality" class="quality"></div>
-        </div>
-      </div>
-      <div class="res-grid">
-        <div class="card">
-          <div class="card-h"><h3>Residual</h3><span class="muted small">RMS ไร้มิติ สเกล log — ใช้ดูแนวโน้ม</span></div>
-          <canvas id="chart-res" height="220"></canvas>
-        </div>
-        <div class="card">
-          <div class="card-h"><h3>การลู่เข้าทำงานอย่างไร</h3></div>
-          <p class="small muted" style="margin:0">ลมร้อนเหนือ CDU กระเพื่อมตลอดเวลา residual จึงลดลงถึงระดับหนึ่งแล้วแกว่งอยู่ ไม่ลงถึงศูนย์
-            โปรแกรมจึงตัดสินการลู่เข้าจากค่าที่ใช้งานจริง — ค่าเฉลี่ย 10 วินาทีของ T ลมเข้าทุกโมดูลต้องนิ่งภายใน ±0.05 °C
-            สมดุลพลังงาน 95–105% และความคลาดเคลื่อนมวล ≤ 1% ผ่านครบต่อเนื่อง 6 ครั้ง (3 วินาทีจำลอง) จึงหยุดเอง
-            ถ้ายังไม่ผ่านจะคำนวณต่อไปเรื่อย ๆ จนถึงเพดานเวลา (ค่าเริ่มต้น 1,800 s)</p>
-        </div>
-      </div>
+
       <div class="res-grid">
         <div class="card">
           <div class="card-h"><h3>ข้อสังเกตและแนวทางแก้ไข</h3></div>
-          <ul id="advice" class="advice"><li class="muted">กด ▶ คำนวณ เพื่อดูผล</li></ul>
+          <ul id="advice" class="advice"><li class="muted">กด คำนวณ เพื่อดูผล</li></ul>
         </div>
         <div class="card">
           <div class="card-h"><h3>เกณฑ์อุณหภูมิลมกลับ</h3><span class="muted small">สี CDU ในภาพ 3D และตาราง</span></div>
           <div id="criteria"></div>
         </div>
-        <div class="card remark small">
-          <div class="card-h"><h3>หมายเหตุ</h3></div>
-          <p><b>REMARK :</b></p>
-          <ol>
-            <li>เนื่องจากการจำลองการไหลของอากาศที่เกิดขึ้น เป็นการทดลองด้วย PROGRAM COMPUTER เท่านั้น วัตถุประสงค์เพื่อใช้ในการป้องกันหรือหาแนวทางแก้ไขปัญหาเรื่องของการระบายความร้อน ซึ่งไม่ใช่สภาวะอากาศจริงที่เกิดขึ้นกับ CDU</li>
-            <li>ทั้งนี้ทิศทางลมที่เข้ามาจะขึ้นอยู่กับฤดูกาล และช่วงเวลาในขณะนั้นด้วย ซึ่งจะแตกต่างกับ CFD ที่มีอยู่เพียงทิศทางเดียว ดังนั้นควรจะทำการทดลองติดตั้ง MOCK UP ROOM เพื่อตรวจสอบ ผลที่ได้จาก CFD อีกครั้ง</li>
-          </ol>
-          <p lang="en">Please noted that this simulation is done on the computer system that analyses the air flow pattern. A/C equipment under simulation only applicable to DAIKIN system and is not based on any actual experiments. Therefore, the simulation does not guarantee the phenomena at the actual installation site.</p>
+      </div>
+
+      <div class="res-grid even need-res">
+        <div class="card">
+          <div class="card-h"><h3>อุณหภูมิลมเข้าคอยล์ตามเวลา</h3><span class="muted small" id="chart-note"></span></div>
+          <canvas id="chart" height="220"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-h"><h3>Residual</h3><span class="muted small">RMS ไร้มิติ สเกล log — ใช้ดูแนวโน้ม</span></div>
+          <canvas id="chart-res" height="220"></canvas>
+        </div>
+      </div>
+
+      <div class="res-grid even">
+        <div class="card">
+          <div class="card-h"><h3>คุณภาพการคำนวณ</h3></div>
+          <div id="quality" class="quality"></div>
+          <details class="explain">
+            <summary>การลู่เข้าทำงานอย่างไร</summary>
+            <p class="small muted">ลมร้อนเหนือ CDU กระเพื่อมตลอดเวลา residual จึงลดลงถึงระดับหนึ่งแล้วแกว่งอยู่ ไม่ลงถึงศูนย์
+              โปรแกรมจึงตัดสินการลู่เข้าจากค่าที่ใช้งานจริง — ค่าเฉลี่ย 10 วินาทีของ T ลมเข้าทุกโมดูลต้องนิ่งภายใน ±0.05 °C
+              สมดุลพลังงาน 95–105% และความคลาดเคลื่อนมวล ≤ 1% ผ่านครบต่อเนื่อง 6 ครั้ง (3 วินาทีจำลอง) จึงหยุดเอง
+              ถ้ายังไม่ผ่านจะคำนวณต่อไปเรื่อย ๆ จนถึงเพดานเวลา (ค่าเริ่มต้น 1,800 s)</p>
+          </details>
         </div>
         <div class="card">
           <div class="card-h"><h3>เปรียบเทียบทางเลือก</h3><span class="muted small">ผลที่คำนวณเสร็จในรอบนี้</span></div>
-          <table class="cmp-table" id="cmp-table">
-            <thead><tr><th>ทางเลือก</th><th class="n">เมช</th><th class="n">ΔT สูงสุด</th><th class="n">ΔT เฉลี่ย</th><th class="n">Capacity รวม</th><th></th></tr></thead>
-            <tbody><tr><td colspan="6" class="muted">ยังไม่มี</td></tr></tbody>
-          </table>
+          <div class="table-wrap">
+            <table class="cmp-table" id="cmp-table">
+              <thead><tr><th>ทางเลือก</th><th class="n">เมช</th><th class="n">ΔT สูงสุด</th><th class="n">ΔT เฉลี่ย</th><th class="n">Capacity รวม</th><th></th></tr></thead>
+              <tbody><tr><td colspan="6" class="muted">ยังไม่มี</td></tr></tbody>
+            </table>
+          </div>
         </div>
+      </div>
+
+      <div class="card captures" id="captures-card">
+        <div class="card-h"><h3>ภาพสำหรับรายงาน <span class="muted small" id="cap-count">(0)</span></h3>
+          <span class="cap-actions">
+            <button class="ghost mini" id="btn-cap-all" disabled>ดาวน์โหลดทุกภาพ</button>
+            <button class="ghost mini" id="btn-cap-clear" disabled>ล้างทั้งหมด</button>
+          </span>
+        </div>
+        <div class="cap-list" id="cap-list"></div>
+      </div>
+
+      <div class="card remark small">
+        <div class="card-h"><h3>หมายเหตุ</h3></div>
+        <p><b>REMARK :</b></p>
+        <ol>
+          <li>เนื่องจากการจำลองการไหลของอากาศที่เกิดขึ้น เป็นการทดลองด้วย PROGRAM COMPUTER เท่านั้น วัตถุประสงค์เพื่อใช้ในการป้องกันหรือหาแนวทางแก้ไขปัญหาเรื่องของการระบายความร้อน ซึ่งไม่ใช่สภาวะอากาศจริงที่เกิดขึ้นกับ CDU</li>
+          <li>ทั้งนี้ทิศทางลมที่เข้ามาจะขึ้นอยู่กับฤดูกาล และช่วงเวลาในขณะนั้นด้วย ซึ่งจะแตกต่างกับ CFD ที่มีอยู่เพียงทิศทางเดียว ดังนั้นควรจะทำการทดลองติดตั้ง MOCK UP ROOM เพื่อตรวจสอบ ผลที่ได้จาก CFD อีกครั้ง</li>
+        </ol>
+        <p lang="en">Please noted that this simulation is done on the computer system that analyses the air flow pattern. A/C equipment under simulation only applicable to DAIKIN system and is not based on any actual experiments. Therefore, the simulation does not guarantee the phenomena at the actual installation site.</p>
       </div>
     </div>
   </section>
 
-  <!-- ═════════════ README ═════════════ -->
-  <section id="tab-readme" class="tabpage readme" hidden>
+  <!-- ═════════════ คู่มือ ═════════════ -->
+  <section id="tab-readme" class="tabpage page readme" hidden>
     <article>
+      <p class="lead">จำลองการไหลของลมร้อนจากคอยล์ร้อน Daikin VRV (6A / IV S / S Hi) และ Split type ในลานวางเครื่อง — หาการวนกลับของลมร้อน (hot-air recirculation)
+        อุณหภูมิลมเข้าคอยล์แต่ละเครื่อง และผลต่อ capacity</p>
       <h2>ใช้งานอย่างไร</h2>
       <ol>
-        <li><b>วางแบบ</b> — กด <kbd>+ CDU</kbd> แล้วคลิกบนพื้นเพื่อวางเครื่อง (คลิกต่อได้หลายตัว, <kbd>Esc</kbd> เพื่อจบ)
-          · <kbd>+ ผนัง / louver</kbd> คลิกจุดเริ่มแล้วคลิกจุดถัดไป ลากต่อเป็นแนวรอบลานได้ (กด <kbd>Shift</kbd> ล็อกแนวตรง, ดับเบิลคลิกหรือ <kbd>Esc</kbd> เพื่อจบ, คลิกกลับจุดแรกเพื่อปิดรอบ)
-          · <kbd>+ อาคาร</kbd> คลิกมุมหนึ่งแล้วคลิกมุมตรงข้าม
-          · <kbd>+ พื้น / หลังคา</kbd> คลิกสองมุมเพื่อวางแผ่นพื้นยกหรือหลังคา แล้วตั้งระดับความสูง ความหนา และ % ช่องเปิด (ตะแกรง) ที่แผงด้านขวา
+        <li><b>วางแบบ</b> — เลือก <b>CDU</b> ที่แถบเครื่องมือด้านซ้าย แล้วคลิกบนพื้นเพื่อวางเครื่อง (คลิกต่อได้หลายตัว, <kbd>Esc</kbd> เพื่อจบ)
+          · <b>ผนัง/louver</b> คลิกจุดเริ่มแล้วคลิกจุดถัดไป ลากต่อเป็นแนวรอบลานได้ (กด <kbd>Shift</kbd> ล็อกแนวตรง, ดับเบิลคลิกหรือ <kbd>Esc</kbd> เพื่อจบ, คลิกกลับจุดแรกเพื่อปิดรอบ)
+          · <b>อาคาร</b> คลิกมุมหนึ่งแล้วคลิกมุมตรงข้าม
+          · <b>พื้น/หลังคา</b> คลิกสองมุมเพื่อวางแผ่นพื้นยกหรือหลังคา แล้วตั้งระดับความสูง ความหนา และ % ช่องเปิด (ตะแกรง) ที่แผงด้านขวา
           · ระหว่างลากผนัง พิมพ์ตัวเลขแล้วกด <kbd>Enter</kbd> เพื่อกำหนดความยาวช่วงนั้นตามทิศเมาส์</li>
         <li><b>ปรับแต่ง</b> — คลิกเลือกวัตถุ แล้วแก้ค่าที่แผงด้านขวา: หมวดและรุ่นเครื่อง (VRV: 6A / IV S / S Hi · Split type: FTKB-A) ทิศหน้าเครื่อง ความสูงฐาน
           Hood (VRV 6A: แบบตรงหรือท่อโค้ง 90° กำหนดความสูง ระยะยื่น และทิศปากลม) · รุ่นเป่าหน้า (VRV IV S / S Hi / Split):
           ทิศทางลมร้อนออกจากเครื่อง ตรงหรือเบี่ยง 45° ขึ้น/ลง/ซ้าย/ขวา และความยาว Hood
           ความสูงและ % พื้นที่เปิดของ louver ความยาวผนัง (พิมพ์ค่าได้ทันที) ฯลฯ ลากวัตถุบนพื้นเพื่อย้าย (ขยับทีละ 0.1 ม., กด <kbd>Alt</kbd> ค้างเพื่อวางละเอียด 1 ซม.)</li>
-        <li><b>คำนวณ</b> — ตั้งอุณหภูมิอากาศภายนอก ลม และขนาดเซลล์ แล้วกด <kbd>▶ คำนวณ</kbd> โปรแกรมจะหยุดเองเมื่อผลนิ่ง
+        <li><b>คำนวณ</b> — ตั้งอุณหภูมิอากาศภายนอก ลม และขนาดเซลล์ที่แท็บ <b>ตั้งค่า</b> ของแผงด้านขวา แล้วกด <b>คำนวณ</b> มุมขวาบน โปรแกรมจะหยุดเองเมื่อผลนิ่ง
           หรือครบเวลาจำลองสูงสุด ระหว่างคำนวณจะเห็นผลเปลี่ยนแบบสด</li>
-        <li><b>อ่านผล</b> — ตารางแสดงอุณหภูมิลมเข้าคอยล์ของแต่ละเครื่อง ΔT เทียบอากาศภายนอก สัดส่วนลมวนกลับ และ capacity ที่เหลือ
-          เลื่อนระนาบหน้าตัดโดยลากปุ่มกลมบนขอบระนาบ ชี้เมาส์บนระนาบเพื่ออ่านค่า ณ จุดนั้น</li>
+        <li><b>อ่านผล</b> — หน้า <b>ผลลัพธ์</b> มีตารางแสดงอุณหภูมิลมเข้าคอยล์ของแต่ละเครื่อง ΔT เทียบอากาศภายนอก สัดส่วนลมวนกลับ และ capacity ที่เหลือ
+          เลื่อนระนาบหน้าตัดโดยลากปุ่มกลมบนขอบระนาบ ชี้เมาส์บนระนาบเพื่ออ่านค่า ณ จุดนั้น (แสดงที่แถบสถานะด้านล่าง)</li>
         <li><b>เปรียบเทียบ</b> — แก้แบบ (เช่น เพิ่มท่อเป่าลม เปิด louver กว้างขึ้น ขยับเครื่อง) แล้วคำนวณใหม่ ตารางเปรียบเทียบจะเก็บผลทุกรอบไว้</li>
       </ol>
       <p class="kbd-list"><b>คีย์ลัด</b> <kbd>V</kbd> เลือก · <kbd>C</kbd> CDU · <kbd>W</kbd>/<kbd>L</kbd>/<kbd>Ctrl+L</kbd> ผนัง · <kbd>B</kbd> อาคาร · <kbd>F</kbd> พื้น/หลังคา · <kbd>R</kbd> หมุน 90° ทวนเข็ม · <kbd>P</kbd> Capture ภาพ ·
@@ -432,7 +504,7 @@
       </div>
       <p>ความร้อนที่ปล่อยออกขึ้นกับ T<sub>in</sub> ของเครื่องเอง จึงคำนวณใหม่ทุกสเต็ป (ป้อนกลับ): ลมร้อนวนกลับมาก → T<sub>in</sub> สูง
         → capacity ลด กำลังไฟฟ้าเพิ่ม → ปล่อยความร้อนมากขึ้น ค่าเริ่มต้น T<sub>ref</sub> = 35 °C, k<sub>cap</sub> = 2%/°C, k<sub>pow</sub> = 2.5%/°C
-        แก้ได้ในหัวข้อ "ขั้นสูง"</p>
+        แก้ได้ที่ <b>ตั้งค่า → ขั้นสูง</b></p>
 
       <h2>เกณฑ์อุณหภูมิลมกลับ (สี CDU)</h2>
       <ul>
@@ -440,7 +512,7 @@
         <li><b style="color:#b8860b">เหลือง</b> — อุณหภูมิลมกลับที่อยู่ระหว่าง 40–46 องศาเซลเซียส คอยล์ร้อนสามารถทำงานได้ แต่ประสิทธิภาพการทำงานของเครื่องปรับอากาศจะลดลง</li>
         <li><b style="color:#d1332e">แดง</b> — อุณหภูมิลมกลับที่เกิน 46 องศาเซลเซียส คอยล์ร้อนไม่สามารถระบายความร้อนได้ ควรปรับเปลี่ยนลักษณะการวางคอยล์ร้อน</li>
       </ul>
-      <p>เกณฑ์ 40 / 46 °C เป็นค่าเริ่มต้น ปรับได้ที่ "สี CDU ตาม T ลมเข้า" ในแผงการแสดงผล</p>
+      <p>เกณฑ์ 40 / 46 °C เป็นค่าเริ่มต้น ปรับได้ที่ "สี CDU ตาม T ลมเข้า" ในแท็บ <b>แสดงผล</b> ของแผงด้านขวา</p>
 
       <h2>ตัวชี้วัดในตาราง</h2>
       <table class="doc">
@@ -483,7 +555,7 @@
         แล้วคำนวณซ้ำ ตารางเปรียบเทียบจะเก็บผลทั้งสองรอบ</p>
 
       <h2>ความเร็วในการคำนวณ — เลือกเครื่องคำนวณ</h2>
-      <p>เลือกที่ <b>สภาพแวดล้อมและการคำนวณ → เครื่องคำนวณ</b> ก่อนกด <kbd>▶ คำนวณ</kbd> แถบสถานะด้านล่างบอกสิ่งที่ใช้อยู่จริง</p>
+      <p>เลือกที่แผงด้านขวา <b>ตั้งค่า → เครื่องคำนวณ</b> ก่อนกด <b>คำนวณ</b> แถบสถานะด้านล่างบอกสิ่งที่ใช้อยู่จริง</p>
       <table class="doc">
         <tr><th>ทางเลือก</th><th>เปิดไฟล์ด้วยดับเบิลคลิก (file://)</th><th>เปิดผ่าน http:// หรือ https://</th></tr>
         <tr><td><b>CPU — WebAssembly</b></td><td>1 เธรด</td><td>ทุกแกนของเครื่อง ผลเหมือนกันทุกบิตไม่ว่ากี่เธรด</td></tr>
@@ -511,7 +583,7 @@
         <li>เนื่องจากการจำลองการไหลของอากาศที่เกิดขึ้น เป็นการทดลองด้วย PROGRAM COMPUTER เท่านั้น วัตถุประสงค์เพื่อใช้ในการป้องกันหรือหาแนวทางแก้ไขปัญหาเรื่องของการระบายความร้อน ซึ่งไม่ใช่สภาวะอากาศจริงที่เกิดขึ้นกับ CDU</li>
         <li>ทิศทางลมที่เข้ามาจะขึ้นอยู่กับฤดูกาล และช่วงเวลาในขณะนั้นด้วย ซึ่งจะแตกต่างกับ CFD ที่มีอยู่เพียงทิศทางเดียว ดังนั้นควรจะทำการทดลองติดตั้ง MOCK UP ROOM เพื่อตรวจสอบ ผลที่ได้จาก CFD อีกครั้ง</li>
         <li>แบบจำลองความปั่นป่วนเป็น LES แบบหยาบ (Smagorinsky) ไม่มี wall function และไม่คิดการแผ่รังสีจากหลังคา/ผนังที่ร้อน</li>
-        <li>kW อัตราลม ขนาด และชุดผสมของแต่ละรุ่นมาจาก catalog EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRMT332104A (VRV S Hi), EDTTH042558 (Split FTKB-A — EER ใช้ COP จาก catalog) แต่ EER (3.5) และสมการ capacity ตามอุณหภูมิเป็นค่าประมาณ — แก้ได้ในหัวข้อขั้นสูง และแก้อัตราลมรายเครื่องได้</li>
+        <li>kW อัตราลม ขนาด และชุดผสมของแต่ละรุ่นมาจาก catalog EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRMT332104A (VRV S Hi), EDTTH042558 (Split FTKB-A — EER ใช้ COP จาก catalog) แต่ EER (3.5) และสมการ capacity ตามอุณหภูมิเป็นค่าประมาณ — แก้ได้ที่ ตั้งค่า → ขั้นสูง และแก้อัตราลมรายเครื่องได้</li>
         <li>ผนัง/อาคารแบบเฉียงถูกแทนด้วยเซลล์แบบขั้นบันได ขนาดที่เล็กกว่าเซลล์จะถูกปัดเป็นหนึ่งเซลล์</li>
         <li>ลมพัดผ่านโดเมนแบบคงที่ ไม่มีความปั่นป่วนของลมบรรยากาศ กรณีไม่มีลม (0 m/s) มักเป็นกรณีแย่ที่สุด</li>
       </ul>
@@ -521,11 +593,59 @@
     </article>
   </section>
 
-  <footer class="foot muted small">
-    <span id="foot-mode">คำนวณใน Web Worker</span>
-    <span>ข้อมูลโปรเจกต์อยู่ในเบราว์เซอร์นี้เท่านั้น — บันทึกเป็นไฟล์ .json เพื่อเก็บไว้</span>
+  </main>
+
+  <!-- ═════════════ แถบสถานะ ═════════════ -->
+  <footer class="statusbar">
+    <span class="sb-left">
+      <span id="hint">คลิกเลือกวัตถุ · ลากเพื่อย้าย · ลากพื้นที่ว่างเพื่อหมุนมุมมอง · คลิกขวาลากเพื่อเลื่อน · สกรอลล์เพื่อซูม</span>
+      <span class="probe mono" id="probe" hidden></span>
+    </span>
+    <span class="sb-right" id="foot-mode">คำนวณใน Web Worker</span>
   </footer>
 </div>
+
+<!-- ตารางคีย์ลัด -->
+<div class="modal" id="keys-pop" hidden>
+  <div class="keys-pop" role="dialog" aria-label="คีย์ลัด">
+    <button class="keys-x" title="ปิด (Esc)" aria-label="ปิด">×</button>
+    <h3>คีย์ลัด</h3>
+    <div class="keys-grid">
+      <b>วาง / เครื่องมือ</b>
+      <span><kbd>V</kbd> เลือก / ย้าย</span>
+      <span><kbd>C</kbd> วาง CDU</span>
+      <span><kbd>W</kbd> <kbd>L</kbd> <kbd>Ctrl+L</kbd> ผนัง / louver (Line)</span>
+      <span><kbd>B</kbd> อาคาร</span>
+      <span><kbd>F</kbd> พื้น / หลังคา</span>
+      <span><kbd>M</kbd> Move — จุดฐาน → จุดที่สอง / พิมพ์ระยะ</span>
+      <span><kbd>O</kbd> Offset — ระยะ ↵ → วัตถุ → ฝั่ง</span>
+      <span><kbd>Shift+C</kbd> Copy — จุดฐาน → วางหลายครั้ง</span>
+      <span><kbd>Shift+M</kbd> Mirror — สองจุดของเส้นสะท้อน</span>
+      <span><kbd>Shift+R</kbd> Rotate — จุดฐาน → มุม ↵</span>
+      <span><kbd>F8</kbd> Ortho ล็อกแนวแกน</span>
+      <span><kbd>Shift</kbd> สลับ Ortho ชั่วคราว</span>
+      <span>ระหว่างลากผนัง พิมพ์ความยาว + <kbd>Enter</kbd></span>
+      <span><kbd>Esc</kbd> จบเส้น / ออกจากเครื่องมือ</span>
+      <b>แก้ไข</b>
+      <span><kbd>Ctrl+C</kbd> คัดลอก</span>
+      <span><kbd>Ctrl+X</kbd> ตัด</span>
+      <span><kbd>Ctrl+V</kbd> วาง ณ ตำแหน่งเมาส์</span>
+      <span><kbd>Ctrl+D</kbd> ทำสำเนา</span>
+      <span><kbd>R</kbd> หมุน 90° ทวนเข็ม</span>
+      <span><kbd>Delete</kbd> ลบ</span>
+      <span>ลูกศร ขยับ 0.1 ม. (<kbd>Shift</kbd> 1 ม.)</span>
+      <span><kbd>Tab</kbd> เลือกวัตถุถัดไป</span>
+      <span><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> เลิกทำ / ทำซ้ำ</span>
+      <b>มุมมอง / คำนวณ</b>
+      <span><kbd>1</kbd>–<kbd>6</kbd> 3D เหนือ ใต้ ออก ตก Top</span>
+      <span><kbd>P</kbd> Capture ภาพ</span>
+      <span><kbd>Space</kbd> คำนวณ / หยุด</span>
+      <span><kbd>Ctrl+S</kbd> บันทึก</span>
+      <span><kbd>?</kbd> เปิด/ปิดหน้านี้</span>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden></div>
 <script type="module" src="src/main.js"></script>
 </body>

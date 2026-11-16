@@ -176,7 +176,9 @@ export class Viewer {
       const Rc = Math.max(span * 1.6 / Math.max(1, aspect), span * 0.9, d.H * 1.6) + depth * 0.5;
       this.persp.position.set(cx + dx * Rc, Rc * 0.7, cz + dz * Rc);
     } else {
-      this.persp.position.set(cx - R * 0.55, R * 0.62, cz + R * 0.95);
+      // ภาพแคบ/สูง (แผงด้านข้างกว้าง จอแนวตั้ง): ถอยกล้องให้เห็นลานเต็มความกว้างเท่ากับภาพสัดส่วน 1.6
+      const fit = R * Math.max(1, 1.6 / (this.persp.aspect || 1.6));
+      this.persp.position.set(cx - fit * 0.55, fit * 0.62, cz + fit * 0.95);
     }
     this.persp.up.set(0, 1, 0);
     c.target.set(cx, cy, cz);
@@ -1199,7 +1201,7 @@ export class Viewer {
         <div class="pop-row"><span>capacity ที่ได้</span><span class="mono">${(u.capF * 100).toFixed(1)}%</span></div>`;
       if (u.modules.length > 1)
         html += `<div class="pop-mods">${u.modules.map((q, i) => `<span>${chip(q.Tin)}โมดูล ${i + 1}: <b class="mono">${q.Tin.toFixed(1)} °C</b></span>`).join('')}</div>`;
-    } else html += `<div class="pop-row muted">ยังไม่มีผล — กด ▶ คำนวณ เพื่อดูอุณหภูมิลมกลับ</div>`;
+    } else html += `<div class="pop-row muted">ยังไม่มีผล — กด คำนวณ เพื่อดูอุณหภูมิลมกลับ</div>`;
     el.innerHTML = html;
     el.hidden = false;
   }
