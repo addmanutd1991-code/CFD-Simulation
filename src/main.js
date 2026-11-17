@@ -398,7 +398,7 @@ function renderProps() {
     <label class="row">${L('ชื่อ', 'Name')} <input type="text" data-k="name" value="${esc(o.name)}"></label>`;
   if (o.type === 'cdu') {
     const m = getModel(o.model);
-    const opt = x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.indoor ? x.indoor + ' / ' : ''}${x.id}${seriesOf(x).cat === 'split' ? ` (HxWxD - ${x.height}x${x.width}x${x.depth})` : ''} — ${x.hp} HP · ${x.kw.toFixed(1)} kW</option>`;
+    const opt = x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.indoor ? x.indoor + ' / ' : ''}${x.id}${seriesOf(x).cat === 'split' ? ` (HxWxD - ${x.height}x${x.width}x${x.depth}) — ` : ` — ${x.hp} HP · `}${x.kw.toFixed(1)} kW</option>`;
     // หมวดหมู่ (VRV / Split type) เลือกก่อน แล้วรายการรุ่นแสดงเฉพาะหมวดนั้น
     const cat = seriesOf(m).cat;
     const groups = SERIES.filter(sr => sr.cat === cat).flatMap(sr => {
@@ -1864,7 +1864,7 @@ function bindUI() {
 
 function renderModelTable() {
   const cat = m => CATEGORIES.find(c => c.key === seriesOf(m).cat).label;
-  const rows = MODELS.map(m => `<tr><td>${cat(m)}</td><td>${seriesOf(m).label}</td><td>${m.indoor ? m.indoor + ' / ' : ''}${m.id}</td><td class="n">${m.hp}</td><td>${m.modules.length > 1 ? m.modules.join(' + ') : '—'}</td>
+  const rows = MODELS.map(m => `<tr><td>${cat(m)}</td><td>${seriesOf(m).label}</td><td>${m.indoor ? m.indoor + ' / ' : ''}${m.id}</td><td class="n">${seriesOf(m).cat === 'split' ? '—' : m.hp}</td><td>${m.modules.length > 1 ? m.modules.join(' + ') : '—'}</td>
     <td class="n">${m.kw.toFixed(1)}</td><td class="n">${m.cmm}</td><td class="n">${m.eer.toFixed(2)}</td>
     <td class="n">${m.width} × ${m.height} × ${m.depth}</td><td class="n">${m.fans}</td><td>${m.discharge === 'front' ? L('หน้า', 'Front') : L('บน', 'Top')}</td></tr>`).join('');
   $('#model-table').innerHTML = `<tr><th>${L('หมวด', 'Category')}</th><th>${L('ซีรีส์', 'Series')}</th><th>${L('รุ่น', 'Model')}</th><th class="n">HP</th><th>${L('โมดูล', 'Modules')}</th><th class="n">kW</th><th class="n">m³/min</th><th class="n">EER</th><th class="n">${L('ก × ส × ล (มม.)', 'W × H × D (mm)')}</th><th class="n">${L('พัดลม', 'Fans')}</th><th>${L('ลมออก', 'Discharge')}</th></tr>${rows}`;
