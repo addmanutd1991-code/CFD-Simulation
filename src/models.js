@@ -11,8 +11,8 @@
  *     ตำแหน่งและขนาดหน้ากากพัดลมประมาณจากแบบ Dimensions ของ catalog
  *   Split type FTKB-A (คอยล์ร้อน RKB09/12AV2S) catalog EDTTH042558 — เป่าลมออกด้านหน้า 461 × 650 × 244 mm
  *     EER ใช้ COP ที่พิกัดจาก catalog (3.09 / 3.10)
- *   Split type คอยล์ร้อน (CDU) RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S — Specification ของ Daikin
- *     เก็บเฉพาะคอยล์ร้อน (ไม่รวมคอยล์เย็น) · ขนาดตัวเครื่องต่างกันรายรุ่น 3 แบบ (ดู SPLIT_BODY)
+ *   Split type คอยล์ร้อน (CDU) RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S, RKM-YV2S, RKQ-YV2S, RKZ-YV2S
+ *     — Specification ของ Daikin · เก็บเฉพาะคอยล์ร้อน (ไม่รวมคอยล์เย็น) · ขนาดตัวเครื่องต่างกันรายรุ่น 4 แบบ (ดู SPLIT_BODY)
  *     อัตราลมใช้ค่า H ของคอยล์ร้อน · EER ใช้ COP ที่พิกัด
  * EER ของ VRV ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
  */
@@ -94,6 +94,7 @@ const SPLIT_BODY = {
   S: { h: 418, w: 695, d: 244, fan: { lx: -0.08, y: 0.21, s: 0.38, dia: 0.36 } },
   M: { h: 550, w: 675, d: 284, fan: { lx: -0.07, y: 0.27, s: 0.46, dia: 0.44 } },
   L: { h: 595, w: 845, d: 300, fan: { lx: -0.10, y: 0.29, s: 0.50, dia: 0.48 } },
+  XL: { h: 695, w: 930, d: 350, fan: { lx: -0.12, y: 0.34, s: 0.58, dia: 0.55 } },
 };
 const HP_OF = { '09': 1, 12: 1.5, 15: 1.75, 18: 2, 24: 2.5 };
 /** [รหัสรุ่น, kW, m³/min (H), COP, ตัวเครื่อง] */
@@ -118,6 +119,18 @@ Object.assign(FRONT_SERIES, {
     ['RKF09YV2S', 2.7, 17.8, 3.25, 'S'], ['RKF12YV2S', 3.6, 26.5, 3.21, 'M'], ['RKF15YV2S', 4.4, 35.8, 3.33, 'L'],
     ['RKF18YV2S', 5.3, 45.1, 3.19, 'L'], ['RKF24YV2S', 7.1, 45.1, 3.18, 'L'],
   ]),
+  RKM: splitSeries('Split RKM-YV2S', 'RKM-YV2S', [
+    ['RKM09YV2S', 2.7, 25.4, 4.15, 'M'], ['RKM12YV2S', 3.6, 26.5, 3.64, 'M'], ['RKM15YV2S', 4.4, 35.8, 3.93, 'L'],
+    ['RKM18YV2S', 5.3, 35.8, 3.71, 'L'], ['RKM24YV2S', 7.1, 45.1, 3.33, 'L'],
+  ]),
+  RKQ: splitSeries('Split RKQ-YV2S', 'RKQ-YV2S', [
+    ['RKQ09YV2S', 2.7, 15.1, 3.14, 'S'], ['RKQ12YV2S', 3.6, 25.5, 3.19, 'M'], ['RKQ15YV2S', 4.4, 27.4, 3.18, 'M'],
+    ['RKQ18YV2S', 5.3, 35.0, 3.05, 'M'], ['RKQ24YV2S', 6.0, 45.6, 3.11, 'L'],
+  ]),
+  RKZ: splitSeries('Split RKZ-YV2S', 'RKZ-YV2S', [
+    ['RKZ09YV2S', 2.7, 35.8, 5.19, 'L'], ['RKZ12YV2S', 3.6, 35.8, 4.80, 'L'], ['RKZ15YV2S', 4.4, 35.8, 4.11, 'L'],
+    ['RKZ18YV2S', 5.3, 66.8, 4.02, 'XL'], ['RKZ24YV2S', 7.1, 66.8, 3.41, 'XL'],
+  ]),
 });
 
 /** หมวดหมู่เครื่อง — เมนูเลือกรุ่นแยก VRV กับ Split type */
@@ -136,6 +149,9 @@ export const SERIES = [
   { key: 'RKC', cat: 'split', label: 'Split RKC-ZV2S', code: 'RKC-ZV2S', discharge: 'front', catalog: 'RKC-ZV2S Specification' },
   { key: 'RKD', cat: 'split', label: 'Split RKD-ZV2S', code: 'RKD-ZV2S', discharge: 'front', catalog: 'RKD-ZV2S Specification' },
   { key: 'RKF', cat: 'split', label: 'Split RKF-YV2S', code: 'RKF-YV2S', discharge: 'front', catalog: 'RKF-YV2S Specification' },
+  { key: 'RKM', cat: 'split', label: 'Split RKM-YV2S', code: 'RKM-YV2S', discharge: 'front', catalog: 'RKM-YV2S Specification' },
+  { key: 'RKQ', cat: 'split', label: 'Split RKQ-YV2S', code: 'RKQ-YV2S', discharge: 'front', catalog: 'RKQ-YV2S Specification' },
+  { key: 'RKZ', cat: 'split', label: 'Split RKZ-YV2S', code: 'RKZ-YV2S', discharge: 'front', catalog: 'RKZ-YV2S Specification' },
 ];
 export function seriesOf(model) { return SERIES.find(s => s.key === model.series) || SERIES[0]; }
 
