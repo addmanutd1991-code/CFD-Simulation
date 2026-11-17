@@ -11,6 +11,9 @@
  *     ตำแหน่งและขนาดหน้ากากพัดลมประมาณจากแบบ Dimensions ของ catalog
  *   Split type FTKB-A (คอยล์ร้อน RKB09/12AV2S) catalog EDTTH042558 — เป่าลมออกด้านหน้า 461 × 650 × 244 mm
  *     EER ใช้ COP ที่พิกัดจาก catalog (3.09 / 3.10)
+ *   Split type คอยล์ร้อน (CDU) RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S — Specification ของ Daikin
+ *     เก็บเฉพาะคอยล์ร้อน (ไม่รวมคอยล์เย็น) · ขนาดตัวเครื่องต่างกันรายรุ่น 3 แบบ (ดู SPLIT_BODY)
+ *     อัตราลมใช้ค่า H ของคอยล์ร้อน · EER ใช้ COP ที่พิกัด
  * EER ของ VRV ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
  */
 
@@ -84,6 +87,39 @@ const FRONT_SERIES = {
   },
 };
 
+/**
+ * ตัวเครื่องคอยล์ร้อน Split type (H × W × D mm) และหน้ากากพัดลมโดยประมาณ — ใช้ร่วมกันหลายรุ่น
+ */
+const SPLIT_BODY = {
+  S: { h: 418, w: 695, d: 244, fan: { lx: -0.08, y: 0.21, s: 0.38, dia: 0.36 } },
+  M: { h: 550, w: 675, d: 284, fan: { lx: -0.07, y: 0.27, s: 0.46, dia: 0.44 } },
+  L: { h: 595, w: 845, d: 300, fan: { lx: -0.10, y: 0.29, s: 0.50, dia: 0.48 } },
+};
+const HP_OF = { '09': 1, 12: 1.5, 15: 1.75, 18: 2, 24: 2.5 };
+/** [รหัสรุ่น, kW, m³/min (H), COP, ตัวเครื่อง] */
+function splitSeries(label, code, rows) {
+  const units = rows.map(([id, kw, cmm, eer, b]) => ({ id, hp: HP_OF[id.slice(3, 5)], kw, cmm, eer, body: SPLIT_BODY[b] }));
+  const b0 = units[0].body;
+  return { label, code, h: b0.h, w: b0.w, d: b0.d, fan: b0.fan, units };
+}
+Object.assign(FRONT_SERIES, {
+  RKB: splitSeries('Split RKB-ZV2S', 'RKB-ZV2S', [
+    ['RKB15ZV2S', 4.4, 27.8, 3.12, 'M'], ['RKB18ZV2S', 5.3, 31.6, 3.05, 'M'], ['RKB24ZV2S', 6.0, 45.75, 3.03, 'L'],
+  ]),
+  RKC: splitSeries('Split RKC-ZV2S', 'RKC-ZV2S', [
+    ['RKC09ZV2S', 2.7, 17.8, 3.25, 'S'], ['RKC12ZV2S', 3.6, 26.5, 3.21, 'M'], ['RKC15ZV2S', 4.4, 35.8, 3.33, 'L'],
+    ['RKC18ZV2S', 5.3, 45.1, 3.19, 'L'], ['RKC24ZV2S', 7.1, 45.1, 3.18, 'L'],
+  ]),
+  RKD: splitSeries('Split RKD-ZV2S', 'RKD-ZV2S', [
+    ['RKD09ZV2S', 2.7, 15.1, 3.14, 'S'], ['RKD12ZV2S', 3.6, 25.5, 3.19, 'M'], ['RKD15ZV2S', 4.4, 27.4, 3.14, 'M'],
+    ['RKD18ZV2S', 5.3, 35.0, 3.05, 'M'], ['RKD24ZV2S', 6.0, 45.6, 3.03, 'L'],
+  ]),
+  RKF: splitSeries('Split RKF-YV2S', 'RKF-YV2S', [
+    ['RKF09YV2S', 2.7, 17.8, 3.25, 'S'], ['RKF12YV2S', 3.6, 26.5, 3.21, 'M'], ['RKF15YV2S', 4.4, 35.8, 3.33, 'L'],
+    ['RKF18YV2S', 5.3, 45.1, 3.19, 'L'], ['RKF24YV2S', 7.1, 45.1, 3.18, 'L'],
+  ]),
+});
+
 /** หมวดหมู่เครื่อง — เมนูเลือกรุ่นแยก VRV กับ Split type */
 export const CATEGORIES = [
   { key: 'vrv', label: 'VRV' },
@@ -96,6 +132,10 @@ export const SERIES = [
   { key: 'IVS', cat: 'vrv', label: 'VRV IV S', code: 'RXMQ', discharge: 'front', catalog: 'EDTRMT332049' },
   { key: 'SHI', cat: 'vrv', label: 'VRV S Hi', code: 'RSUQ-AYM', discharge: 'front', catalog: 'EDTRMT332104A' },
   { key: 'FTKB', cat: 'split', label: 'Split FTKB-A', code: 'RKB-AV2S', discharge: 'front', catalog: 'EDTTH042558' },
+  { key: 'RKB', cat: 'split', label: 'Split RKB-ZV2S', code: 'RKB-ZV2S', discharge: 'front', catalog: 'RKB15-24 Specification' },
+  { key: 'RKC', cat: 'split', label: 'Split RKC-ZV2S', code: 'RKC-ZV2S', discharge: 'front', catalog: 'RKC-ZV2S Specification' },
+  { key: 'RKD', cat: 'split', label: 'Split RKD-ZV2S', code: 'RKD-ZV2S', discharge: 'front', catalog: 'RKD-ZV2S Specification' },
+  { key: 'RKF', cat: 'split', label: 'Split RKF-YV2S', code: 'RKF-YV2S', discharge: 'front', catalog: 'RKF-YV2S Specification' },
 ];
 export function seriesOf(model) { return SERIES.find(s => s.key === model.series) || SERIES[0]; }
 
@@ -122,14 +162,14 @@ function build() {
   for (const hp of Object.keys(COMBOS).map(Number)) list.push(makeModel(hp, COMBOS[hp][1], COMBOS[hp][0]));
   for (const [key, sr] of Object.entries(FRONT_SERIES))
     for (const u of sr.units) {
-      const eer = u.eer || EER;
-      const spec = { hp: u.hp, kw: u.kw, cmm: u.cmm, w: sr.w, fans: 1, eer };
+      const eer = u.eer || EER, b = u.body || sr;
+      const spec = { hp: u.hp, kw: u.kw, cmm: u.cmm, w: b.w, fans: 1, eer };
       list.push({
         id: u.id, indoor: u.indoor || null, series: key, discharge: 'front',
         hp: u.hp, kw: u.kw, cmm: u.cmm, eer, kwScale: 1,
         modules: [u.hp], mods: [spec],
-        width: sr.w, height: sr.h, depth: sr.d, fans: 1,
-        fan: { ...sr.fan },
+        width: b.w, height: b.h, depth: b.d, fans: 1,
+        fan: { ...b.fan },
       });
     }
   return list;

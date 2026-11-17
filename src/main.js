@@ -398,7 +398,7 @@ function renderProps() {
     <label class="row">${L('ชื่อ', 'Name')} <input type="text" data-k="name" value="${esc(o.name)}"></label>`;
   if (o.type === 'cdu') {
     const m = getModel(o.model);
-    const opt = x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.indoor ? x.indoor + ' / ' : ''}${x.id} — ${x.hp} HP · ${x.kw.toFixed(1)} kW</option>`;
+    const opt = x => `<option value="${x.id}" ${x.id === o.model ? 'selected' : ''}>${x.indoor ? x.indoor + ' / ' : ''}${x.id}${seriesOf(x).cat === 'split' ? ` (HxWxD - ${x.height}x${x.width}x${x.depth})` : ''} — ${x.hp} HP · ${x.kw.toFixed(1)} kW</option>`;
     // หมวดหมู่ (VRV / Split type) เลือกก่อน แล้วรายการรุ่นแสดงเฉพาะหมวดนั้น
     const cat = seriesOf(m).cat;
     const groups = SERIES.filter(sr => sr.cat === cat).flatMap(sr => {
