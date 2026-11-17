@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { unitModules, unitSize, getModel, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
+import { unitModules, unitSize, getModel, hasStand, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
 import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
 import { axisLocator } from './grid.js';
@@ -329,7 +329,7 @@ export class Viewer {
     let ySup = 0;
     for (const s of this.objects || [])
       if (s.type === 'slab' && s.y <= yb + 1e-6 && insideRect(s, o.x, o.z)) ySup = Math.max(ySup, slabRange(s).y1);
-    if (yb - ySup > 0.01) {
+    if (hasStand(o, yb - ySup)) {   // ขาตั้งเฉพาะ VRV 6A ที่ยกไม่เกิน 10 ซม. — นอกนั้นเครื่องลอยเหนือพื้น
       const pad = new THREE.Mesh(new THREE.BoxGeometry(sz.w + 0.1, yb - ySup, sz.d + 0.1),
         new THREE.MeshStandardMaterial({ color: 0x9aa1a8, roughness: 0.95 }));
       pad.position.y = (yb + ySup) / 2;

@@ -2,7 +2,7 @@
  * main.js — ตัวควบคุมหลัก: เชื่อมหน้าจอ ↔ ข้อมูลฉาก ↔ มุมมอง 3D ↔ ตัวคำนวณ
  */
 
-import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, status as unitStatus } from './models.js';
+import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import { buildMesh } from './mesher.js';
 import { Solver } from './solver.js';
@@ -432,6 +432,9 @@ function renderProps() {
         ${[[0, L('ใต้', 'S')], [90, L('ตอ.', 'E')], [180, L('เหนือ', 'N')], [270, L('ตต.', 'W')]].map(([v, l]) => `<button data-v="${v}" class="${o.rot === v ? 'on' : ''}">${l}</button>`).join('')}
       </div></div>
       <label class="row">${L('ความสูงฐาน (ม.)', 'Base height (m)')} <input type="number" step="0.05" min="0" max="60" data-k="elev" value="${fmt(o.elev)}"></label>
+      <p class="note">${hasStand(o, (o.elev || 0) - supportAt(o.x, o.z))
+        ? L('มีขาตั้ง (VRV 6A ยกไม่เกิน 10 ซม.)', 'With stand (VRV 6A, raised ≤ 10 cm)')
+        : L('ไม่มีขาตั้ง — เครื่องลอยเหนือพื้น ลมผ่านใต้เครื่องได้ (ขาตั้งใส่เฉพาะ VRV 6A ยกไม่เกิน 10 ซม.)', 'No stand — unit floats above the floor, air passes underneath (stands only on VRV 6A raised ≤ 10 cm)')}</p>
       ${hoodHtml}
       <label class="row">${L('อัตราลม (m³/min)', 'Airflow (m³/min)')} <input type="number" step="1" min="30" max="2000" data-k="airflow" value="${fmt(o.airflow || m.cmm)}"></label>
       <div class="spec">

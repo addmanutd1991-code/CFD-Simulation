@@ -261,6 +261,12 @@ export function unitModules(unit) {
   });
 }
 
+/** ขาตั้ง CDU: ใส่เฉพาะ VRV 6A และเมื่อระยะยกจากพื้นรองรับไม่เกิน 10 ซม. — สูงกว่านี้เครื่องลอยเหนือพื้น (ลมผ่านใต้เครื่องได้) */
+export const STAND_MAX = 0.10;
+export function hasStand(unit, gap) {
+  return getModel(unit.model).series === '6A' && gap > 0.01 && gap <= STAND_MAX + 1e-6;
+}
+
 export function unitSize(unit) {
   const m = getModel(unit.model);
   return { w: m.width / 1000, h: m.height / 1000, d: m.depth / 1000 };
