@@ -104,7 +104,7 @@ npm test             # ทดสอบ solver: node tools/selftest.mjs <preset> 
      **ท่อโค้ง 90°** — กำหนด **ความสูง** และ **ระยะยื่นออกด้านปากลม** ได้
      (เลือกทิศปากลม หน้า/หลัง/ซ้าย/ขวา — ซ้าย/ขวาใช้กับเครื่องโมดูลเดี่ยว) ท่อขึ้นจากเครื่อง โค้งด้านบน แล้วยื่นแนวนอนพ้นตัวเครื่อง
      ลมออกแนวนอนที่ปลายท่อ (หน้าตัดสูงเท่าความลึกเครื่อง 765 มม. ไม่เกินความสูง Hood)
-   - **VRV IV S (RXMQ4–6)**, **VRV S Hi (RSUQ7–9)** และ **Split FTKB-A (RKB09/12AV2S)** และคอยล์ร้อน Split **RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S, RKM-YV2S, RKQ-YV2S, RKZ-YV2S** (เป่าหน้า):
+   - **VRV IV S (RXMQ4–6)**, **VRV S Hi (RSUQ7–9)** และ **Split FTKB-A (RKB09/12AV2S)** และคอยล์ร้อน Split **RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S, RKM-YV2S, RKQ-YV2S, RKZ-YV2S, RKE-YV2S** (เป่าหน้า):
      **ทิศทางลมร้อนออกจากเครื่อง** ตรง หรือเบี่ยง 45° ขึ้น/ลง/ซ้าย/ขวา (มองจากด้านหน้าเครื่อง) — แทนใบเบี่ยงลมที่ติดกับเครื่อง
      ไม่วาดรูปทรง มีลูกศรสีส้มบอกทิศ · ใส่ Hood สี่เหลี่ยมครอบหน้ากากพัดลมได้ (กำหนดความยาว) · ลมเข้าด้านหลังและด้านซ้าย
    ลากเพื่อย้าย · `Ctrl+Z` เลิกทำ
@@ -212,7 +212,7 @@ npm test             # ทดสอบ solver: node tools/selftest.mjs <preset> 
 ตารางรุ่นใน `src/models.js` (kW, อัตราลม, ขนาด, ชุดผสม 8–78 HP) มาจาก catalog EDTRTH342529A (VRV 6A),
 EDTRMT332049 (VRV IV S: RXMQ4AVE / 5BVM / 6BVM — 990 × 940 × 320 มม.) และ EDTRMT332104A (VRV S Hi: RSUQ7/8/9AYM — 870 × 1,100 × 460 มม.)
 และ EDTTH042558 (Split FTKB-A: คอยล์ร้อน RKB09AV2S 2.7 kW / RKB12AV2S 3.6 kW — 461 × 650 × 244 มม., EER ใช้ COP จาก catalog 3.09 / 3.10)
-คอยล์ร้อน Split RKB15–24ZV2S / RKC-ZV2S / RKD-ZV2S / RKF-YV2S / RKM-YV2S / RKQ-YV2S / RKZ-YV2S จาก Specification ของแต่ละรุ่น (เฉพาะ CDU — kW, อัตราลม H, COP และขนาด H × W × D รายรุ่น)
+คอยล์ร้อน Split RKB15–24ZV2S / RKC-ZV2S / RKD-ZV2S / RKF-YV2S / RKM-YV2S / RKQ-YV2S / RKZ-YV2S / RKE-YV2S จาก Specification ของแต่ละรุ่น (เฉพาะ CDU — kW, อัตราลม H, COP และขนาด H × W × D รายรุ่น)
 ตำแหน่งและขนาดหน้ากากพัดลมของรุ่นเป่าหน้าประมาณจากแบบ Dimensions
 
 รุ่นเป่าหน้าบนกริด: ลมออกเป็นหน้า u/w ด้านหน้าเครื่อง (หรือปลาย Hood) · ทิศทางลมร้อนเบี่ยง 45° ไม่มีรูปทรงบนกริด —

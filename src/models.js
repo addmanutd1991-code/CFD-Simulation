@@ -11,7 +11,7 @@
  *     ตำแหน่งและขนาดหน้ากากพัดลมประมาณจากแบบ Dimensions ของ catalog
  *   Split type FTKB-A (คอยล์ร้อน RKB09/12AV2S) catalog EDTTH042558 — เป่าลมออกด้านหน้า 461 × 650 × 244 mm
  *     EER ใช้ COP ที่พิกัดจาก catalog (3.09 / 3.10)
- *   Split type คอยล์ร้อน (CDU) RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S, RKM-YV2S, RKQ-YV2S, RKZ-YV2S
+ *   Split type คอยล์ร้อน (CDU) RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S, RKM-YV2S, RKQ-YV2S, RKZ-YV2S, RKE-YV2S
  *     — Specification ของ Daikin · เก็บเฉพาะคอยล์ร้อน (ไม่รวมคอยล์เย็น) · ขนาดตัวเครื่องต่างกันรายรุ่น 4 แบบ (ดู SPLIT_BODY)
  *     อัตราลมใช้ค่า H ของคอยล์ร้อน · EER ใช้ COP ที่พิกัด
  * EER ของ VRV ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
@@ -131,6 +131,9 @@ Object.assign(FRONT_SERIES, {
     ['RKZ09YV2S', 2.7, 35.8, 5.19, 'L'], ['RKZ12YV2S', 3.6, 35.8, 4.80, 'L'], ['RKZ15YV2S', 4.4, 35.8, 4.11, 'L'],
     ['RKZ18YV2S', 5.3, 66.8, 4.02, 'XL'], ['RKZ24YV2S', 7.1, 66.8, 3.41, 'XL'],
   ]),
+  RKE: splitSeries('Split RKE-YV2S', 'RKE-YV2S', [
+    ['RKE09YV2S', 2.7, 15.1, 3.14, 'S'], ['RKE12YV2S', 3.6, 25.5, 3.19, 'M'], ['RKE18YV2S', 5.3, 35.0, 3.05, 'M'],
+  ]),
 });
 
 /** หมวดหมู่เครื่อง — เมนูเลือกรุ่นแยก VRV กับ Split type */
@@ -152,6 +155,7 @@ export const SERIES = [
   { key: 'RKM', cat: 'split', label: 'Split RKM-YV2S', code: 'RKM-YV2S', discharge: 'front', catalog: 'RKM-YV2S Specification' },
   { key: 'RKQ', cat: 'split', label: 'Split RKQ-YV2S', code: 'RKQ-YV2S', discharge: 'front', catalog: 'RKQ-YV2S Specification' },
   { key: 'RKZ', cat: 'split', label: 'Split RKZ-YV2S', code: 'RKZ-YV2S', discharge: 'front', catalog: 'RKZ-YV2S Specification' },
+  { key: 'RKE', cat: 'split', label: 'Split RKE-YV2S', code: 'RKE-YV2S', discharge: 'front', catalog: 'RKE-YV2S Specification' },
 ];
 export function seriesOf(model) { return SERIES.find(s => s.key === model.series) || SERIES[0]; }
 
