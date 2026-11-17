@@ -14,6 +14,10 @@
  *   Split type คอยล์ร้อน (CDU) RKB15–24ZV2S, RKC-ZV2S, RKD-ZV2S, RKF-YV2S, RKM-YV2S, RKQ-YV2S, RKZ-YV2S, RKE-YV2S
  *     — Specification ของ Daikin · เก็บเฉพาะคอยล์ร้อน (ไม่รวมคอยล์เย็น) · ขนาดตัวเครื่องต่างกันรายรุ่น 4 แบบ (ดู SPLIT_BODY)
  *     อัตราลมใช้ค่า H ของคอยล์ร้อน · EER ใช้ COP ที่พิกัด
+ *   Sky Air Premium RZF-DV2S/DY2S (+ RZFS38DY2S) — Specification EDTH282362
+ *   Sky Air Standard RZFC-EV2S/EY2S             — Specification RZFC-EV2S
+ *     — เก็บเฉพาะคอยล์ร้อน (CDU) · kW และ EER ใช้ค่าที่จับคู่กับคอยล์เย็นแบบ Cassette (FCTF / FCFC;
+ *       RZFS38DY2S ใช้คู่ FCF(S)) · อัตราลมของคอยล์ร้อนจาก Specification · ตัวเครื่อง 3 ขนาด (L / XL / XXL)
  * EER ของ VRV ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
  */
 
@@ -95,11 +99,13 @@ const SPLIT_BODY = {
   M: { h: 550, w: 675, d: 284, fan: { lx: -0.07, y: 0.27, s: 0.46, dia: 0.44 } },
   L: { h: 595, w: 845, d: 300, fan: { lx: -0.10, y: 0.29, s: 0.50, dia: 0.48 } },
   XL: { h: 695, w: 930, d: 350, fan: { lx: -0.12, y: 0.34, s: 0.58, dia: 0.55 } },
+  XXL: { h: 990, w: 940, d: 320, fan: { lx: -0.10, y: 0.50, s: 0.60, dia: 0.55 } },  // ตัวเครื่องเดียวกับ VRV IV S
 };
-const HP_OF = { '09': 1, 12: 1.5, 15: 1.75, 18: 2, 24: 2.5 };
+/** HP โดยประมาณจากรหัสขนาดในชื่อรุ่น (×1,000 Btu/h) — ไม่แสดงในเมนูของ Split type */
+const HP_OF = { '09': 1, 12: 1.5, 13: 1.5, 15: 1.75, 18: 2, 24: 2.5, 30: 3, 36: 4, 38: 4, 42: 4.5, 48: 5 };
 /** [รหัสรุ่น, kW, m³/min (H), COP, ตัวเครื่อง] */
 function splitSeries(label, code, rows) {
-  const units = rows.map(([id, kw, cmm, eer, b]) => ({ id, hp: HP_OF[id.slice(3, 5)], kw, cmm, eer, body: SPLIT_BODY[b] }));
+  const units = rows.map(([id, kw, cmm, eer, b]) => ({ id, hp: HP_OF[id.match(/\d\d/)[0]], kw, cmm, eer, body: SPLIT_BODY[b] }));
   const b0 = units[0].body;
   return { label, code, h: b0.h, w: b0.w, d: b0.d, fan: b0.fan, units };
 }
@@ -134,6 +140,19 @@ Object.assign(FRONT_SERIES, {
   RKE: splitSeries('Split RKE-YV2S', 'RKE-YV2S', [
     ['RKE09YV2S', 2.7, 15.1, 3.14, 'S'], ['RKE12YV2S', 3.6, 25.5, 3.19, 'M'], ['RKE18YV2S', 5.3, 35.0, 3.05, 'M'],
   ]),
+  RZF: splitSeries('Sky Air Premium RZF', 'RZF-D', [
+    ['RZF13DV2S', 4.1, 45, 5.43, 'L'], ['RZF18DV2S', 5.3, 45, 4.84, 'L'], ['RZF24DV2S', 7.0, 45, 3.86, 'L'],
+    ['RZF30DV2S', 8.8, 65, 3.59, 'XL'], ['RZF36DV2S', 10.6, 70, 3.26, 'XXL'], ['RZF42DV2S', 12.3, 70, 2.96, 'XXL'],
+    ['RZF48DV2S', 14.1, 70, 2.59, 'XXL'],
+    ['RZF30DY2S', 8.8, 65, 3.59, 'XL'], ['RZF36DY2S', 10.6, 70, 3.26, 'XXL'], ['RZFS38DY2S', 11.3, 86, 3.61, 'XXL'],
+    ['RZF42DY2S', 12.3, 70, 2.96, 'XXL'], ['RZF48DY2S', 14.1, 70, 2.59, 'XXL'],
+  ]),
+  RZFC: splitSeries('Sky Air Standard RZFC', 'RZFC-E', [
+    ['RZFC13EV2S', 4.0, 35.8, 3.28, 'L'], ['RZFC18EV2S', 5.3, 35.8, 3.25, 'L'], ['RZFC24EV2S', 7.0, 44, 3.26, 'L'],
+    ['RZFC30EV2S', 8.8, 65, 3.11, 'XL'], ['RZFC36EV2S', 10.6, 65, 3.10, 'XL'],
+    ['RZFC30EY2S', 8.8, 65, 3.11, 'XL'], ['RZFC36EY2S', 10.6, 65, 3.10, 'XL'],
+    ['RZFC42EY2S', 12.3, 70, 2.72, 'XXL'], ['RZFC48EY2S', 14.1, 70, 2.70, 'XXL'],
+  ]),
 });
 
 /** หมวดหมู่เครื่อง — เมนูเลือกรุ่นแยก VRV กับ Split type */
@@ -156,6 +175,8 @@ export const SERIES = [
   { key: 'RKQ', cat: 'split', label: 'Split RKQ-YV2S', code: 'RKQ-YV2S', discharge: 'front', catalog: 'RKQ-YV2S Specification' },
   { key: 'RKZ', cat: 'split', label: 'Split RKZ-YV2S', code: 'RKZ-YV2S', discharge: 'front', catalog: 'RKZ-YV2S Specification' },
   { key: 'RKE', cat: 'split', label: 'Split RKE-YV2S', code: 'RKE-YV2S', discharge: 'front', catalog: 'RKE-YV2S Specification' },
+  { key: 'RZF', cat: 'split', label: 'Sky Air Premium RZF', code: 'RZF-D', discharge: 'front', catalog: 'EDTH282362' },
+  { key: 'RZFC', cat: 'split', label: 'Sky Air Standard RZFC', code: 'RZFC-E', discharge: 'front', catalog: 'RZFC-EV2S Specification' },
 ];
 export function seriesOf(model) { return SERIES.find(s => s.key === model.series) || SERIES[0]; }
 
