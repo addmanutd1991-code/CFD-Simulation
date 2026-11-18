@@ -848,7 +848,18 @@ export class Viewer {
     const quads = [];
     const sum = new Map(), cnt = new Map();
     const key = (x, y, z) => `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+    // กรอบตัวเครื่องจริง (พิกัดโลก) — หน้าดูดของเมชที่ตกอยู่ในตัวเครื่อง (เครื่องไม่ลงตัวกับเซลล์) ถูกดันออกมาที่ผิวเครื่อง
+    // ไม่เช่นนั้นเฉดด้านข้างของรุ่นเป่าหน้าจะถูกตัวเครื่องบังจนมองไม่เห็น
+    const bodyBox = new Map();
+    for (const o of this.objects || []) {
+      if (o.type !== 'cdu') continue;
+      const s = unitSize(o), ra = (((o.rot % 360) + 360) % 360) * Math.PI / 180;
+      const c = Math.abs(Math.round(Math.cos(ra))), sn = Math.abs(Math.round(Math.sin(ra)));
+      const ex = (s.w / 2) * c + (s.d / 2) * sn, ez = (s.w / 2) * sn + (s.d / 2) * c;
+      bodyBox.set(o.id, { x0: o.x - ex, x1: o.x + ex, z0: o.z - ez, z1: o.z + ez });
+    }
     for (const m of M.modules) {
+      const bb = bodyBox.get(m.unitId);
       for (let q = 0; q < m.inFaces.length; q++) {
         const f = m.inFaces[q], ax = m.inAxis[q];
         const i = f % NX, j = Math.floor(f / NX) % NY, k = Math.floor(f / (NX * NY));
@@ -856,8 +867,15 @@ export class Viewer {
         const t = T[m.inCells[q]];
         const y0 = yf[j - 1], y1 = yf[j];
         let c;
-        if (ax === 0) { const x = xf[i - 1], z0 = zf[k - 1], z1 = zf[k]; c = [[x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0]]; }
-        else { const z = zf[k - 1], x0 = xf[i - 1], x1 = xf[i]; c = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]]; }
+        if (ax === 0) {
+          let x = xf[i - 1];
+          if (bb) x = sgn < 0 ? Math.min(x, bb.x0) : Math.max(x, bb.x1);
+          const z0 = zf[k - 1], z1 = zf[k]; c = [[x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0]];
+        } else {
+          let z = zf[k - 1];
+          if (bb) z = sgn < 0 ? Math.min(z, bb.z0) : Math.max(z, bb.z1);
+          const x0 = xf[i - 1], x1 = xf[i]; c = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
+        }
         const ks = c.map(v => key(...v));
         for (const kk of ks) { sum.set(kk, (sum.get(kk) || 0) + t); cnt.set(kk, (cnt.get(kk) || 0) + 1); }
         quads.push({ c, ks, ax, sgn });
