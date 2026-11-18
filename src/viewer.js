@@ -95,6 +95,7 @@ export class Viewer {
 
     this.#initSection();
     this.meshLines = null;
+    this.inletShade = null;   // สีอุณหภูมิรายเซลล์บนหน้าคอยล์ดูดลม
     this.#initStreaks();
     this.#initIso();
     this.#initGlyphs();
@@ -446,7 +447,6 @@ export class Viewer {
     const suc = this.#suctionMarks(o, sz, mods, yb);
     g.userData.suction = suc;
     g.add(suc);
-    this.#shadeUnit(o, g);
     // ลูกศรบอกด้านหน้าเครื่อง (ด้านบริการ) บนพื้น
     const arrow = new THREE.Mesh(arrowShape(0.28), new THREE.MeshBasicMaterial({ color: 0x4f5b66, transparent: true, opacity: 0.55 }));
     arrow.rotation.x = -Math.PI / 2;
@@ -460,7 +460,7 @@ export class Viewer {
 
   /** ปุ่มลมดูด: ลูกศรแสดงเสมอเมื่อเปิด · แถบสีฟ้าซ่อนเมื่อมีสีอุณหภูมิบนหน้าคอยล์แล้ว */
   #applySuctionVis() {
-    const shaded = this.#shadeOn();
+    const shaded = !!this.inletShade;
     for (const g of this.meshes.values()) {
       const s = g.userData.suction;
       if (!s) continue;
@@ -473,34 +473,27 @@ export class Viewer {
    * ด้านดูดลม: แถบสีฟ้าโปร่งแสงบนหน้าคอยล์ (ช่วงความสูง COIL_LO–COIL_HI) + ลูกศรชี้เข้าเครื่อง
    * ด้านเดียวกับที่ตัวคำนวณใช้ (suctionSides) — ด้านที่ติดกับโมดูลในชุดเดียวกันไม่ดูดลม
    */
-  /**
-   * หน้าคอยล์ดูดลมจริงของเครื่องในแกนเฉพาะ: [ความยาวหน้า, กึ่งกลาง (x, z) บนผิวเครื่อง, ทิศชี้ออก (nx, nz), โมดูล]
-   * หลัง = ทุกโมดูล · ซ้าย = โมดูลแรก · ขวา = โมดูลสุดท้าย (ด้านที่ติดกันในชุดไม่ดูดลม)
-   */
-  #coilFaces(o, sz, mods) {
-    const hw = sz.w / 2, hd = sz.d / 2, sides = suctionSides(o), out = [];
-    if (sides.includes('back')) mods.forEach((m, mi) => out.push([m.x1 - m.x0, (m.x0 + m.x1) / 2, -hd, 0, -1, mi]));
-    if (sides.includes('left')) out.push([sz.d, -hw, 0, -1, 0, 0]);
-    if (sides.includes('right')) out.push([sz.d, hw, 0, 1, 0, mods.length - 1]);
-    return out;
-  }
-
   #suctionMarks(o, sz, mods, yb) {
     const grp = new THREE.Group();
     grp.visible = !!this.display.suction;
     const y0 = yb + COIL_LO * sz.h, y1 = yb + COIL_HI * sz.h, ym = (y0 + y1) / 2, hh = y1 - y0;
-    const off = 0.02;
+    const hw = sz.w / 2, hd = sz.d / 2, off = 0.02;
     const mat = new THREE.MeshBasicMaterial({ color: 0x2f9be8, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false });
+    const sides = suctionSides(o);
+    // [ความยาวหน้า, ตำแหน่งกึ่งกลาง (x, z), ทิศชี้ออกจากเครื่อง (nx, nz)]
+    const faces = [];
+    if (sides.includes('back')) for (const m of mods) faces.push([m.x1 - m.x0, (m.x0 + m.x1) / 2, -hd - off, 0, -1]);
+    if (sides.includes('left')) faces.push([sz.d, -hw - off, 0, -1, 0]);
+    if (sides.includes('right')) faces.push([sz.d, hw + off, 0, 1, 0]);
     const aLen = 0.4;
-    for (let [len, cx, cz, nx, nz] of this.#coilFaces(o, sz, mods)) {
-      cx += nx * off; cz += nz * off;
+    for (const [len, cx, cz, nx, nz] of faces) {
       const pl = new THREE.Mesh(new THREE.PlaneGeometry(len, hh), mat);
       pl.position.set(cx, ym, cz);
       pl.rotation.y = nx ? Math.PI / 2 : 0;
       pl.renderOrder = 4;
       pl.raycast = () => {};
       pl.userData.plane = true;
-      pl.visible = !this.#shadeOn();
+      pl.visible = !this.inletShade;
       grp.add(pl);
       const n = Math.max(1, Math.round(len / 0.45));
       for (let i = 0; i < n; i++) {
@@ -835,90 +828,56 @@ export class Viewer {
     return [r.amb, Math.max(red, r.amb + 1)];
   }
 
-  /** โหมดเฉดด้านดูดและมีผลคำนวณแล้ว */
-  #shadeOn() {
-    return this.display.cduColor === 'shade' && !!this.results?.fields?.T && !!this.results?.mesh?.modules;
-  }
-
-  /** สร้างเฉดด้านดูดใหม่ทุกเครื่อง */
-  #updateInletShade() {
-    for (const o of this.objects || []) if (o.type === 'cdu') { const g = this.meshes.get(o.id); if (g) this.#shadeUnit(o, g); }
-  }
-
   /**
-   * ไล่เฉดอุณหภูมิบนผิวคอยล์จริงของเครื่อง (โหมดสี CDU = 'shade') — แนบเป็นส่วนหนึ่งของตัวเครื่อง
-   * ค่าที่แต่ละจุดบนผิวมาจากหน้าดูดลมของเมช (ชุดเดียวกับที่ตัวคำนวณใช้) ด้านเดียวกัน
-   * เฉลี่ยถ่วงน้ำหนักแบบ Gaussian ตามระยะบนระนาบผิว แล้วเปิดสีทีละพิกเซล → เฉดต่อเนื่อง
-   * ส่วนที่ไม่มีหน้าดูดลมอยู่ใกล้ (ถูกผนัง/เครื่องอื่นบัง) ไม่ระบายสี
+   * ไล่เฉดอุณหภูมิบนหน้าคอยล์ดูดลม (โหมดสี CDU = 'shade')
+   * ใช้หน้าดูดลมชุดเดียวกับตัวคำนวณ: ค่าที่มุมของแต่ละหน้าเซลล์ = ค่าเฉลี่ยของหน้าเซลล์ที่ติดมุมนั้น
+   * แล้วแทรกค่าเชิงเส้นทั่วผิว และเปิดสีจากแถบสีทีละพิกเซล → เฉดต่อเนื่อง ไม่เป็นช่องตามเซลล์
+   * ส่วนที่ถูกบังไม่มีหน้าดูดจึงไม่มีสี
    */
-  #shadeUnit(o, g) {
-    if (g.userData.shade) { g.remove(g.userData.shade); g.userData.shade.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); }); g.userData.shade = null; }
-    if (!this.#shadeOn()) return;
-    const r = this.results, M = r.mesh, T = r.fields.T;
-    const mu = M.units?.find(u => u.id === o.id);
-    if (!mu) return;
+  #updateInletShade() {
+    if (this.inletShade) {
+      this.scene3.remove(this.inletShade);
+      this.inletShade.geometry.dispose(); this.inletShade.material.dispose();
+      this.inletShade = null;
+    }
+    const r = this.results, M = r?.mesh, T = r?.fields?.T;
+    if (this.display.cduColor !== 'shade' || !M?.modules || !T) return;
     const { NX, NY, xf, yf, zf } = M;
-    const sz = unitSize(o), mods = unitModules(o), yb = o.elev || 0;
-    const rot = ((o.rot % 360) + 360) % 360, ra = rot * Math.PI / 180, c = Math.round(Math.cos(ra)), sn = Math.round(Math.sin(ra));
     const [lo, hi] = this.inletRange(), span = Math.max(1e-6, hi - lo);
-    const y0 = yb + COIL_LO * sz.h, y1 = yb + COIL_HI * sz.h;
-    const grp = new THREE.Group();
-    const mat = new THREE.MeshBasicMaterial({ map: rampTexture(), side: THREE.DoubleSide, transparent: true, alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    for (const [len, cx, cz, nx, nz, mi] of this.#coilFaces(o, sz, mods)) {
-      const m = M.modules[mu.modules[mi]];
-      if (!m) continue;
-      // ทิศชี้ออกและทิศตามแนวผิวในพิกัดโลก
-      const wn = [nx * c + nz * sn, -nx * sn + nz * c];
-      const lt = nx ? [0, 1] : [1, 0];                                  // แนวผิวในแกนเฉพาะ (lx, lz)
-      const wt = [lt[0] * c + lt[1] * sn, -lt[0] * sn + lt[1] * c];
-      const ox = o.x + cx * c + cz * sn, oz = o.z - cx * sn + cz * c;    // กึ่งกลางหน้าในพิกัดโลก
-      // หน้าดูดลมของเมชที่หันทิศเดียวกัน → พิกัดบนระนาบผิว (t, y), ครึ่งขนาด, ค่า T
-      const pts = [];
+    const off = 0.012;   // ยกออกจากผิวเครื่องเล็กน้อย กันภาพซ้อน
+    const quads = [];
+    const sum = new Map(), cnt = new Map();
+    const key = (x, y, z) => `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+    for (const m of M.modules) {
       for (let q = 0; q < m.inFaces.length; q++) {
         const f = m.inFaces[q], ax = m.inAxis[q];
-        const sg = m.inVel[q] > 0 ? -1 : 1;
-        const fn = ax === 0 ? [sg, 0] : [0, sg];
-        if (Math.abs(fn[0] - wn[0]) > 0.1 || Math.abs(fn[1] - wn[1]) > 0.1) continue;
         const i = f % NX, j = Math.floor(f / NX) % NY, k = Math.floor(f / (NX * NY));
-        const fx = ax === 0 ? xf[i - 1] : 0.5 * (xf[i - 1] + xf[i]), fz = ax === 0 ? 0.5 * (zf[k - 1] + zf[k]) : zf[k - 1];
-        const ht = ax === 0 ? 0.5 * (zf[k] - zf[k - 1]) : 0.5 * (xf[i] - xf[i - 1]);
-        pts.push({ t: (fx - ox) * wt[0] + (fz - oz) * wt[1], y: 0.5 * (yf[j - 1] + yf[j]), ht, hy: 0.5 * (yf[j] - yf[j - 1]), v: T[m.inCells[q]] });
+        const sgn = m.inVel[q] > 0 ? -1 : 1;   // ทิศจากผิวคอยล์ออกไปทางอากาศ
+        const t = T[m.inCells[q]];
+        const y0 = yf[j - 1], y1 = yf[j];
+        let c;
+        if (ax === 0) { const x = xf[i - 1], z0 = zf[k - 1], z1 = zf[k]; c = [[x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0]]; }
+        else { const z = zf[k - 1], x0 = xf[i - 1], x1 = xf[i]; c = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]]; }
+        const ks = c.map(v => key(...v));
+        for (const kk of ks) { sum.set(kk, (sum.get(kk) || 0) + t); cnt.set(kk, (cnt.get(kk) || 0) + 1); }
+        quads.push({ c, ks, ax, sgn });
       }
-      if (!pts.length) continue;
-      const cell = Math.max(...pts.map(p => Math.max(p.ht, p.hy))) * 2;
-      const sig2 = 2 * (0.55 * cell) ** 2;
-      // ตาราง vertex บนผิวจริง ละเอียด ~4 ซม.
-      const nu = Math.max(2, Math.ceil(len / 0.04)), nv = Math.max(2, Math.ceil((y1 - y0) / 0.04));
-      const geo = new THREE.PlaneGeometry(len, y1 - y0, nu, nv);
-      const P = geo.attributes.position, UV = geo.attributes.uv;
-      for (let n = 0; n < P.count; n++) {
-        const t = P.getX(n), y = (y0 + y1) / 2 + P.getY(n);
-        // ระยะถึงหน้าดูดลมที่ใกล้สุด (ตามขอบสี่เหลี่ยม) — ไกลเกินครึ่งเซลล์ = ถูกบัง ไม่ระบายสี
-        let dmin = Infinity, ws = 0, vs = 0;
-        for (const p of pts) {
-          const dt = Math.max(0, Math.abs(t - p.t) - p.ht), dy = Math.max(0, Math.abs(y - p.y) - p.hy);
-          dmin = Math.min(dmin, Math.hypot(dt, dy));
-          const w = Math.exp(-((t - p.t) ** 2 + (y - p.y) ** 2) / sig2);
-          ws += w; vs += w * p.v;
-        }
-        const covered = dmin <= 0.5 * cell && ws > 1e-9;
-        UV.setXY(n, covered ? Math.min(1, Math.max(0, (vs / ws - lo) / span)) : 0, covered ? 0.75 : 0.25);
-      }
-      UV.needsUpdate = true;
-      const pl = new THREE.Mesh(geo, mat);
-      // PlaneGeometry: แกน x ของระนาบ = แนวผิว lt, หันออกตาม (nx, nz)
-      pl.position.set(cx + nx * 0.004, (y0 + y1) / 2, cz + nz * 0.004);
-      pl.rotation.y = nx ? -nx * Math.PI / 2 : (nz > 0 ? 0 : Math.PI);
-      // ตรวจทิศแกน x ของระนาบให้ตรงกับ lt (กลับด้านเมื่อหมุนแล้วชี้สวน)
-      const ax = new THREE.Vector3(1, 0, 0).applyEuler(pl.rotation);
-      if (ax.x * lt[0] + ax.z * lt[1] < 0) pl.scale.x = -1;
-      pl.raycast = () => {};
-      pl.renderOrder = 4;
-      grp.add(pl);
     }
-    grp.raycast = () => {};
-    g.userData.shade = grp;
-    g.add(grp);
+    if (!quads.length) return;
+    const pos = [], uv = [];
+    for (const { c, ks, ax, sgn } of quads) {
+      const u = ks.map(kk => ((sum.get(kk) / cnt.get(kk)) - lo) / span);
+      const p = c.map(([x, y, z]) => ax === 0 ? [x + sgn * off, y, z] : [x, y, z + sgn * off]);
+      for (const n of [0, 1, 2, 0, 2, 3]) { pos.push(...p[n]); uv.push(Math.min(1, Math.max(0, u[n])), 0.5); }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: rampTexture(), side: THREE.DoubleSide }));
+    mesh.raycast = () => {};
+    mesh.renderOrder = 4;
+    this.inletShade = mesh;
+    this.scene3.add(mesh);
   }
 
   setDisplay(patch) {
@@ -2404,12 +2363,11 @@ let RAMP = null;
 function rampTexture() {
   if (RAMP) return RAMP;
   const cv = document.createElement('canvas');
-  cv.width = 256; cv.height = 2;
-  const x = cv.getContext('2d'), img = x.createImageData(256, 2);
+  cv.width = 256; cv.height = 1;
+  const x = cv.getContext('2d'), img = x.createImageData(256, 1);
   for (let i = 0; i < 256; i++) {
     const [r, g, b] = rgb(i / 255);
-    img.data.set([r, g, b, 255], i * 4);          // แถว 0 (v = 0.75 หลังพลิก flipY): สีตามค่า
-    img.data.set([0, 0, 0, 0], (256 + i) * 4);    // แถว 1: โปร่งใส (ส่วนที่ถูกบัง)
+    img.data.set([r, g, b, 255], i * 4);
   }
   x.putImageData(img, 0, 0);
   RAMP = new THREE.CanvasTexture(cv);
