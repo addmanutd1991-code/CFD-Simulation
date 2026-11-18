@@ -125,9 +125,10 @@ npm test             # ทดสอบ solver: node tools/selftest.mjs <preset> 
 
 ## กรณีศึกษาจากคู่มือการวางคอยล์ร้อน
 
-**ไฟล์ → กรณีศึกษา** มีตัวอย่างตามคู่มือ *CFD Simulation Standard — Outdoor unit layout guide (Rev.1)*
-ของ Siam Daikin Sales — แต่ละกรณีมีปุ่ม **แบบเดิม** (ลมร้อนวนกลับ / short circuit) และ **แบบแก้ไข** ตามที่คู่มือแนะนำ
-เปิดทั้งสองแบบแล้วคำนวณเพื่อเทียบ T ลมเข้าในหน้า **ผลลัพธ์** (ฉากอยู่ใน `src/scene.js` → `GUIDE`)
+**ไฟล์ → คู่มือการวางคอยล์ร้อน…** เปิดหน้าต่างกรณีศึกษาตามคู่มือ *CFD Simulation Standard — Outdoor unit layout guide (Rev.1)*
+ของ Siam Daikin Sales — การ์ดละหนึ่งกรณี มีคำอธิบายปัญหาและวิธีแก้ พร้อมภาพแบบจำลอง **แบบเดิม** (ลมร้อนวนกลับ / short circuit)
+และ **แบบแก้ไข** ตามที่คู่มือแนะนำ คลิกภาพเพื่อเปิดแบบนั้น แล้วคำนวณเพื่อเทียบ T ลมเข้าในหน้า **ผลลัพธ์**
+(ฉากอยู่ใน `src/scene.js` → `GUIDE` · ภาพย่อสร้างด้วย `node tools/case-thumbs.cjs` ขณะเปิด `npm run serve` — รันใหม่เมื่อแก้ฉาก)
 
 | กรณี | ปัญหา (แบบเดิม) | แบบแก้ไข |
 |---|---|---|
@@ -255,6 +256,7 @@ src/main.js           ตัวควบคุมหลัก: UI, undo/redo, �
 src/i18n.js           ภาษาของหน้าจอ: L('ไทย', 'English') — ข้อความคงที่ใน index.html ใช้ attribute data-en
 src/viewer.js         มุมมอง 3D, เครื่องมือวาด/ลาก, หน้าตัด, อนุภาค, iso-surface
 src/scene.js          ข้อมูลฉาก, โดเมน, ตัวอย่างสำเร็จรูป
+src/case-thumbs.js    ภาพย่อแบบจำลองของกรณีศึกษา (สร้างโดย tools/case-thumbs.cjs)
 src/models.js         ตารางรุ่น VRV และสมการสมรรถนะ
 src/grid.js           เส้นกริดของโดเมน: สม่ำเสมอ / ปรับความละเอียดอัตโนมัติ
 src/mesher.js         แปลงฉากเป็นกริด + เงื่อนไขขอบของ CDU
@@ -271,6 +273,7 @@ src/worker.js         Web Worker
 src/runner.js         เลือก worker / main thread อัตโนมัติ
 tools/build.mjs       รวมเป็นไฟล์เดียว dist/cdu-airflow-cfd.html
 tools/build-wasm.mjs  คอมไพล์ src/kernels.c เป็น src/kernels-wasm.js
+tools/case-thumbs.cjs ถ่ายภาพย่อกรณีศึกษา → src/case-thumbs.js (Playwright)
 tools/selftest.mjs    ทดสอบ solver แบบ CPU จาก command line
 tools/gputest.html    ทดสอบ solver แบบ GPU เทียบกับ CPU ในเบราว์เซอร์
 tools/serve.mjs       เว็บเซิร์ฟเวอร์ในเครื่อง (npm run serve)

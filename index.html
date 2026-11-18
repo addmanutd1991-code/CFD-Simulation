@@ -79,8 +79,8 @@
           <button class="mi" id="btn-save"><svg class="ic"><use href="#i-save"/></svg><span class="mi-t" data-en="Save as .json file">บันทึกเป็นไฟล์ .json</span><kbd>Ctrl+S</kbd></button>
           <div class="menu-h" data-en="Examples">ตัวอย่างสำเร็จรูป</div>
           <div id="preset-list"></div>
-          <div class="menu-h" data-en="Case studies — Daikin outdoor unit layout guide (original → fixed)">กรณีศึกษา — คู่มือการวางคอยล์ร้อน Daikin (แบบเดิม → แบบแก้ไข)</div>
-          <div id="guide-list"></div>
+          <div class="menu-h" data-en="Case studies">กรณีศึกษา</div>
+          <button class="mi" id="btn-cases"><svg class="ic"><use href="#i-cdu"/></svg><span class="mi-t"><b data-en="Outdoor unit layout guide…">คู่มือการวางคอยล์ร้อน…</b><small data-en="Original vs. fixed layouts with pictures — pick one to open">เปรียบเทียบแบบเดิม / แบบแก้ไข พร้อมภาพ — เลือกเปิดได้ทันที</small></span></button>
           <p class="menu-note" data-en="The current model is kept in this browser automatically — save a .json file to keep it permanently or share it">แบบที่ทำอยู่ถูกเก็บไว้ในเบราว์เซอร์นี้อัตโนมัติ — บันทึกเป็นไฟล์ .json เพื่อเก็บถาวรหรือส่งต่อ</p>
         </div>
       </div>
@@ -835,6 +835,16 @@
       <span><kbd>Ctrl+S</kbd> <span data-en="Save">บันทึก</span></span>
       <span><kbd>?</kbd> <span data-en="Open/close this table">เปิด/ปิดหน้านี้</span></span>
     </div>
+  </div>
+</div>
+
+<!-- กรณีศึกษาจากคู่มือการวางคอยล์ร้อน -->
+<div class="modal" id="cases-pop" hidden>
+  <div class="keys-pop cases-pop" role="dialog" aria-label="กรณีศึกษา" data-en-label="Case studies">
+    <button class="keys-x" title="ปิด (Esc)" data-en-title="Close (Esc)" aria-label="ปิด" data-en-label="Close">×</button>
+    <h3 data-en="Case studies — outdoor unit layout guide">กรณีศึกษา — คู่มือการวางคอยล์ร้อน</h3>
+    <p class="note" data-en="From the Siam Daikin “CFD Simulation Standard — Outdoor unit layout guide”. Click a picture to open that model, then press Run and compare the inlet temperatures of the original and the fixed layout.">จากคู่มือ “CFD Simulation Standard — Outdoor unit layout guide” ของ Siam Daikin · คลิกภาพเพื่อเปิดแบบจำลองนั้น แล้วกด คำนวณ เพื่อเทียบอุณหภูมิลมเข้าของแบบเดิมกับแบบแก้ไข</p>
+    <div class="case-grid" id="case-grid"></div>
   </div>
 </div>
 

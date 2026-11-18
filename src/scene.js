@@ -327,7 +327,7 @@ const slab = (name, x, z, w, d, y, extra = {}) => ({ type: 'slab', name, x, z, w
 function guideBalcony(fix) {
   const d = fix ? 'left' : 'none';
   return [
-    bldg(L('ผนังห้อง', 'Room wall'), 0.8, -0.5, 4.0, 1.0, 6.0),
+    bldg(L('ผนังห้อง', 'Room wall'), 0.8, -0.5, 4.0, 1.0, 3.6),
     wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 1.2, 3.0, 0),
     wall(L('ผนังข้างขวา', 'Right side wall'), 1.6, 0.0, 1.6, 1.2, 3.0, 0),
     wall(L('ราวกันตก', 'Balustrade'), 0.0, 1.2, 1.6, 1.2, 1.0, 60, { thick: 0.05 }),
@@ -343,7 +343,7 @@ function guideBalcony(fix) {
  */
 function guideNiche(mode) {
   const objs = [
-    bldg(L('อาคาร', 'Building'), 1.75, -0.5, 4.5, 1.0, 6.0),
+    bldg(L('อาคาร', 'Building'), 1.75, -0.5, 4.5, 1.0, 4.2),
     wall(L('ผนังทึบด้านซ้าย', 'Solid left wall'), 0.0, 0.0, 0.0, 1.0, 3.6, 0),
     wall(mode === 'side' ? L('ผนังข้าง → ระแนง 70%', 'Side wall → 70% louver') : L('ประตูทึบกั้นระเบียง', 'Solid door to balcony'),
       1.5, 0.0, 1.5, 1.0, 3.6, mode === 'side' ? 70 : 0),
@@ -365,7 +365,7 @@ function guideNiche(mode) {
 function guideCurb(mode) {
   const ex = mode === 'deflect' ? { deflect: 'up' } : mode === 'raise' ? { elev: 0.7 } : {};
   return [
-    bldg(L('อาคาร', 'Building'), 3.0, -0.5, 6.4, 1.0, 6.0),
+    bldg(L('อาคาร', 'Building'), 3.0, -0.5, 6.4, 1.0, 3.4),
     wall(L('ผนังปลายซ้าย', 'Left end wall'), 0.0, 0.0, 0.0, 1.0, 2.8, 0),
     wall(L('ผนังปลายขวา', 'Right end wall'), 6.0, 0.0, 6.0, 1.0, 2.8, 0),
     wall(L('ขอบปูน', 'Concrete upstand'), 0.0, 1.0, 6.0, 1.0, 0.6, 0, { thick: 0.2 }),
@@ -396,7 +396,7 @@ function guideEnclosure(fix) {
 /** 5 — ช่องวางเครื่องกว้าง 3.2 ม. ลึก 1.0 ม. VRV IV S 2 ชุดเป่าออกผ่านระแนงหน้าอาคาร (% พื้นที่เปิด = open) */
 function guideScreen(open, label) {
   return [
-    bldg(L('อาคาร', 'Building'), 1.6, -0.5, 4.2, 1.0, 6.0),
+    bldg(L('อาคาร', 'Building'), 1.6, -0.5, 4.2, 1.0, 3.6),
     wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 1.0, 3.0, 0),
     wall(L('ผนังข้างขวา', 'Right side wall'), 3.2, 0.0, 3.2, 1.0, 3.0, 0),
     wall(label, 0.0, 1.0, 3.2, 1.0, 3.0, open, { thick: 0.08 }),
@@ -410,7 +410,7 @@ function guideScreen(open, label) {
 function guideHoodScreen(open, label) {
   const hood = { duct: 0.8, hoodType: 'elbow', hoodDir: 'front', hoodOut: 1.0 };
   return [
-    bldg(L('อาคาร', 'Building'), 2.5, -0.5, 5.4, 1.0, 6.0),
+    bldg(L('อาคาร', 'Building'), 2.5, -0.5, 5.4, 1.0, 4.0),
     wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 2.5, 3.4, 0),
     wall(L('ผนังข้างขวา', 'Right side wall'), 5.0, 0.0, 5.0, 2.5, 3.4, 0),
     wall(label, 0.0, 2.5, 5.0, 2.5, 3.4, open, { thick: 0.08 }),
@@ -425,7 +425,7 @@ function guideHoodScreen(open, label) {
 function guideUnderSlab(fix) {
   const hood = fix ? { duct: 0.6, hoodType: 'elbow', hoodDir: 'front', hoodOut: 1.0 } : {};
   return [
-    bldg(L('อาคาร', 'Building'), 3.0, -0.5, 6.4, 1.0, 6.0),
+    bldg(L('อาคาร', 'Building'), 3.0, -0.5, 6.4, 1.0, 3.5),
     wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 2.2, 2.9, 0),
     wall(L('ผนังข้างขวา', 'Right side wall'), 6.0, 0.0, 6.0, 2.2, 2.9, 0),
     slab(L('สแลบ / ฝ้าเพดาน', 'Slab / ceiling'), 3.0, 1.1, 6.0, 2.2, 2.9),
@@ -433,56 +433,56 @@ function guideUnderSlab(fix) {
   ];
 }
 
-/** [เลขกรณี, หัวข้อ (ไทย, อังกฤษ), รายการแบบ: [variant, ชื่อปุ่ม (ไทย, อังกฤษ), คำอธิบายฉาก (ไทย, อังกฤษ), build objects]] */
+/** [เลขกรณี, หัวข้อ (ไทย, อังกฤษ), คำอธิบายปัญหาและการแก้ไข (ไทย, อังกฤษ), รายการแบบ: [variant, ชื่อปุ่ม (ไทย, อังกฤษ), คำอธิบายฉาก (ไทย, อังกฤษ), build objects]] */
 const GUIDE = [
-  ['1', 'คอยล์ร้อนเป่าลมร้อนใส่ระเบียง', 'Hot air blown into a balcony', [
+  ['1', 'คอยล์ร้อนเป่าลมร้อนใส่ระเบียง', 'Hot air blown into a balcony', 'ลมร้อนเป่าเข้าหาผนังระเบียง ความร้อนสะสมในระเบียงแล้วย้อนกลับเข้าเครื่อง — แก้โดยติดใบปรับทิศทางลมร้อนให้เป่าออกนอกระเบียง', 'Hot air blows at the balcony wall, builds up and is drawn back in — fixed with a deflector louver that aims it out of the balcony', [
     ['before', 'เป่าเข้าผนังระเบียง', 'blowing at the balcony wall', () => guideBalcony(false)],
     ['after', 'ใบปรับทิศลมออกนอกระเบียง', 'deflector louver aimed out of the balcony', () => guideBalcony(true)],
   ]],
-  ['2.1', 'ผนังทึบ 3 ด้าน — เพิ่มพื้นที่เปิดด้านข้าง', 'Solid walls on 3 sides — open the side', [
+  ['2.1', 'ผนังทึบ 3 ด้าน — เพิ่มพื้นที่เปิดด้านข้าง', 'Solid walls on 3 sides — open the side', 'ช่องวางเครื่องมีผนังทึบ 3 ด้าน เปิดเฉพาะระแนงด้านหน้า ลมเข้าและลมออกอยู่ทางเดียวกัน — แก้โดยเปิดผนังข้างเพิ่มพื้นที่ลมเข้า', 'A niche with solid walls on 3 sides opens only through the front louver, so intake and discharge share one face — fixed by opening the side wall', [
     ['before', 'ระแนงหน้าด้านเดียว ประตูทึบ', 'front louver only, solid door', () => guideNiche('before')],
     ['after', 'เปิดผนังข้างเป็นระแนง 70%', 'side wall opened as a 70% louver', () => guideNiche('side')],
   ]],
-  ['2.2', 'ผนังทึบ 3 ด้าน — เปลี่ยนเป็น VRV', 'Solid walls on 3 sides — switch to VRV', [
+  ['2.2', 'ผนังทึบ 3 ด้าน — เปลี่ยนเป็น VRV', 'Solid walls on 3 sides — switch to VRV', 'ช่องผนังทึบ 3 ด้านเดียวกัน — แก้โดยลดจำนวนคอยล์ร้อน ใช้ VRV 1 ชุดด้านบนแทน Split 3 ชุด ระแนงส่วนล่างเป็นทางลมเข้า', 'The same 3-sided niche — fixed by using one VRV unit at the top instead of 3 Split units, leaving the lower louver for intake', [
     ['before', 'Split 3 ชุดซ้อนกัน', '3 stacked Split units', () => guideNiche('before')],
     ['after', 'VRV S Hi 1 ชุดด้านบน', 'one VRV S Hi unit at the top', () => guideNiche('vrv')],
   ]],
-  ['3.1', 'ลมร้อนปะทะขอบปูน — ใบปรับทิศ', 'Hot air hits an upstand — deflector', [
+  ['3.1', 'ลมร้อนปะทะขอบปูน — ใบปรับทิศ', 'Hot air hits an upstand — deflector', 'คอยล์ร้อนเป่าลมร้อนปะทะขอบปูนด้านหน้า ลมร้อนตีกลับเข้าเครื่อง — แก้โดยติดใบปรับทิศทางลมขึ้น ไม่ให้ปะทะโดยตรง', 'Hot air hits the concrete upstand in front and bounces back — fixed with a deflector aimed upward', [
     ['before', 'เป่าชนขอบปูน', 'blowing into the upstand', () => guideCurb('before')],
     ['after', 'ใบปรับทิศลมขึ้น 45°', 'deflector 45° up', () => guideCurb('deflect')],
   ]],
-  ['3.2', 'ลมร้อนปะทะขอบปูน — ยกเครื่องสูงขึ้น', 'Hot air hits an upstand — raise the units', [
+  ['3.2', 'ลมร้อนปะทะขอบปูน — ยกเครื่องสูงขึ้น', 'Hot air hits an upstand — raise the units', 'ขอบปูนเดียวกัน — แก้โดยติดตั้งคอยล์ร้อนให้สูงกว่าขอบปูน ลมร้อนเป่าข้ามสิ่งกีดขวางออกไป', 'The same upstand — fixed by mounting the units above it so hot air clears the obstacle', [
     ['before', 'เป่าชนขอบปูน', 'blowing into the upstand', () => guideCurb('before')],
     ['after', 'ยกเครื่องพ้นขอบปูน', 'units raised above the upstand', () => guideCurb('raise')],
   ]],
-  ['4', 'ผนังทึบล้อมรอบที่วางคอยล์ร้อน', 'Solid walls around the units', [
+  ['4', 'ผนังทึบล้อมรอบที่วางคอยล์ร้อน', 'Solid walls around the units', 'ผนังอิฐทึบล้อมรอบเพื่อบังสายตา ลมเย็นเข้ามาไม่ได้ ลมร้อนวนอยู่ในคอก — แก้โดยเปลี่ยนผนังเป็นระแนง ต่อ Hood ให้ปากลมสูงกว่าผนัง และปรับทิศลมขึ้น', 'Solid screen walls block fresh air and trap hot air — fixed with louvers, hoods that discharge above the wall, and upward deflectors', [
     ['before', 'ผนังอิฐทึบสูง 2.6 ม.', '2.6 m solid brick walls', () => guideEnclosure(false)],
     ['after', 'ระแนง 70% + Hood + ใบปรับทิศ', '70% louvers + hoods + deflectors', () => guideEnclosure(true)],
   ]],
-  ['5.1', 'ระแนงไม่เหมาะกับการระบายอากาศ — ระแนงตัว Z', 'Unsuitable screen — Z-louver', [
+  ['5.1', 'ระแนงไม่เหมาะกับการระบายอากาศ — ระแนงตัว Z', 'Unsuitable screen — Z-louver', 'ระแนงรูปตัว Z อั้นลมร้อน อากาศไหลผ่านยาก — แนะนำระแนงใบตรงที่มีพื้นที่เปิดไม่ต่ำกว่า 70%', 'A Z-shaped louver holds back hot air — use a straight-blade louver with at least 70% free area', [
     ['before', 'ระแนงตัว Z (เปิด ~35%)', 'Z-louver (~35% open)', () => guideScreen(35, L('ระแนงตัว Z ~35%', 'Z-louver ~35%'))],
     ['after', 'ระแนงใบตรง 75%', 'straight louver 75%', () => guideScreen(75, L('ระแนงใบตรง 75%', 'Straight louver 75%'))],
   ]],
-  ['5.2', 'ระแนงไม่เหมาะกับการระบายอากาศ — เหล็กฉีก / Perforate', 'Unsuitable screen — expanded / perforated metal', [
+  ['5.2', 'ระแนงไม่เหมาะกับการระบายอากาศ — เหล็กฉีก / Perforate', 'Unsuitable screen — expanded / perforated metal', 'เหล็กฉีกหรือแผ่น Perforate มีพื้นที่เปิดน้อย (~26%) ลมร้อนออกไม่ได้ — แนะนำระแนงใบตรงพื้นที่เปิดไม่ต่ำกว่า 70%', 'Expanded or perforated metal has little free area (~26%) — use a straight-blade louver with at least 70% free area', [
     ['before', 'แผ่น Perforate (เปิด ~26%)', 'perforated sheet (~26% open)', () => guideScreen(26, L('เหล็กฉีก / Perforate ~26%', 'Expanded / perforated ~26%'))],
     ['after', 'ระแนงใบตรง 75%', 'straight louver 75%', () => guideScreen(75, L('ระแนงใบตรง 75%', 'Straight louver 75%'))],
   ]],
-  ['6', 'การอั้นลมร้อนภายใน Hood', 'Hot air trapped inside the hood', [
+  ['6', 'การอั้นลมร้อนภายใน Hood', 'Hot air trapped inside the hood', 'Hood ต่อจากคอยล์ร้อนไปชนแผ่นปิดที่มีพื้นที่เปิดน้อย เกิดแรงดันสูงใน Hood — แนะนำ Louver ใบตรง Free area มากกว่า 70% (ดูตัวแปรความดันในแท็บแสดงผล)', 'The hood discharges against a screen with little free area, building up pressure — use a straight louver with over 70% free area (see the pressure variable in Display)', [
     ['before', 'ปาก Hood ชนแผ่น Perforate ~26%', 'hood outlet behind ~26% perforated sheet', () => guideHoodScreen(26, L('แผ่น Perforate ~26%', 'Perforated sheet ~26%'))],
     ['after', 'ระแนงใบตรง 75%', 'straight louver 75%', () => guideHoodScreen(75, L('ระแนงใบตรง 75%', 'Straight louver 75%'))],
   ]],
-  ['7', 'ลมร้อนปะทะฝ้าเพดานหรือสแลบหลังคา', 'Hot air hits a ceiling or slab', [
+  ['7', 'ลมร้อนปะทะฝ้าเพดานหรือสแลบหลังคา', 'Hot air hits a ceiling or slab', 'คอยล์ร้อนเป่าขึ้นอยู่ใต้ฝ้า/สแลบ ลมร้อนปะทะแล้วย้อนกลับเข้าเครื่อง — แก้โดยติด Hood หักมุม 90° เปลี่ยนทิศลมร้อนออกภายนอก', 'Top-discharge units under a slab blow into it and re-ingest the hot air — fixed with a 90° elbow hood that sends it outside', [
     ['before', 'ไม่มี Hood', 'no hood', () => guideUnderSlab(false)],
     ['after', 'Hood หัก 90° ยื่นพ้นสแลบ', '90° elbow hood past the slab edge', () => guideUnderSlab(true)],
   ]],
 ];
 
-for (const [no, th, en, variants] of GUIDE) {
+for (const [no, th, en, dth, den, variants] of GUIDE) {
   for (const [variant, vth, ven, objs] of variants) {
     const tag = variant === 'before' ? ['แบบเดิม', 'Original'] : ['แบบแก้ไข', 'Fixed'];
     PRESETS.push({
       key: `guide-${no}-${variant}`, group: 'guide', caseNo: no, variant,
-      caseTitle: th, caseTitleEn: en, btn: tag[0], btnEn: tag[1],
+      caseTitle: th, caseTitleEn: en, caseDesc: dth, caseDescEn: den, btn: tag[0], btnEn: tag[1], varDesc: vth, varDescEn: ven,
       label: `กรณีศึกษา ${no} ${tag[0]} — ${th}: ${vth}`,
       labelEn: `Case ${no} ${tag[1]} — ${en}: ${ven}`,
       build() {
