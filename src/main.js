@@ -4,6 +4,7 @@
 
 import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
+import CASE_THUMBS from './case-thumbs.js';
 import { buildMesh } from './mesher.js';
 import { Solver } from './solver.js';
 import { GPU_BYTES_PER_CELL } from './gpu-solver.js';
@@ -328,6 +329,11 @@ function setOrtho(on) {
   viewer.setOrtho(on);
   $('#btn-ortho').classList.toggle('on', on);
   toast(on ? L('Ortho เปิด — ผนัง/Move ล็อกตามแนวแกน X/Z (Shift = ปลดชั่วคราว)', 'Ortho on — walls/Move lock to the X/Z axes (Shift = temporary release)') : L('Ortho ปิด', 'Ortho off'), 1600);
+}
+
+function toggleCases(show) {
+  const el = $('#cases-pop');
+  el.hidden = show === undefined ? !el.hidden : !show;
 }
 
 function toggleKeys(show) {
@@ -1711,8 +1717,23 @@ function applyTheme() {
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 function renderPresets() {
-  $('#preset-list').innerHTML = PRESETS.map(p => `<button class="mi" data-preset="${p.key}"><span class="mi-t">${esc(L(p.label, p.labelEn))}</span></button>`).join('');
-  $$('[data-preset]').forEach(b => b.addEventListener('click', () => loadPreset(b.dataset.preset)));
+  $('#preset-list').innerHTML = PRESETS.filter(p => !p.group).map(p => `<button class="mi" data-preset="${p.key}"><span class="mi-t">${esc(L(p.label, p.labelEn))}</span></button>`).join('');
+  // กรณีศึกษาจากคู่มือการวางคอยล์ร้อน: การ์ดละหนึ่งกรณี ภาพแบบจำลอง แบบเดิม / แบบแก้ไข พร้อมคำอธิบาย
+  const cases = new Map();
+  for (const p of PRESETS.filter(q => q.group === 'guide')) {
+    if (!cases.has(p.caseNo)) cases.set(p.caseNo, []);
+    cases.get(p.caseNo).push(p);
+  }
+  $('#case-grid').innerHTML = [...cases].map(([no, ps]) => `<article class="case-card">
+      <h4><span class="case-no">${esc(L('กรณี', 'Case'))} ${esc(no)}</span>${esc(L(ps[0].caseTitle, ps[0].caseTitleEn))}</h4>
+      <p>${esc(L(ps[0].caseDesc, ps[0].caseDescEn))}</p>
+      <div class="case-pair">${ps.map(p => `<button class="case-pick ${p.variant}" data-preset="${p.key}" title="${esc(L(p.label, p.labelEn))}">
+          ${CASE_THUMBS[p.key] ? `<img src="${CASE_THUMBS[p.key]}" alt="" loading="lazy" width="360" height="225">` : '<span class="case-noimg"></span>'}
+          <span class="case-tag">${esc(L(p.btn, p.btnEn))}</span>
+          <span class="case-cap">${esc(L(p.varDesc, p.varDescEn))}</span>
+        </button>`).join('')}</div>
+    </article>`).join('');
+  $$('[data-preset]').forEach(b => b.addEventListener('click', () => { toggleCases(false); loadPreset(b.dataset.preset); }));
 }
 
 /* ───────── หน้า (แบบจำลอง / ผลลัพธ์ / คู่มือ) · แท็บของแผงขวา · เมนู ───────── */
@@ -1822,6 +1843,9 @@ function bindUI() {
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-ortho').addEventListener('click', () => setOrtho(!ortho));
   $('#btn-keys').addEventListener('click', () => toggleKeys());
+  $('#btn-cases').addEventListener('click', () => toggleCases(true));
+  $('#cases-pop .keys-x').addEventListener('click', () => toggleCases(false));
+  $('#cases-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleCases(false); });
   $('#keys-pop .keys-x').addEventListener('click', () => toggleKeys(false));
   $('#keys-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleKeys(false); });
   $('#btn-redo').addEventListener('click', redo);
@@ -1918,6 +1942,7 @@ function bindUI() {
     const ctrl = e.ctrlKey || e.metaKey;
     if (k === 'escape' && $$('.menu').some(m => !m.hidden)) { closeMenus(); return; }
     if (!$('#keys-pop').hidden && (k === 'escape' || k === '?')) { toggleKeys(false); return; }
+    if (!$('#cases-pop').hidden) { if (k === 'escape') toggleCases(false); return; }
     if (!$('#report-pop').hidden) { if (k === 'escape') toggleReportPop(false); return; }
     if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
