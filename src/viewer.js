@@ -95,6 +95,7 @@ export class Viewer {
 
     this.#initSection();
     this.meshLines = null;
+    this.inletShade = null;   // สีอุณหภูมิรายเซลล์บนหน้าคอยล์ดูดลม
     this.#initStreaks();
     this.#initIso();
     this.#initGlyphs();
@@ -457,6 +458,17 @@ export class Viewer {
     return g;
   }
 
+  /** ปุ่มลมดูด: ลูกศรแสดงเสมอเมื่อเปิด · แถบสีฟ้าซ่อนเมื่อมีสีอุณหภูมิบนหน้าคอยล์แล้ว */
+  #applySuctionVis() {
+    const shaded = !!this.inletShade;
+    for (const g of this.meshes.values()) {
+      const s = g.userData.suction;
+      if (!s) continue;
+      s.visible = !!this.display.suction;
+      for (const c of s.children) if (c.userData.plane) c.visible = !shaded;
+    }
+  }
+
   /**
    * ด้านดูดลม: แถบสีฟ้าโปร่งแสงบนหน้าคอยล์ (ช่วงความสูง COIL_LO–COIL_HI) + ลูกศรชี้เข้าเครื่อง
    * ด้านเดียวกับที่ตัวคำนวณใช้ (suctionSides) — ด้านที่ติดกับโมดูลในชุดเดียวกันไม่ดูดลม
@@ -480,6 +492,8 @@ export class Viewer {
       pl.rotation.y = nx ? Math.PI / 2 : 0;
       pl.renderOrder = 4;
       pl.raycast = () => {};
+      pl.userData.plane = true;
+      pl.visible = !this.inletShade;
       grp.add(pl);
       const n = Math.max(1, Math.round(len / 0.45));
       for (let i = 0; i < n; i++) {
@@ -501,7 +515,8 @@ export class Viewer {
    * ยังไม่มีผล → สีปกติของตัวเครื่อง
    */
   #tintCdu(id, g) {
-    const temps = this.results?.modTin?.get(id);
+    // มีสีอุณหภูมิรายเซลล์บนหน้าคอยล์แล้ว → ตัวเครื่องคงสีปกติ (ไม่ทาสีทั้งเครื่อง)
+    const temps = this.results?.fields?.T ? null : this.results?.modTin?.get(id);
     const b = this.sceneData?.bands || { green: 40, red: 46 };
     g.userData.modMats?.forEach((mats, i) => {
       const t = temps?.[i];
@@ -512,6 +527,8 @@ export class Viewer {
   }
 
   refreshCduColors() {
+    this.#updateInletShade();
+    this.#applySuctionVis();
     for (const o of this.objects) if (o.type === 'cdu') { const g = this.meshes.get(o.id); if (g) this.#tintCdu(o.id, g); }
   }
 
@@ -803,6 +820,65 @@ export class Viewer {
     this.refreshCduColors();
   }
 
+  /** ช่วงสีของหน้าคอยล์: อุณหภูมิภายนอก (น้ำเงิน) → เกณฑ์สีแดง (แดง) */
+  inletRange() {
+    const r = this.results;
+    if (!r) return null;
+    const red = this.sceneData?.bands?.red ?? r.amb + 11;
+    return [r.amb, Math.max(red, r.amb + 1)];
+  }
+
+  /**
+   * ไล่สีอุณหภูมิบนหน้าคอยล์ดูดลม แยกตามหน้าเซลล์ของเมช (หน้าเดียวกับที่ตัวคำนวณใช้ดูดลม)
+   * สีของแต่ละหน้า = T ของเซลล์อากาศที่ติดหน้าคอยล์ — ส่วนที่ถูกบังไม่มีหน้าดูดจึงไม่มีสี
+   */
+  #updateInletShade() {
+    if (this.inletShade) {
+      this.scene3.remove(this.inletShade);
+      this.inletShade.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); });
+      this.inletShade = null;
+    }
+    const r = this.results, M = r?.mesh, T = r?.fields?.T;
+    if (!M?.modules || !T) return;
+    const { NX, NY, xf, yf, zf } = M;
+    const [lo, hi] = this.inletRange(), span = Math.max(1e-6, hi - lo);
+    const pos = [], col = [], edge = [];
+    const off = 0.012;   // ยกออกจากผิวเครื่องเล็กน้อย กันภาพซ้อน
+    for (const m of M.modules) {
+      for (let q = 0; q < m.inFaces.length; q++) {
+        const f = m.inFaces[q], ax = m.inAxis[q];
+        const i = f % NX, j = Math.floor(f / NX) % NY, k = Math.floor(f / (NX * NY));
+        const s = m.inVel[q] > 0 ? -1 : 1;   // ทิศจากผิวคอยล์ออกไปทางอากาศ
+        const [cr, cg, cb] = rgb((T[m.inCells[q]] - lo) / span).map(v => v / 255);
+        const y0 = yf[j - 1], y1 = yf[j];
+        let p;
+        if (ax === 0) {
+          const x = xf[i - 1] + s * off, z0 = zf[k - 1], z1 = zf[k];
+          p = [[x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0]];
+        } else {
+          const z = zf[k - 1] + s * off, x0 = xf[i - 1], x1 = xf[i];
+          p = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
+        }
+        for (const v of [p[0], p[1], p[2], p[0], p[2], p[3]]) { pos.push(...v); col.push(cr, cg, cb); }
+        for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0]]) edge.push(...p[a], ...p[b]);
+      }
+    }
+    if (!pos.length) return;
+    const g = new THREE.Group();
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    const faces = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    const eg = new THREE.BufferGeometry();
+    eg.setAttribute('position', new THREE.Float32BufferAttribute(edge, 3));
+    const lines = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x1c2a36, transparent: true, opacity: 0.35 }));
+    faces.raycast = () => {}; lines.raycast = () => {};
+    g.add(faces, lines);
+    g.renderOrder = 4;
+    this.inletShade = g;
+    this.scene3.add(g);
+  }
+
   setDisplay(patch) {
     Object.assign(this.display, patch);
     this.#updateSectionTexture();
@@ -812,7 +888,7 @@ export class Viewer {
     if ('objOpacity' in patch) for (const g of this.meshes.values()) this.#applyOpacity(g);
     this.labelLayer.classList.toggle('hidden', !this.display.labels);
     if ('mesh' in patch) this.#updateMeshLines();
-    if ('suction' in patch) for (const g of this.meshes.values()) if (g.userData.suction) g.userData.suction.visible = this.display.suction;
+    if ('suction' in patch) this.#applySuctionVis();
   }
 
   /**

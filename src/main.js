@@ -935,10 +935,9 @@ function updateBandLegend() {
   const b = scene.bands;
   const el = $('#band-legend');
   el.hidden = !run.fields || run.stale;
-  el.innerHTML = `<span class="muted">${L('สี CDU = T ลมเข้าเฉลี่ยรายโมดูล', 'CDU colour = mean inlet T per module')}</span>
-    <span><i class="chip chip-green"></i>≤ ${b.green} °C</span>
-    <span><i class="chip chip-yellow"></i>${b.green}–${b.red} °C</span>
-    <span><i class="chip chip-red"></i>&gt; ${b.red} °C</span>`;
+  const rg = viewer.inletRange() || [scene.site.ambient, b.red];
+  el.innerHTML = `<span class="muted">${L('หน้าคอยล์ดูดลม = T ลมเข้ารายเซลล์', 'Coil suction faces = inlet T per cell')}</span>
+    <span class="mono">${fmt(rg[0])}</span><i class="inlet-bar" style="background:${cssGradient()}"></i><span class="mono">≥ ${fmt(rg[1])} °C</span>`;
 }
 
 /** ผลรายเครื่อง (รวมโมดูล) จากรายงานล่าสุด */
