@@ -316,6 +316,186 @@ export const PRESETS = [
   },
 ];
 
+/* ───────── กรณีศึกษาจากคู่มือ "CFD Simulation Standard — Outdoor unit layout guide" (Siam Daikin, Rev.1) ─────────
+ * แต่ละกรณีมีคู่ "แบบเดิม" (ลมร้อนวนกลับ) และ "แบบแก้ไข" ตามที่คู่มือแนะนำ — เปิดได้จากเมนู ไฟล์ → กรณีศึกษา
+ * ขนาดฉากประมาณจากภาพในคู่มือ · ระแนง/แผ่นปิดใช้ % พื้นที่เปิดแทนรูปทรงจริง
+ *   ระแนงตัว Z ≈ 35% · เหล็กฉีก / Perforate รู Ø30 ระยะ 60 × 45 มม. ≈ 26% · ระแนงใบตรงตามคู่มือ ≥ 70% (ใช้ 75%)
+ */
+const slab = (name, x, z, w, d, y, extra = {}) => ({ type: 'slab', name, x, z, w, d, y, thick: 0.2, rot: 0, open: 0, ...extra });
+
+/** 1 — ระเบียง 1.6 × 1.2 ม. Split 2 ชุดซ้อนกัน เป่าลมเข้าผนังข้างระเบียง */
+function guideBalcony(fix) {
+  const d = fix ? 'left' : 'none';
+  return [
+    bldg(L('ผนังห้อง', 'Room wall'), 0.8, -0.5, 4.0, 1.0, 6.0),
+    wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 1.2, 3.0, 0),
+    wall(L('ผนังข้างขวา', 'Right side wall'), 1.6, 0.0, 1.6, 1.2, 3.0, 0),
+    wall(L('ราวกันตก', 'Balustrade'), 0.0, 1.2, 1.6, 1.2, 1.0, 60, { thick: 0.05 }),
+    slab(L('เพดานระเบียง', 'Balcony ceiling'), 0.8, 0.6, 1.6, 1.2, 3.0, { thick: 0.15 }),
+    cdu('CDU-1', 0.35, 0.6, 90, 'RKB12AV2S', { elev: 0.3, deflect: d }),
+    cdu('CDU-2', 0.35, 0.6, 90, 'RKB12AV2S', { elev: 1.1, deflect: d }),
+  ];
+}
+
+/**
+ * 2 — ช่องวางคอยล์ร้อนกว้าง 1.5 ม. ลึก 1.0 ม. ผนังทึบ 3 ด้าน เปิดด้านหน้าด้วยระแนงตั้ง 50%
+ *     ข้างช่องเป็นระเบียงที่มีประตูทึบกั้น · mode: 'before' | 'side' (เปิดด้านข้างเป็นระแนง 70%) | 'vrv' (Split 3 ชุด → VRV 1 ชุด)
+ */
+function guideNiche(mode) {
+  const objs = [
+    bldg(L('อาคาร', 'Building'), 1.75, -0.5, 4.5, 1.0, 6.0),
+    wall(L('ผนังทึบด้านซ้าย', 'Solid left wall'), 0.0, 0.0, 0.0, 1.0, 3.6, 0),
+    wall(mode === 'side' ? L('ผนังข้าง → ระแนง 70%', 'Side wall → 70% louver') : L('ประตูทึบกั้นระเบียง', 'Solid door to balcony'),
+      1.5, 0.0, 1.5, 1.0, 3.6, mode === 'side' ? 70 : 0),
+    wall(L('ระแนงตั้งด้านหน้า', 'Front vertical louver'), 0.0, 1.0, 1.5, 1.0, 3.6, 50, { thick: 0.08 }),
+    wall(L('ผนังข้างระเบียง', 'Balcony end wall'), 3.5, 0.0, 3.5, 1.0, 3.6, 0),
+    wall(L('ราวกันตกระเบียง', 'Balcony balustrade'), 1.5, 1.0, 3.5, 1.0, 1.0, 60, { thick: 0.05 }),
+    slab(L('พื้นชั้นบน', 'Floor slab above'), 1.75, 0.5, 3.5, 1.0, 3.6),
+  ];
+  if (mode === 'vrv') objs.push(cdu('CDU-1', 0.85, 0.5, 0, 'RSUQ8AYM', { elev: 2.4 }));
+  else objs.push(
+    cdu('CDU-1', 0.75, 0.5, 0, 'RKC24ZV2S', { elev: 0.3 }),
+    cdu('CDU-2', 0.75, 0.5, 0, 'RKC24ZV2S', { elev: 1.4 }),
+    cdu('CDU-3', 0.75, 0.5, 0, 'RKC24ZV2S', { elev: 2.5 }),
+  );
+  return objs;
+}
+
+/** 3 — ช่องยาวใต้หลังคา Split 4 ชุดเป่าออกด้านหน้าชนขอบปูนสูง 0.6 ม. · mode: 'before' | 'deflect' (ใบปรับทิศขึ้น) | 'raise' (ยกเครื่องพ้นขอบปูน) */
+function guideCurb(mode) {
+  const ex = mode === 'deflect' ? { deflect: 'up' } : mode === 'raise' ? { elev: 0.7 } : {};
+  return [
+    bldg(L('อาคาร', 'Building'), 3.0, -0.5, 6.4, 1.0, 6.0),
+    wall(L('ผนังปลายซ้าย', 'Left end wall'), 0.0, 0.0, 0.0, 1.0, 2.8, 0),
+    wall(L('ผนังปลายขวา', 'Right end wall'), 6.0, 0.0, 6.0, 1.0, 2.8, 0),
+    wall(L('ขอบปูน', 'Concrete upstand'), 0.0, 1.0, 6.0, 1.0, 0.6, 0, { thick: 0.2 }),
+    slab(L('หลังคา', 'Roof'), 3.0, 0.5, 6.0, 1.0, 2.8),
+    ...[1.2, 2.4, 3.6, 4.8].map((x, i) => cdu(`CDU-${i + 1}`, x, 0.45, 0, 'RKC18ZV2S', { elev: 0.05, ...ex })),
+  ];
+}
+
+/** 4 — ดาดฟ้า 10 × 6 ม. ล้อมด้วยผนังอิฐทึบสูง 2.6 ม. · fix: ผนัง → ระแนง 70%, VRV 6A ต่อ Hood ตรง 1 ม. พ้นผนัง, รุ่นเป่าหน้าปรับทิศขึ้น */
+function guideEnclosure(fix) {
+  const lv = fix ? 70 : 0, name = fix ? L('ระแนง', 'Louver') : L('ผนังอิฐ', 'Brick wall');
+  const top = fix ? { duct: 1.0 } : {}, side = fix ? { deflect: 'up' } : {};
+  return [
+    wall(`${name} ${L('เหนือ', 'N')}`, 0, 0, 10, 0, 2.6, lv),
+    wall(`${name} ${L('ตะวันออก', 'E')}`, 10, 0, 10, 6, 2.6, lv),
+    wall(`${name} ${L('ใต้', 'S')}`, 10, 6, 0, 6, 2.6, lv),
+    wall(`${name} ${L('ตะวันตก', 'W')}`, 0, 6, 0, 0, 2.6, lv),
+    cdu('CDU-1', 4.8, 2.3, 180, 'RXQ20BY1S', top),
+    cdu('CDU-2', 4.8, 3.7, 0, 'RXQ20BY1S', top),
+    cdu('CDU-3', 7.4, 2.3, 180, 'RXQ16BY1S', top),
+    cdu('CDU-4', 7.4, 3.7, 0, 'RXQ16BY1S', top),
+    cdu('CDU-5', 1.6, 1.6, 90, 'RXMQ6BVM', side),
+    cdu('CDU-6', 1.6, 3.0, 90, 'RXMQ6BVM', side),
+    cdu('CDU-7', 1.6, 4.4, 90, 'RXMQ6BVM', side),
+  ];
+}
+
+/** 5 — ช่องวางเครื่องกว้าง 3.2 ม. ลึก 1.0 ม. VRV IV S 2 ชุดเป่าออกผ่านระแนงหน้าอาคาร (% พื้นที่เปิด = open) */
+function guideScreen(open, label) {
+  return [
+    bldg(L('อาคาร', 'Building'), 1.6, -0.5, 4.2, 1.0, 6.0),
+    wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 1.0, 3.0, 0),
+    wall(L('ผนังข้างขวา', 'Right side wall'), 3.2, 0.0, 3.2, 1.0, 3.0, 0),
+    wall(label, 0.0, 1.0, 3.2, 1.0, 3.0, open, { thick: 0.08 }),
+    slab(L('พื้นชั้นบน', 'Floor slab above'), 1.6, 0.5, 3.2, 1.0, 3.0),
+    cdu('CDU-1', 0.9, 0.45, 0, 'RXMQ6BVM'),
+    cdu('CDU-2', 2.3, 0.45, 0, 'RXMQ6BVM'),
+  ];
+}
+
+/** 6 — ห้องเครื่องลึก 2.5 ม. VRV 6A 3 ชุดต่อ Hood หัก 90° เป่าออกหน้าอาคารผ่านแผงปิด (% พื้นที่เปิด = open) */
+function guideHoodScreen(open, label) {
+  const hood = { duct: 0.8, hoodType: 'elbow', hoodDir: 'front', hoodOut: 1.0 };
+  return [
+    bldg(L('อาคาร', 'Building'), 2.5, -0.5, 5.4, 1.0, 6.0),
+    wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 2.5, 3.4, 0),
+    wall(L('ผนังข้างขวา', 'Right side wall'), 5.0, 0.0, 5.0, 2.5, 3.4, 0),
+    wall(label, 0.0, 2.5, 5.0, 2.5, 3.4, open, { thick: 0.08 }),
+    slab(L('พื้นชั้นบน', 'Floor slab above'), 2.5, 1.25, 5.0, 2.5, 3.4),
+    cdu('CDU-1', 1.2, 1.0, 0, 'RXQ12BY1S', hood),
+    cdu('CDU-2', 2.5, 1.0, 0, 'RXQ12BY1S', hood),
+    cdu('CDU-3', 3.8, 1.0, 0, 'RXQ12BY1S', hood),
+  ];
+}
+
+/** 7 — VRV 6A 3 ชุดใต้สแลบ (ช่องว่างเหนือเครื่อง ~0.6 ม.) · fix: Hood หัก 90° ยื่นพ้นขอบสแลบ */
+function guideUnderSlab(fix) {
+  const hood = fix ? { duct: 0.6, hoodType: 'elbow', hoodDir: 'front', hoodOut: 1.0 } : {};
+  return [
+    bldg(L('อาคาร', 'Building'), 3.0, -0.5, 6.4, 1.0, 6.0),
+    wall(L('ผนังข้างซ้าย', 'Left side wall'), 0.0, 0.0, 0.0, 2.2, 2.9, 0),
+    wall(L('ผนังข้างขวา', 'Right side wall'), 6.0, 0.0, 6.0, 2.2, 2.9, 0),
+    slab(L('สแลบ / ฝ้าเพดาน', 'Slab / ceiling'), 3.0, 1.1, 6.0, 2.2, 2.9),
+    ...[1.6, 3.0, 4.4].map((x, i) => cdu(`CDU-${i + 1}`, x, 0.88, 0, 'RXQ12BY1S', hood)),
+  ];
+}
+
+/** [เลขกรณี, หัวข้อ (ไทย, อังกฤษ), รายการแบบ: [variant, ชื่อปุ่ม (ไทย, อังกฤษ), คำอธิบายฉาก (ไทย, อังกฤษ), build objects]] */
+const GUIDE = [
+  ['1', 'คอยล์ร้อนเป่าลมร้อนใส่ระเบียง', 'Hot air blown into a balcony', [
+    ['before', 'เป่าเข้าผนังระเบียง', 'blowing at the balcony wall', () => guideBalcony(false)],
+    ['after', 'ใบปรับทิศลมออกนอกระเบียง', 'deflector louver aimed out of the balcony', () => guideBalcony(true)],
+  ]],
+  ['2.1', 'ผนังทึบ 3 ด้าน — เพิ่มพื้นที่เปิดด้านข้าง', 'Solid walls on 3 sides — open the side', [
+    ['before', 'ระแนงหน้าด้านเดียว ประตูทึบ', 'front louver only, solid door', () => guideNiche('before')],
+    ['after', 'เปิดผนังข้างเป็นระแนง 70%', 'side wall opened as a 70% louver', () => guideNiche('side')],
+  ]],
+  ['2.2', 'ผนังทึบ 3 ด้าน — เปลี่ยนเป็น VRV', 'Solid walls on 3 sides — switch to VRV', [
+    ['before', 'Split 3 ชุดซ้อนกัน', '3 stacked Split units', () => guideNiche('before')],
+    ['after', 'VRV S Hi 1 ชุดด้านบน', 'one VRV S Hi unit at the top', () => guideNiche('vrv')],
+  ]],
+  ['3.1', 'ลมร้อนปะทะขอบปูน — ใบปรับทิศ', 'Hot air hits an upstand — deflector', [
+    ['before', 'เป่าชนขอบปูน', 'blowing into the upstand', () => guideCurb('before')],
+    ['after', 'ใบปรับทิศลมขึ้น 45°', 'deflector 45° up', () => guideCurb('deflect')],
+  ]],
+  ['3.2', 'ลมร้อนปะทะขอบปูน — ยกเครื่องสูงขึ้น', 'Hot air hits an upstand — raise the units', [
+    ['before', 'เป่าชนขอบปูน', 'blowing into the upstand', () => guideCurb('before')],
+    ['after', 'ยกเครื่องพ้นขอบปูน', 'units raised above the upstand', () => guideCurb('raise')],
+  ]],
+  ['4', 'ผนังทึบล้อมรอบที่วางคอยล์ร้อน', 'Solid walls around the units', [
+    ['before', 'ผนังอิฐทึบสูง 2.6 ม.', '2.6 m solid brick walls', () => guideEnclosure(false)],
+    ['after', 'ระแนง 70% + Hood + ใบปรับทิศ', '70% louvers + hoods + deflectors', () => guideEnclosure(true)],
+  ]],
+  ['5.1', 'ระแนงไม่เหมาะกับการระบายอากาศ — ระแนงตัว Z', 'Unsuitable screen — Z-louver', [
+    ['before', 'ระแนงตัว Z (เปิด ~35%)', 'Z-louver (~35% open)', () => guideScreen(35, L('ระแนงตัว Z ~35%', 'Z-louver ~35%'))],
+    ['after', 'ระแนงใบตรง 75%', 'straight louver 75%', () => guideScreen(75, L('ระแนงใบตรง 75%', 'Straight louver 75%'))],
+  ]],
+  ['5.2', 'ระแนงไม่เหมาะกับการระบายอากาศ — เหล็กฉีก / Perforate', 'Unsuitable screen — expanded / perforated metal', [
+    ['before', 'แผ่น Perforate (เปิด ~26%)', 'perforated sheet (~26% open)', () => guideScreen(26, L('เหล็กฉีก / Perforate ~26%', 'Expanded / perforated ~26%'))],
+    ['after', 'ระแนงใบตรง 75%', 'straight louver 75%', () => guideScreen(75, L('ระแนงใบตรง 75%', 'Straight louver 75%'))],
+  ]],
+  ['6', 'การอั้นลมร้อนภายใน Hood', 'Hot air trapped inside the hood', [
+    ['before', 'ปาก Hood ชนแผ่น Perforate ~26%', 'hood outlet behind ~26% perforated sheet', () => guideHoodScreen(26, L('แผ่น Perforate ~26%', 'Perforated sheet ~26%'))],
+    ['after', 'ระแนงใบตรง 75%', 'straight louver 75%', () => guideHoodScreen(75, L('ระแนงใบตรง 75%', 'Straight louver 75%'))],
+  ]],
+  ['7', 'ลมร้อนปะทะฝ้าเพดานหรือสแลบหลังคา', 'Hot air hits a ceiling or slab', [
+    ['before', 'ไม่มี Hood', 'no hood', () => guideUnderSlab(false)],
+    ['after', 'Hood หัก 90° ยื่นพ้นสแลบ', '90° elbow hood past the slab edge', () => guideUnderSlab(true)],
+  ]],
+];
+
+for (const [no, th, en, variants] of GUIDE) {
+  for (const [variant, vth, ven, objs] of variants) {
+    const tag = variant === 'before' ? ['แบบเดิม', 'Original'] : ['แบบแก้ไข', 'Fixed'];
+    PRESETS.push({
+      key: `guide-${no}-${variant}`, group: 'guide', caseNo: no, variant,
+      caseTitle: th, caseTitleEn: en, btn: tag[0], btnEn: tag[1],
+      label: `กรณีศึกษา ${no} ${tag[0]} — ${th}: ${vth}`,
+      labelEn: `Case ${no} ${tag[1]} — ${en}: ${ven}`,
+      build() {
+        return {
+          name: L(`กรณีศึกษา ${no} ${tag[0]} — ${th}: ${vth}`, `Case ${no} ${tag[1]} — ${en}: ${ven}`),
+          site: { ambient: 35, windSpeed: 0, windDir: 0 },
+          objects: withIds(objs()),
+        };
+      },
+    });
+  }
+}
+
 export function presetScene(key) {
   const p = PRESETS.find(q => q.key === key) || PRESETS[0];
   const s = newScene();

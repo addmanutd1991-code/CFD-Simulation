@@ -1711,7 +1711,17 @@ function applyTheme() {
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 function renderPresets() {
-  $('#preset-list').innerHTML = PRESETS.map(p => `<button class="mi" data-preset="${p.key}"><span class="mi-t">${esc(L(p.label, p.labelEn))}</span></button>`).join('');
+  $('#preset-list').innerHTML = PRESETS.filter(p => !p.group).map(p => `<button class="mi" data-preset="${p.key}"><span class="mi-t">${esc(L(p.label, p.labelEn))}</span></button>`).join('');
+  // กรณีศึกษาจากคู่มือการวางคอยล์ร้อน: หนึ่งแถวต่อกรณี พร้อมปุ่ม แบบเดิม / แบบแก้ไข
+  const cases = new Map();
+  for (const p of PRESETS.filter(q => q.group === 'guide')) {
+    if (!cases.has(p.caseNo)) cases.set(p.caseNo, []);
+    cases.get(p.caseNo).push(p);
+  }
+  $('#guide-list').innerHTML = [...cases].map(([no, ps]) => `<div class="case-row">
+      <span class="case-no">${esc(no)}</span><span class="case-t">${esc(L(ps[0].caseTitle, ps[0].caseTitleEn))}</span>
+      ${ps.map(p => `<button class="case-btn ${p.variant}" data-preset="${p.key}" title="${esc(L(p.label, p.labelEn))}">${esc(L(p.btn, p.btnEn))}</button>`).join('')}
+    </div>`).join('');
   $$('[data-preset]').forEach(b => b.addEventListener('click', () => loadPreset(b.dataset.preset)));
 }
 
@@ -1755,7 +1765,7 @@ function bindMenus() {
   }));
   // คลิกนอกเมนู หรือเลือกรายการแล้ว → ปิด
   document.addEventListener('pointerdown', (e) => { if (!e.target.closest?.('.menu, [data-menu]')) closeMenus(); }, true);
-  $$('.menu').forEach(m => m.addEventListener('click', (e) => { if (e.target.closest('.mi')) closeMenus(); }));
+  $$('.menu').forEach(m => m.addEventListener('click', (e) => { if (e.target.closest('.mi, .case-btn')) closeMenus(); }));
 }
 
 function loadPreset(key) {
