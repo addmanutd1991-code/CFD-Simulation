@@ -1551,6 +1551,14 @@ function toggleMesh(on = !viewer.display.mesh) {
   b.setAttribute('aria-pressed', String(on));
 }
 
+/* ───────── แสดงด้านดูดลม ───────── */
+function toggleSuction(on = !viewer.display.suction) {
+  viewer.setDisplay({ suction: on });
+  const b = $('#btn-suction');
+  b.classList.toggle('on', on);
+  b.setAttribute('aria-pressed', String(on));
+}
+
 function exportReport() {
   const units = unitsNow();
   if (!units) return;
@@ -1825,6 +1833,7 @@ function bindUI() {
   $('#rep-default').addEventListener('click', () => { repOpts = defaultRepOpts(); saveRepOpts(); renderReportPop(); });
   $('#rep-go').addEventListener('click', () => { toggleReportPop(false); exportReport(); });
   $('#btn-mesh').addEventListener('click', () => toggleMesh());
+  $('#btn-suction').addEventListener('click', () => toggleSuction());
   $('#btn-png').addEventListener('click', () => {
     const a = document.createElement('a');
     a.href = viewer.snapshot(); a.download = `${safeName(scene.name)}-3d.png`; a.click();
@@ -1921,6 +1930,7 @@ function bindUI() {
     else if (k === 'f') setTool('slab');
     else if (k === 'p') captureView();
     else if (k === 'g') toggleMesh();
+    else if (k === 'i') toggleSuction();
     else if (k >= '1' && k <= '6') setViewUI(['3d', 'n', 's', 'e', 'w', 'top'][+k - 1]);
     else if (k === ' ') { e.preventDefault(); startOrToggle(); }
     else if (k.startsWith('arrow') && selected()) {

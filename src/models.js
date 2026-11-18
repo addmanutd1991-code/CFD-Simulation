@@ -261,6 +261,18 @@ export function unitModules(unit) {
   });
 }
 
+/** ช่วงความสูงของคอยล์ดูดลม (สัดส่วนความสูงเครื่อง) — ใช้ทั้งตัวคำนวณและภาพแสดงด้านดูด */
+export const COIL_LO = 0.08, COIL_HI = 0.92;
+
+/**
+ * ด้านที่คอยล์ดูดลมเข้า ในแกนเฉพาะของเครื่อง (ตรงกับ mesher.js)
+ *   เป่าขึ้น (VRV 6A): หลัง + ซ้าย + ขวา   ·   เป่าหน้า: หลัง + ซ้าย
+ *   ถ้าด้านเหล่านี้ถูกบังหมด ตัวคำนวณจะใช้ช่องด้านหน้าแทน
+ */
+export function suctionSides(unit) {
+  return getModel(unit.model).discharge === 'front' ? ['back', 'left'] : ['back', 'left', 'right'];
+}
+
 /** ขาตั้ง CDU: ใส่เฉพาะ VRV 6A และเมื่อระยะยกจากพื้นรองรับไม่เกิน 10 ซม. — สูงกว่านี้เครื่องลอยเหนือพื้น (ลมผ่านใต้เครื่องได้) */
 export const STAND_MAX = 0.10;
 export function hasStand(unit, gap) {

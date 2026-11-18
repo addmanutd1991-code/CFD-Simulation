@@ -24,13 +24,12 @@
  */
 
 import { L as tr } from './i18n.js';
-import { unitModules, unitSize, getModel, hasStand, FAN_AREA, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
+import { unitModules, unitSize, getModel, hasStand, COIL_LO, COIL_HI, suctionSides, FAN_AREA, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
 import { domainOf, cloneBC, slabRange, insideRect } from './scene.js';
 import { cellIndex } from './grid.js';
 
 export const FLUID = 0, SOLID = 1, OPEN = 2;
 
-const COIL_LO = 0.08, COIL_HI = 0.92;   // ช่วงความสูงของคอยล์ (สัดส่วนความสูงเครื่อง)
 const LOUVER_CD = 0.6;                   // สัมประสิทธิ์การไหลผ่านช่องใบเกล็ด
 
 /** ค่าสัมประสิทธิ์ความสูญเสียของ louver จาก % พื้นที่เปิด: K = (1/(Cd·φ) − 1)² */
@@ -421,7 +420,7 @@ export function buildMesh(scene) {
         });
         return out;
       };
-      const SIDES = front ? ['back', 'left'] : ['back', 'left', 'right'];
+      const SIDES = suctionSides(o);
       let faces = collect(SIDES);
       if (!faces.length) {
         faces = collect(['front']);

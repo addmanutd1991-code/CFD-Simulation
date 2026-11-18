@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { unitModules, unitSize, getModel, hasStand, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
+import { unitModules, unitSize, getModel, hasStand, COIL_LO, COIL_HI, suctionSides, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
 import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
 import { axisLocator } from './grid.js';
@@ -53,7 +53,7 @@ export class Viewer {
     this.section = { axis: 'x', pos: 0, show: true };
     // mode: รูปแบบกราฟิกบนระนาบหน้าตัด — 'contour' | 'stream' (streamline) | 'vector'
     // playing: ภาพเคลื่อนไหว (อนุภาค / streamline) เดินเฉพาะเมื่อกดเล่น
-    this.display = { mode: 'contour', field: 'T', particles: true, iso: true, isoDT: 2, labels: false, objOpacity: 1, playing: false, mesh: false };
+    this.display = { mode: 'contour', field: 'T', particles: true, iso: true, isoDT: 2, labels: false, objOpacity: 1, playing: false, mesh: false, suction: false };
     this.animT = 0;
 
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -443,6 +443,9 @@ export class Viewer {
         g.add(hg);
       }
     }
+    const suc = this.#suctionMarks(o, sz, mods, yb);
+    g.userData.suction = suc;
+    g.add(suc);
     // ลูกศรบอกด้านหน้าเครื่อง (ด้านบริการ) บนพื้น
     const arrow = new THREE.Mesh(arrowShape(0.28), new THREE.MeshBasicMaterial({ color: 0x4f5b66, transparent: true, opacity: 0.55 }));
     arrow.rotation.x = -Math.PI / 2;
@@ -452,6 +455,44 @@ export class Viewer {
     g.rotation.y = o.rot * Math.PI / 180;
     this.#tintCdu(o.id, g);
     return g;
+  }
+
+  /**
+   * ด้านดูดลม: แถบสีฟ้าโปร่งแสงบนหน้าคอยล์ (ช่วงความสูง COIL_LO–COIL_HI) + ลูกศรชี้เข้าเครื่อง
+   * ด้านเดียวกับที่ตัวคำนวณใช้ (suctionSides) — ด้านที่ติดกับโมดูลในชุดเดียวกันไม่ดูดลม
+   */
+  #suctionMarks(o, sz, mods, yb) {
+    const grp = new THREE.Group();
+    grp.visible = !!this.display.suction;
+    const y0 = yb + COIL_LO * sz.h, y1 = yb + COIL_HI * sz.h, ym = (y0 + y1) / 2, hh = y1 - y0;
+    const hw = sz.w / 2, hd = sz.d / 2, off = 0.02;
+    const mat = new THREE.MeshBasicMaterial({ color: 0x2f9be8, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false });
+    const sides = suctionSides(o);
+    // [ความยาวหน้า, ตำแหน่งกึ่งกลาง (x, z), ทิศชี้ออกจากเครื่อง (nx, nz)]
+    const faces = [];
+    if (sides.includes('back')) for (const m of mods) faces.push([m.x1 - m.x0, (m.x0 + m.x1) / 2, -hd - off, 0, -1]);
+    if (sides.includes('left')) faces.push([sz.d, -hw - off, 0, -1, 0]);
+    if (sides.includes('right')) faces.push([sz.d, hw + off, 0, 1, 0]);
+    const aLen = 0.4;
+    for (const [len, cx, cz, nx, nz] of faces) {
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(len, hh), mat);
+      pl.position.set(cx, ym, cz);
+      pl.rotation.y = nx ? Math.PI / 2 : 0;
+      pl.renderOrder = 4;
+      pl.raycast = () => {};
+      grp.add(pl);
+      const n = Math.max(1, Math.round(len / 0.45));
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n - 0.5;
+        const px = cx + (nx ? 0 : t * len) + nx * (aLen + 0.03);
+        const pz = cz + (nz ? 0 : t * len) + nz * (aLen + 0.03);
+        const a = new THREE.ArrowHelper(new THREE.Vector3(-nx, 0, -nz), new THREE.Vector3(px, ym, pz), aLen, 0x1f7fd0, 0.13, 0.09);
+        a.traverse(c => { c.raycast = () => {}; });
+        grp.add(a);
+      }
+    }
+    grp.raycast = () => {};
+    return grp;
   }
 
   /**
@@ -771,6 +812,7 @@ export class Viewer {
     if ('objOpacity' in patch) for (const g of this.meshes.values()) this.#applyOpacity(g);
     this.labelLayer.classList.toggle('hidden', !this.display.labels);
     if ('mesh' in patch) this.#updateMeshLines();
+    if ('suction' in patch) for (const g of this.meshes.values()) if (g.userData.suction) g.userData.suction.visible = this.display.suction;
   }
 
   /**

@@ -35,6 +35,7 @@
   <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10.2 10h.01M13.8 10h.01M17.5 10h.01M6.5 14h.01M17.5 14h.01M9.5 14h5"/></symbol>
   <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.4"/></symbol>
   <symbol id="i-mesh" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="1"/><path d="M3.5 9h17M3.5 13.5h17M3.5 17h17M9 3.5v17M13.5 3.5v17M17 3.5v17"/></symbol>
+  <symbol id="i-suction" viewBox="0 0 24 24"><rect x="9" y="5" width="11" height="14" rx="1.2"/><path d="M2.5 9h4.5M5 7l2 2-2 2M2.5 15h4.5M5 13l2 2-2 2"/></symbol>
   <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
   <symbol id="i-unfull" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5v14l11.5-7z" fill="currentColor"/></symbol>
@@ -156,6 +157,7 @@
               </div>
               <div class="vseg glass">
                 <button class="vact" id="btn-mesh" aria-pressed="false" title="Show mesh: แสดงเส้นกริดของเมชที่ใช้คำนวณ บนพื้นและระนาบตัด (G)" data-en-title="Show mesh: draw the calculation grid on the floor and the section plane (G)"><svg class="ic"><use href="#i-mesh"/></svg><span>Mesh</span></button>
+                <button class="vact" id="btn-suction" aria-pressed="false" title="แสดงด้านดูดลม (หน้าคอยล์) ของ CDU ทุกเครื่อง (I)" data-en-title="Show the suction (coil) faces of every CDU (I)"><svg class="ic"><use href="#i-suction"/></svg><span data-en="Suction">ลมดูด</span></button>
                 <button class="vact" id="btn-capture" title="Capture: บันทึกภาพมุมมองนี้ (พร้อมแถบสี) ไว้ใส่รายงาน — กดได้หลายมุม (P)" data-en-title="Capture: save this view (with the colour bar) for the report — as many views as you like (P)" aria-label="Capture"><svg class="ic"><use href="#i-camera"/></svg></button>
                 <button class="vact" id="btn-full" title="เต็มจอ (Esc เพื่อออก)" aria-label="Fullscreen"><svg class="ic"><use id="full-ic" href="#i-full"/></svg></button>
               </div>
@@ -819,6 +821,7 @@
       <span><kbd>1</kbd>–<kbd>6</kbd> <span data-en="3D, North, South, East, West, Top">3D เหนือ ใต้ ออก ตก Top</span></span>
       <span><kbd>P</kbd> <span data-en="Capture image">Capture ภาพ</span></span>
       <span><kbd>G</kbd> <span data-en="Show / hide mesh">แสดง / ซ่อนเมช</span></span>
+      <span><kbd>I</kbd> <span data-en="Show / hide suction faces">แสดง / ซ่อนด้านดูดลม</span></span>
       <span><kbd>Space</kbd> <span data-en="Run / pause">คำนวณ / หยุด</span></span>
       <span><kbd>Ctrl+S</kbd> <span data-en="Save">บันทึก</span></span>
       <span><kbd>?</kbd> <span data-en="Open/close this table">เปิด/ปิดหน้านี้</span></span>
