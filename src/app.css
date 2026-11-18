@@ -266,9 +266,9 @@ a { color: var(--accent); }
 .vseg, .status { pointer-events: auto; }
 .vseg { display: inline-flex; padding: 3px; gap: 2px; }
 .vt, .vact { background: transparent; border-color: transparent; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: var(--text-2); }
-.vact { padding: 4px 8px; }
+.vact { padding: 4px 8px; display: inline-flex; align-items: center; gap: 4px; }
 .vt:hover:not(:disabled), .vact:hover:not(:disabled) { background: var(--glass-hover); border-color: transparent; color: var(--text); }
-.vt.on, .vt.on:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.vt.on, .vt.on:hover:not(:disabled), .vact.on, .vact.on:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
 .status { flex: 0 1 304px; min-width: 0; padding: 8px 10px 7px; font-size: 12.5px; }
 .st-row { display: flex; align-items: center; gap: 7px; }
@@ -683,3 +683,11 @@ body.model-locked .tool:not([data-tool="select"]) { opacity: .4; }
   #btn-edit, #btn-reset { padding: 6px 4px; }
   #btn-run { padding: 6px 10px; }
 }
+
+/* ── ตัวเลือกรายงาน ── */
+.report-pop { width: min(520px, 100%); }
+.rep-h { margin: 12px 0 4px; font-weight: 600; font-size: 13px; }
+.rep-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.rep-opts label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.rep-act { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+.rep-act .spacer { flex: 1; }

@@ -1131,7 +1131,7 @@ function renderAdvice(units) {
     if (solidNear.length) tips.push(L(`ผนังทึบใกล้เครื่อง (${solidNear.map(w => esc(w.name)).join(', ')}) — เปลี่ยนเป็น louver หรือเว้นระยะมากขึ้น`, `Solid wall near the unit (${solidNear.map(w => esc(w.name)).join(', ')}) — change it to a louver or increase the clearance`));
     if (u.blockedPct > 20) tips.push(L(`หน้าคอยล์ถูกบัง ${u.blockedPct.toFixed(0)}% — เพิ่มระยะจากผนัง/เครื่องข้างเคียง`, `Coil face ${u.blockedPct.toFixed(0)}% blocked — increase the distance from walls/neighbouring units`));
     if (!tips.length) tips.push(L('ขยับให้ห่างจากเครื่องที่อยู่ต้นลม หรือเพิ่มระยะระหว่างแถว', 'Move it away from upwind units, or increase the row spacing'));
-    out.push(`<li><b class="st-${u.status.key}">${esc(u.name)}</b> ΔT +${u.dT.toFixed(2)} °C · ${L('ลมวนกลับ', 'recirculation')} ${(u.Cin * 100).toFixed(1)}% · capacity ${(u.capF * 100).toFixed(1)}%
+    out.push(`<li><b class="st-${u.status.key}">${esc(u.name)}</b> ΔT +${u.dT.toFixed(2)} °C · ${L('ลมวนกลับ', 'recirculation')} ${(u.Cin * 100).toFixed(1)}%<span class="adv-cap"> · capacity ${(u.capF * 100).toFixed(1)}%</span>
       <br>${tips.map(t => '→ ' + t).join('<br>')}</li>`);
   }
   if (!out.length) out.push(L('<li><b class="st-ok">ทุกเครื่อง ΔT &lt; 1 °C</b> — ลมร้อนวนกลับน้อย ผังนี้ใช้ได้ในเงื่อนไขที่ตั้งไว้</li>', '<li><b class="st-ok">All units ΔT &lt; 1 °C</b> — little recirculation; this layout works under the set conditions</li>'));
@@ -1492,6 +1492,65 @@ function exportCSV() {
   download(`${safeName(scene.name)}-results.csv`, csv, 'text/csv');
 }
 
+/* ───────── ตัวเลือกรายงาน: เลือกคอลัมน์/หัวข้อที่จะแสดง ─────────
+ * Capacity ซ่อนไว้เป็นค่าเริ่มต้น — เป็นค่าประมาณจากแบบจำลอง ไม่ใช่ Capacity จริงของเครื่อง */
+const REPORT_KEY = 'cdu-cfd-report-opts';
+const REPORT_COLS = () => [
+  { k: 'name', th: 'CDU', td: u => `<td>${esc(u.name)}</td>` },
+  { k: 'model', th: L('รุ่น', 'Model'), td: u => `<td>${esc(u.model)}</td>` },
+  { k: 'kw', th: L('kW พิกัด', 'Rated kW'), td: u => `<td class="n">${u.kwRated.toFixed(1)}</td>` },
+  { k: 'cmm', th: L('ลม m³/min', 'Airflow m³/min'), td: u => `<td class="n">${u.cmm.toFixed(0)}</td>` },
+  { k: 'tin', th: L('T ลมเข้า °C', 'Inlet T °C'), td: u => `<td class="n">${u.Tin.toFixed(2)}</td>` },
+  { k: 'tmax', th: L('สูงสุด °C', 'Max °C'), td: u => `<td class="n">${u.TinMax.toFixed(1)}</td>` },
+  { k: 'dt', th: 'ΔT °C', td: u => `<td class="n">+${u.dT.toFixed(2)}</td>` },
+  { k: 'recirc', th: L('ลมวนกลับ %', 'Recirc. %'), td: u => `<td class="n">${(u.Cin * 100).toFixed(1)}</td>` },
+  { k: 'cap', th: 'Capacity %', td: u => `<td class="n">${(u.capF * 100).toFixed(1)}</td>`, off: true },
+  { k: 'kwa', th: L('kW ที่ได้', 'Available kW'), td: u => `<td class="n">${u.kwAvail.toFixed(1)}</td>`, off: true },
+  { k: 'status', th: L('สถานะ', 'Status'), td: u => `<td class="${u.status.key}">${u.status.label}</td>` },
+  { k: 'band', th: L('เกณฑ์ T ลมกลับ', 'Return-air criterion'), td: u => `<td><i class="chip chip-${unitBand(u)}"></i>${BAND_TEXT()[unitBand(u)].label}</td>` },
+];
+const REPORT_SECS = () => [
+  { k: 'figs', label: L('ภาพที่ Capture', 'Captured images') },
+  { k: 'criteria', label: L('เกณฑ์อุณหภูมิลมกลับ', 'Return-air criteria') },
+  { k: 'advice', label: L('ข้อสังเกต', 'Observations') },
+  { k: 'remark', label: L('หมายเหตุท้ายรายงาน', 'Closing remark') },
+];
+function defaultRepOpts() {
+  return {
+    cols: Object.fromEntries(REPORT_COLS().map(c => [c.k, !c.off])),
+    secs: Object.fromEntries(REPORT_SECS().map(c => [c.k, true])),
+  };
+}
+let repOpts = defaultRepOpts();
+try {
+  const v = JSON.parse(localStorage.getItem(REPORT_KEY) || 'null');
+  if (v?.cols && v?.secs) repOpts = { cols: { ...repOpts.cols, ...v.cols }, secs: { ...repOpts.secs, ...v.secs } };
+} catch { /* ถูกบล็อก */ }
+function saveRepOpts() { try { localStorage.setItem(REPORT_KEY, JSON.stringify(repOpts)); } catch { /* ถูกบล็อก */ } }
+
+function renderReportPop() {
+  const box = (list, grp) => list.map(c => `<label><input type="checkbox" data-g="${grp}" data-k="${c.k}" ${repOpts[grp][c.k] ? 'checked' : ''}>${c.label ?? c.th}</label>`).join('');
+  $('#rep-cols').innerHTML = box(REPORT_COLS(), 'cols');
+  $('#rep-secs').innerHTML = box(REPORT_SECS(), 'secs');
+  $$('#report-pop input[type=checkbox]').forEach(el => el.addEventListener('change', () => {
+    repOpts[el.dataset.g][el.dataset.k] = el.checked;
+    saveRepOpts();
+  }));
+}
+function toggleReportPop(show) {
+  if (show && !run.report) return;
+  if (show) renderReportPop();
+  $('#report-pop').hidden = !show;
+}
+
+/* ───────── Show mesh ───────── */
+function toggleMesh(on = !viewer.display.mesh) {
+  viewer.setDisplay({ mesh: on });
+  const b = $('#btn-mesh');
+  b.classList.toggle('on', on);
+  b.setAttribute('aria-pressed', String(on));
+}
+
 function exportReport() {
   const units = unitsNow();
   if (!units) return;
@@ -1505,22 +1564,23 @@ function exportReport() {
     .chip{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
     .chip-green{background:#3ecf6e}.chip-yellow{background:#f5c518}.chip-red{background:#e5433b}
     .remark{border-top:1px solid #c8d3dc;margin-top:22px;padding-top:8px;font-size:13px}.ok{color:#1c8a55}.watch{color:#b8860b}.bad{color:#c8551b}.trip{color:#c21d2d}ul{padding-left:18px}`;
-  const tbl = units.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.model)}</td><td class="n">${u.kwRated.toFixed(1)}</td><td class="n">${u.cmm.toFixed(0)}</td>
-    <td class="n">${u.Tin.toFixed(2)}</td><td class="n">${u.TinMax.toFixed(1)}</td><td class="n">+${u.dT.toFixed(2)}</td><td class="n">${(u.Cin * 100).toFixed(1)}</td>
-    <td class="n">${(u.capF * 100).toFixed(1)}</td><td class="n">${u.kwAvail.toFixed(1)}</td><td class="${u.status.key}">${u.status.label}</td>
-    <td><i class="chip chip-${unitBand(u)}"></i>${BAND_TEXT()[unitBand(u)].label}</td></tr>`).join('');
+  const cols = REPORT_COLS().filter(c => repOpts.cols[c.k]);
+  const sec = repOpts.secs;
+  const tbl = units.map(u => `<tr>${cols.map(c => c.td(u)).join('')}</tr>`).join('');
+  let advice = $('#advice').innerHTML;
+  if (!repOpts.cols.cap) advice = advice.replace(/<span class="adv-cap">.*?<\/span>/g, '');
   const html = `<!DOCTYPE html><html lang="${getLang()}"><head><meta charset="utf-8"><title>${esc(scene.name)} — CDU Airflow CFD</title><style>${css}</style></head><body>
     <h1>${esc(scene.name)}</h1><p class="muted">${L('รายงานจาก CDU Airflow CFD', 'Report from CDU Airflow CFD')} · ${date}</p>
     <p>${L('อากาศภายนอก', 'Ambient')} ${scene.site.ambient} °C · ${L('ลม', 'wind')} ${scene.site.windSpeed} m/s ${L('จากทิศ', 'from')} ${scene.site.windDir}° · ${L('เซลล์', 'cell')} ${run.mesh.h} ${L('ม.', 'm')}
       (${run.mesh.nx}×${run.mesh.ny}×${run.mesh.nz}) · ${L('เวลาจำลอง', 'simulated time')} ${r.time.toFixed(0)} s · ${r.converged ? L('ลู่เข้าแล้ว', 'Converged') : L('ยังไม่ลู่เข้า', 'not converged')}
       · ${L('สมดุลพลังงาน', 'energy balance')} ${(r.balance.ratio * 100).toFixed(1)}%</p>
-    ${shots.map((c, i) => `<figure><img src="${c.url}" alt="${esc(c.caption)}"><figcaption>${L('รูปที่', 'Figure')} ${i + 1} — ${esc(c.caption)}</figcaption></figure>`).join('')}
-    <h2>${L('ผลรายเครื่อง', 'Results per unit')}</h2>
-    <table><tr>${L(['CDU', 'รุ่น', 'kW พิกัด', 'ลม m³/min', 'T ลมเข้า °C', 'สูงสุด °C', 'ΔT °C', 'ลมวนกลับ %', 'Capacity %', 'kW ที่ได้', 'สถานะ', 'เกณฑ์ T ลมกลับ'], ['CDU', 'Model', 'Rated kW', 'Airflow m³/min', 'Inlet T °C', 'Max °C', 'ΔT °C', 'Recirc. %', 'Capacity %', 'Available kW', 'Status', 'Return-air criterion']).map(t => `<th>${t}</th>`).join('')}</tr>${tbl}</table>
-    <h2>${L('เกณฑ์อุณหภูมิลมกลับ', 'Return-air temperature criteria')}</h2>${bandCriteriaHTML()}
-    <h2>${L('ข้อสังเกต', 'Observations')}</h2><ul>${$('#advice').innerHTML}</ul>
+    ${sec.figs ? shots.map((c, i) => `<figure><img src="${c.url}" alt="${esc(c.caption)}"><figcaption>${L('รูปที่', 'Figure')} ${i + 1} — ${esc(c.caption)}</figcaption></figure>`).join('') : ''}
+    ${cols.length ? `<h2>${L('ผลรายเครื่อง', 'Results per unit')}</h2>
+    <table><tr>${cols.map(c => `<th>${c.th}</th>`).join('')}</tr>${tbl}</table>` : ''}
+    ${sec.criteria ? `<h2>${L('เกณฑ์อุณหภูมิลมกลับ', 'Return-air temperature criteria')}</h2>${bandCriteriaHTML()}` : ''}
+    ${sec.advice ? `<h2>${L('ข้อสังเกต', 'Observations')}</h2><ul>${advice}</ul>` : ''}
     <p class="muted">${L(`ค่าเฉลี่ยตามเวลาในช่วง ${r.avgWindow.toFixed(0)} วินาทีสุดท้าย · ตัวเลขสมรรถนะเป็นค่าอ้างอิงโดยประมาณ ใช้เพื่อเปรียบเทียบผังการวางเครื่อง`, `Time-averaged over the last ${r.avgWindow.toFixed(0)} s · performance figures are approximate references for comparing layouts`)}</p>
-    <div class="remark">${remarkHTML()}</div>
+    ${sec.remark ? `<div class="remark">${remarkHTML()}</div>` : ''}
     </body></html>`;
   download(`${safeName(scene.name)}-report.html`, html, 'text/html');
 }
@@ -1759,7 +1819,12 @@ function bindUI() {
   }));
   lightQuery.addEventListener('change', applyTheme);
   $('#btn-csv').addEventListener('click', exportCSV);
-  $('#btn-report').addEventListener('click', exportReport);
+  $('#btn-report').addEventListener('click', () => toggleReportPop(true));
+  $('#report-pop .keys-x').addEventListener('click', () => toggleReportPop(false));
+  $('#report-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleReportPop(false); });
+  $('#rep-default').addEventListener('click', () => { repOpts = defaultRepOpts(); saveRepOpts(); renderReportPop(); });
+  $('#rep-go').addEventListener('click', () => { toggleReportPop(false); exportReport(); });
+  $('#btn-mesh').addEventListener('click', () => toggleMesh());
   $('#btn-png').addEventListener('click', () => {
     const a = document.createElement('a');
     a.href = viewer.snapshot(); a.download = `${safeName(scene.name)}-3d.png`; a.click();
@@ -1824,6 +1889,7 @@ function bindUI() {
     const ctrl = e.ctrlKey || e.metaKey;
     if (k === 'escape' && $$('.menu').some(m => !m.hidden)) { closeMenus(); return; }
     if (!$('#keys-pop').hidden && (k === 'escape' || k === '?')) { toggleKeys(false); return; }
+    if (!$('#report-pop').hidden) { if (k === 'escape') toggleReportPop(false); return; }
     if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if (ctrl && k === 'c') { if (selected()) { e.preventDefault(); copySelected(); } }
@@ -1854,6 +1920,7 @@ function bindUI() {
     else if (k === 'b') setTool('building');
     else if (k === 'f') setTool('slab');
     else if (k === 'p') captureView();
+    else if (k === 'g') toggleMesh();
     else if (k >= '1' && k <= '6') setViewUI(['3d', 'n', 's', 'e', 'w', 'top'][+k - 1]);
     else if (k === ' ') { e.preventDefault(); startOrToggle(); }
     else if (k.startsWith('arrow') && selected()) {

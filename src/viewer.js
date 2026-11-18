@@ -53,7 +53,7 @@ export class Viewer {
     this.section = { axis: 'x', pos: 0, show: true };
     // mode: รูปแบบกราฟิกบนระนาบหน้าตัด — 'contour' | 'stream' (streamline) | 'vector'
     // playing: ภาพเคลื่อนไหว (อนุภาค / streamline) เดินเฉพาะเมื่อกดเล่น
-    this.display = { mode: 'contour', field: 'T', particles: true, iso: true, isoDT: 2, labels: false, objOpacity: 1, playing: false };
+    this.display = { mode: 'contour', field: 'T', particles: true, iso: true, isoDT: 2, labels: false, objOpacity: 1, playing: false, mesh: false };
     this.animT = 0;
 
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -94,6 +94,7 @@ export class Viewer {
     this.scene3.add(this.gGround, this.gObjects, this.gHandles, this.gPreview);
 
     this.#initSection();
+    this.meshLines = null;
     this.#initStreaks();
     this.#initIso();
     this.#initGlyphs();
@@ -206,6 +207,7 @@ export class Viewer {
     this.#buildWindArrow();
     this.#rebuildObjects();
     this.#updateSectionGeometry();
+    this.#updateMeshLines();
     if (first) this.setView(this.view);
   }
 
@@ -712,6 +714,7 @@ export class Viewer {
     this.section = { axis, pos, show };
     this.#updateSectionGeometry();
     this.#updateSectionTexture();
+    this.#updateMeshLines();
     this.glyphDirty = true;
   }
 
@@ -767,6 +770,37 @@ export class Viewer {
     if ('particles' in patch) this.streakDirty = true;
     if ('objOpacity' in patch) for (const g of this.meshes.values()) this.#applyOpacity(g);
     this.labelLayer.classList.toggle('hidden', !this.display.labels);
+    if ('mesh' in patch) this.#updateMeshLines();
+  }
+
+  /**
+   * Show mesh: เส้นกริดของเมชที่ใช้คำนวณ (xf/yf/zf ของโดเมน — ตามขนาดเซลล์และเมชปรับความละเอียด)
+   * วาดบนพื้น (ระนาบ x–z) และบนระนาบตัด (ถ้าแสดงอยู่)
+   */
+  #updateMeshLines() {
+    if (this.meshLines) { this.scene3.remove(this.meshLines); this.meshLines.geometry.dispose(); this.meshLines.material.dispose(); this.meshLines = null; }
+    const d = this.dom;
+    if (!this.display.mesh || !d?.xf) return;
+    const { xf, yf, zf } = d;
+    const x0 = xf[0], x1 = xf[xf.length - 1], y0 = yf[0], y1 = yf[yf.length - 1], z0 = zf[0], z1 = zf[zf.length - 1];
+    const v = [];
+    const seg = (a, b, c, e, f, g) => v.push(a, b, c, e, f, g);
+    const yg = 0.015;   // ยกจากพื้นเล็กน้อยกัน z-fighting
+    for (const x of xf) seg(x, yg, z0, x, yg, z1);
+    for (const z of zf) seg(x0, yg, z, x1, yg, z);
+    const sec = this.section;
+    if (sec?.show) {
+      const p = sec.pos, e = 0.012;
+      if (sec.axis === 'x') { for (const y of yf) seg(p + e, y, z0, p + e, y, z1); for (const z of zf) seg(p + e, y0, z, p + e, y1, z); }
+      else if (sec.axis === 'z') { for (const y of yf) seg(x0, y, p + e, x1, y, p + e); for (const x of xf) seg(x, y0, p + e, x, y1, p + e); }
+      else { for (const x of xf) seg(x, p + e, z0, x, p + e, z1); for (const z of zf) seg(x0, p + e, z, x1, p + e, z); }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+    this.meshLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x2b3d4f, transparent: true, opacity: 0.5, depthWrite: false }));
+    this.meshLines.renderOrder = 3;
+    this.meshLines.raycast = () => {};
+    this.scene3.add(this.meshLines);
   }
 
   /** เล่น / หยุดภาพเคลื่อนไหว — คืนค่าสถานะใหม่ */
@@ -1516,6 +1550,7 @@ export class Viewer {
         this.#updateSectionGeometry();
         this.#updateSectionTexture();
         this.glyphDirty = true;
+        this.#updateMeshLines();
         this.cb.onSectionMoved?.(v, false);
       }
       return;
