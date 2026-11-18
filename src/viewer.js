@@ -53,7 +53,7 @@ export class Viewer {
     this.section = { axis: 'x', pos: 0, show: true };
     // mode: รูปแบบกราฟิกบนระนาบหน้าตัด — 'contour' | 'stream' (streamline) | 'vector'
     // playing: ภาพเคลื่อนไหว (อนุภาค / streamline) เดินเฉพาะเมื่อกดเล่น
-    this.display = { mode: 'contour', field: 'T', particles: true, iso: true, isoDT: 2, labels: false, objOpacity: 1, playing: false, mesh: false, suction: false };
+    this.display = { mode: 'contour', field: 'T', particles: true, iso: true, isoDT: 2, labels: false, objOpacity: 1, playing: false, mesh: false, suction: false, cduColor: 'band' };
     this.animT = 0;
 
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -516,7 +516,7 @@ export class Viewer {
    */
   #tintCdu(id, g) {
     // มีสีอุณหภูมิรายเซลล์บนหน้าคอยล์แล้ว → ตัวเครื่องคงสีปกติ (ไม่ทาสีทั้งเครื่อง)
-    const temps = this.results?.fields?.T ? null : this.results?.modTin?.get(id);
+    const temps = this.display.cduColor === 'shade' ? null : this.results?.modTin?.get(id);
     const b = this.sceneData?.bands || { green: 40, red: 46 };
     g.userData.modMats?.forEach((mats, i) => {
       const t = temps?.[i];
@@ -829,54 +829,55 @@ export class Viewer {
   }
 
   /**
-   * ไล่สีอุณหภูมิบนหน้าคอยล์ดูดลม แยกตามหน้าเซลล์ของเมช (หน้าเดียวกับที่ตัวคำนวณใช้ดูดลม)
-   * สีของแต่ละหน้า = T ของเซลล์อากาศที่ติดหน้าคอยล์ — ส่วนที่ถูกบังไม่มีหน้าดูดจึงไม่มีสี
+   * ไล่เฉดอุณหภูมิบนหน้าคอยล์ดูดลม (โหมดสี CDU = 'shade')
+   * ใช้หน้าดูดลมชุดเดียวกับตัวคำนวณ: ค่าที่มุมของแต่ละหน้าเซลล์ = ค่าเฉลี่ยของหน้าเซลล์ที่ติดมุมนั้น
+   * แล้วแทรกค่าเชิงเส้นทั่วผิว และเปิดสีจากแถบสีทีละพิกเซล → เฉดต่อเนื่อง ไม่เป็นช่องตามเซลล์
+   * ส่วนที่ถูกบังไม่มีหน้าดูดจึงไม่มีสี
    */
   #updateInletShade() {
     if (this.inletShade) {
       this.scene3.remove(this.inletShade);
-      this.inletShade.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); });
+      this.inletShade.geometry.dispose(); this.inletShade.material.dispose();
       this.inletShade = null;
     }
     const r = this.results, M = r?.mesh, T = r?.fields?.T;
-    if (!M?.modules || !T) return;
+    if (this.display.cduColor !== 'shade' || !M?.modules || !T) return;
     const { NX, NY, xf, yf, zf } = M;
     const [lo, hi] = this.inletRange(), span = Math.max(1e-6, hi - lo);
-    const pos = [], col = [], edge = [];
     const off = 0.012;   // ยกออกจากผิวเครื่องเล็กน้อย กันภาพซ้อน
+    const quads = [];
+    const sum = new Map(), cnt = new Map();
+    const key = (x, y, z) => `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
     for (const m of M.modules) {
       for (let q = 0; q < m.inFaces.length; q++) {
         const f = m.inFaces[q], ax = m.inAxis[q];
         const i = f % NX, j = Math.floor(f / NX) % NY, k = Math.floor(f / (NX * NY));
-        const s = m.inVel[q] > 0 ? -1 : 1;   // ทิศจากผิวคอยล์ออกไปทางอากาศ
-        const [cr, cg, cb] = rgb((T[m.inCells[q]] - lo) / span).map(v => v / 255);
+        const sgn = m.inVel[q] > 0 ? -1 : 1;   // ทิศจากผิวคอยล์ออกไปทางอากาศ
+        const t = T[m.inCells[q]];
         const y0 = yf[j - 1], y1 = yf[j];
-        let p;
-        if (ax === 0) {
-          const x = xf[i - 1] + s * off, z0 = zf[k - 1], z1 = zf[k];
-          p = [[x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0]];
-        } else {
-          const z = zf[k - 1] + s * off, x0 = xf[i - 1], x1 = xf[i];
-          p = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
-        }
-        for (const v of [p[0], p[1], p[2], p[0], p[2], p[3]]) { pos.push(...v); col.push(cr, cg, cb); }
-        for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0]]) edge.push(...p[a], ...p[b]);
+        let c;
+        if (ax === 0) { const x = xf[i - 1], z0 = zf[k - 1], z1 = zf[k]; c = [[x, y0, z0], [x, y0, z1], [x, y1, z1], [x, y1, z0]]; }
+        else { const z = zf[k - 1], x0 = xf[i - 1], x1 = xf[i]; c = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]]; }
+        const ks = c.map(v => key(...v));
+        for (const kk of ks) { sum.set(kk, (sum.get(kk) || 0) + t); cnt.set(kk, (cnt.get(kk) || 0) + 1); }
+        quads.push({ c, ks, ax, sgn });
       }
     }
-    if (!pos.length) return;
-    const g = new THREE.Group();
+    if (!quads.length) return;
+    const pos = [], uv = [];
+    for (const { c, ks, ax, sgn } of quads) {
+      const u = ks.map(kk => ((sum.get(kk) / cnt.get(kk)) - lo) / span);
+      const p = c.map(([x, y, z]) => ax === 0 ? [x + sgn * off, y, z] : [x, y, z + sgn * off]);
+      for (const n of [0, 1, 2, 0, 2, 3]) { pos.push(...p[n]); uv.push(Math.min(1, Math.max(0, u[n])), 0.5); }
+    }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    const faces = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
-    const eg = new THREE.BufferGeometry();
-    eg.setAttribute('position', new THREE.Float32BufferAttribute(edge, 3));
-    const lines = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x1c2a36, transparent: true, opacity: 0.35 }));
-    faces.raycast = () => {}; lines.raycast = () => {};
-    g.add(faces, lines);
-    g.renderOrder = 4;
-    this.inletShade = g;
-    this.scene3.add(g);
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: rampTexture(), side: THREE.DoubleSide }));
+    mesh.raycast = () => {};
+    mesh.renderOrder = 4;
+    this.inletShade = mesh;
+    this.scene3.add(mesh);
   }
 
   setDisplay(patch) {
@@ -889,6 +890,7 @@ export class Viewer {
     this.labelLayer.classList.toggle('hidden', !this.display.labels);
     if ('mesh' in patch) this.#updateMeshLines();
     if ('suction' in patch) this.#applySuctionVis();
+    if ('cduColor' in patch) this.refreshCduColors();
   }
 
   /**
@@ -2354,4 +2356,22 @@ function surfaceNets(M, field, iso) {
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;
+}
+
+/** แถบสีผลลัพธ์เป็น texture 1 มิติ — ใช้เปิดสีทีละพิกเซลจากค่า u (0–1) */
+let RAMP = null;
+function rampTexture() {
+  if (RAMP) return RAMP;
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 1;
+  const x = cv.getContext('2d'), img = x.createImageData(256, 1);
+  for (let i = 0; i < 256; i++) {
+    const [r, g, b] = rgb(i / 255);
+    img.data.set([r, g, b, 255], i * 4);
+  }
+  x.putImageData(img, 0, 0);
+  RAMP = new THREE.CanvasTexture(cv);
+  RAMP.colorSpace = THREE.SRGBColorSpace;
+  RAMP.wrapS = RAMP.wrapT = THREE.ClampToEdgeWrapping;
+  return RAMP;
 }

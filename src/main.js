@@ -935,9 +935,16 @@ function updateBandLegend() {
   const b = scene.bands;
   const el = $('#band-legend');
   el.hidden = !run.fields || run.stale;
-  const rg = viewer.inletRange() || [scene.site.ambient, b.red];
-  el.innerHTML = `<span class="muted">${L('หน้าคอยล์ดูดลม = T ลมเข้ารายเซลล์', 'Coil suction faces = inlet T per cell')}</span>
-    <span class="mono">${fmt(rg[0])}</span><i class="inlet-bar" style="background:${cssGradient()}"></i><span class="mono">≥ ${fmt(rg[1])} °C</span>`;
+  if (viewer.display.cduColor === 'shade') {
+    const rg = viewer.inletRange() || [scene.site.ambient, b.red];
+    el.innerHTML = `<span class="muted">${L('เฉดด้านดูด = T ลมเข้า', 'Suction shading = inlet T')}</span>
+      <span class="mono">${fmt(rg[0])}</span><i class="inlet-bar" style="background:${cssGradient()}"></i><span class="mono">≥ ${fmt(rg[1])} °C</span>`;
+    return;
+  }
+  el.innerHTML = `<span class="muted">${L('สี CDU = T ลมเข้าเฉลี่ยรายโมดูล', 'CDU colour = mean inlet T per module')}</span>
+    <span><i class="chip chip-green"></i>≤ ${b.green} °C</span>
+    <span><i class="chip chip-yellow"></i>${b.green}–${b.red} °C</span>
+    <span><i class="chip chip-red"></i>&gt; ${b.red} °C</span>`;
 }
 
 /** ผลรายเครื่อง (รวมโมดูล) จากรายงานล่าสุด */
@@ -1550,6 +1557,18 @@ function toggleMesh(on = !viewer.display.mesh) {
   b.setAttribute('aria-pressed', String(on));
 }
 
+/* ───────── สี CDU: 'band' = เขียว/เหลือง/แดงทั้งโมดูล (ค่าเริ่มต้น) · 'shade' = ไล่เฉดบนหน้าคอยล์ดูดลม ───────── */
+const CDU_COLOR_KEY = 'cfd-cdu-color';
+let cduColorPref = 'band';
+try { if (localStorage.getItem(CDU_COLOR_KEY) === 'shade') cduColorPref = 'shade'; } catch { /* ถูกบล็อก */ }
+function setCduColor(v) {
+  v = v === 'shade' ? 'shade' : 'band';
+  try { localStorage.setItem(CDU_COLOR_KEY, v); } catch { /* ถูกบล็อก */ }
+  $$('#d-cducolor button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
+  viewer.setDisplay({ cduColor: v });
+  updateBandLegend();
+}
+
 /* ───────── แสดงด้านดูดลม ───────── */
 function toggleSuction(on = !viewer.display.suction) {
   viewer.setDisplay({ suction: on });
@@ -1840,6 +1859,8 @@ function bindUI() {
 
   // การแสดงผล
   $('#d-field').addEventListener('change', (e) => { viewer.setDisplay({ field: e.target.value }); updateColorbar(); });
+  $$('#d-cducolor button').forEach(b => b.addEventListener('click', () => setCduColor(b.dataset.v)));
+  setCduColor(cduColorPref);
   $$('#d-mode button').forEach(b => b.addEventListener('click', () => {
     $$('#d-mode button').forEach(x => x.classList.toggle('on', x === b));
     viewer.setDisplay({ mode: b.dataset.v });
