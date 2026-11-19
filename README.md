@@ -234,7 +234,7 @@ Perforate รู Ø30 มม. ระยะ 60 × 45 มม. ≈ 26%) · พั�
 **ยังไม่ได้วัดความเร็วบนการ์ดจอจริง**
 
 ตารางรุ่นใน `src/models.js` (kW, อัตราลม, ขนาด, ชุดผสม 8–78 HP) มาจาก catalog EDTRTH342529A (VRV 6A),
-EDTRMT332049 (VRV IV S: RXMQ4AVE / 5BVM / 6BVM — 990 × 940 × 320 มม.) และ EDTRMT332104A (VRV S Hi: RSUQ7/8/9AYM — 870 × 1,100 × 460 มม.)
+EDTRMT332049 (VRV IV S: RXMQ4AVE / 5BVM / 6BVM — 990 × 940 × 320 มม.) และ EDTRTH332028A / EDTRMT332104A (VRV S Hi: RSUQ4/5/6AVMS, RSUQ7/8/9AYM — 870 × 1,100 × 460 มม.)
 และ EDTTH042558 (Split FTKB-A: คอยล์ร้อน RKB09AV2S 2.7 kW / RKB12AV2S 3.6 kW — 461 × 650 × 244 มม., EER ใช้ COP จาก catalog 3.09 / 3.10)
 คอยล์ร้อน Split RKB15–24ZV2S / RKC-ZV2S / RKD-ZV2S / RKF-YV2S / RKM-YV2S / RKQ-YV2S / RKZ-YV2S / RKE-YV2S จาก Specification ของแต่ละรุ่น (เฉพาะ CDU — kW, อัตราลม H, COP และขนาด H × W × D รายรุ่น)
 CDU Sky Air Premium RZF-DV2S/DY2S + RZFS38DY2S (Specification EDTH282362) และ Sky Air Standard RZFC-EV2S/EY2S (Specification RZFC-EV2S) — เฉพาะคอยล์ร้อน: kW/EER ใช้ค่าคู่กับคอยล์เย็นแบบ Cassette (FCTF / FCFC; RZFS38DY2S ใช้คู่ FCF(S)), อัตราลมและขนาด H × W × D ของคอยล์ร้อน
@@ -244,7 +244,18 @@ CDU Sky Air Premium RZF-DV2S/DY2S + RZFS38DY2S (Specification EDTH282362) แล
 กำหนดความเร็วตามทิศเบี่ยงเท่ากับความเร็วพุ่ง ที่หน้าเซลล์ระหว่างเซลล์อากาศชั้นแรกหน้าปากลม (เหมือนแถวใบเกล็ดบาง ๆ ติดหน้าเครื่อง)
 ทดสอบแล้วลำลมร้อนเอียง 38–43° จากแนวตั้งฉากหน้าเครื่อง (เซลล์ 0.1 ม.) · ปากลมต้องกว้างอย่างน้อย 2 เซลล์
 เครื่อง Split มีขนาดเล็ก (ลึก 244 มม.) ควรใช้เซลล์ ≤ 0.1 ม.
-ส่วน EER 3.5 ของ VRV และ capacity ลดลง 2 %/°C เป็นค่าประมาณ แก้ได้ในโปรแกรม
+VRV 6A: capacity / กำลังไฟเทียบอุณหภูมิลมเข้าคอยล์ร้อนใช้ตาราง Cooling Capacity ของ Daikin (RXQ8B – RXQ60B, อากาศภายนอก 10 – 52 °CDB,
+คอยล์เย็น 19 °CWB) แยกตาม Combination ratio 10 – 130 % — ค่าเริ่มต้น 100 %; กำหนดรายเครื่องได้ในแผงคุณสมบัติ (ติ๊ก “กำหนด Combination ratio”
+จึงแสดงช่องกรอกและตาราง capacity เทียบ T ลมเข้า) · ค่าระหว่างจุดตารางเทียบเส้นตรง · ชุดผสมที่เกิน 60 HP (62 – 78 HP) ใช้ตารางของแต่ละโมดูล ·
+capacity % เทียบค่าที่ 35 °C ของ combination เดียวกัน · ความร้อนที่ระบายทิ้ง = TC + PI จากตาราง
+VRV IV S: ตาราง Cooling Capacity RXMQ4AVE, RXMQ5/6BVM (EDTRMT332049) — อากาศภายนอก 10 – 39 °CDB, คอยล์เย็น 19 °CWB, Capacity ratio 50 – 130 %
+VRV S Hi: ตาราง Cooling Capacity RSUQ7/8/9AYM (EDTRMT332104) — อากาศภายนอก 10 – 45 °CDB, คอยล์เย็น 19 °CWB, Capacity ratio 30 – 130 %
+และ RSUQ4/5/6AVMS (EDTRTH332028) · ทั้งสองซีรีส์ใช้แบบเดียวกับ VRV 6A (ค่าเริ่มต้น 100 %)
+T ลมเข้าเกินช่วงตาราง = **Estimate (ไม่ได้อ้างอิงจาก Engineering Data)** — แสดงป้ายกำกับในแผงคุณสมบัติ ตารางผลลัพธ์ ป้ายบน 3D และ CSV
+· ประเมินแยกรายรุ่นจากเส้นแนวโน้มของตารางรุ่นนั้นเอง: เส้นตรง least-squares ผ่าน 6 จุดสุดท้ายของตาราง (อุณหภูมิสูงสุด) ต่อจากจุดสุดท้าย
+  TC = ค่าต่ำกว่าระหว่างเส้นของ combination ที่เลือก กับเส้นของ combination 130 % (capacity สูงสุดของคอยล์ร้อน) · PI = เส้นของ combination ที่เลือก
+· แผงคุณสมบัติแสดงกราฟ capacity เทียบ T ลมเข้า (เส้นทึบ = ตาราง, เส้นประ = Estimate)
+ส่วน EER 3.5 ของ VRV รุ่นอื่น และ capacity ลดลง 2 %/°C (รุ่นที่ไม่มีตาราง) เป็นค่าประมาณ แก้ได้ในโปรแกรม
 ผลใช้เปรียบเทียบผังการวางเครื่อง ไม่ใช่ผลรับรองทางวิศวกรรม
 
 ## โครงสร้างไฟล์
@@ -258,6 +269,9 @@ src/viewer.js         มุมมอง 3D, เครื่องมือว�
 src/scene.js          ข้อมูลฉาก, โดเมน, ตัวอย่างสำเร็จรูป
 src/case-thumbs.js    ภาพย่อแบบจำลองของกรณีศึกษา (สร้างโดย tools/case-thumbs.cjs)
 src/models.js         ตารางรุ่น VRV และสมการสมรรถนะ
+src/vrv6a-capacity.js  ตาราง Cooling Capacity VRV 6A ตาม Combination ratio (สร้างจาก PDF ของ Daikin)
+src/vrvivs-capacity.js ตาราง Cooling Capacity VRV IV S ตาม Capacity ratio (สร้างจาก PDF ของ Daikin)
+src/vrvshi-capacity.js ตาราง Cooling Capacity VRV S Hi ตาม Capacity ratio (สร้างจาก PDF ของ Daikin)
 src/grid.js           เส้นกริดของโดเมน: สม่ำเสมอ / ปรับความละเอียดอัตโนมัติ
 src/mesher.js         แปลงฉากเป็นกริด + เงื่อนไขขอบของ CDU
 src/solver.js         ตัวคำนวณ CFD แบบ CPU: ลำดับงานของ kernel WebAssembly

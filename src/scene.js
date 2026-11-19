@@ -3,7 +3,8 @@
  *
  * พิกัดโลก (เมตร): +x = ทิศตะวันออก, +z = ทิศใต้, +y = ขึ้น (ทิศเหนือคือ −z)
  * วัตถุมี 4 ชนิด
- *   cdu      {x, z, rot, elev, model, duct, hoodType, hoodDir, deflect, airflow}
+ *   cdu      {x, z, rot, elev, model, duct, hoodType, hoodDir, deflect, airflow, combo}
+ *            — combo = Combination ratio (%) ของ VRV 6A สำหรับตาราง capacity (null = 100 %)
  *            — rot เป็นพหุคูณของ 90°, ด้านหน้าเครื่องหันไป +z เมื่อ rot = 0
  *            — duct = Hood: รุ่นเป่าขึ้น (VRV 6A) คือความสูง Hood เหนือเครื่อง, รุ่นเป่าหน้า (VRV IV S / S Hi)
  *              คือความยาว Hood ที่ยื่นจากหน้ากากพัดลม (0 = ไม่มี Hood)
@@ -76,7 +77,7 @@ export function makeObject(scene, type, input = {}) {
   const { id, name, type: _t, ...props } = input;
   const base = { id: Number.isFinite(id) ? id : nextId(scene), type, name: name || nextName(scene, type) };
   if (type === 'cdu') {
-    const o = { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, hoodType: 'straight', hoodDir: 'front', hoodOut: 0.4, deflect: 'none', airflow: null, ...props };
+    const o = { ...base, x: 0, z: 0, rot: 0, elev: 0.2, model: 'RXQ16BY1S', duct: 0, hoodType: 'straight', hoodDir: 'front', hoodOut: 0.4, deflect: 'none', airflow: null, combo: null, ...props };
     o.hoodOut = Math.max(0, Number(o.hoodOut) || 0);
     if (!['straight', 'elbow'].includes(o.hoodType)) o.hoodType = 'straight';
     if (!['front', 'back', 'left', 'right'].includes(o.hoodDir)) o.hoodDir = 'front';

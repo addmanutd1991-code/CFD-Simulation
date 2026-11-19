@@ -262,6 +262,7 @@
               <label class="row"><span data-en="Power increase (%/°C)">กำลังไฟเพิ่มขึ้น (%/°C)</span> <input type="number" id="p-kpow" step="0.1" min="0" max="8"></label>
               <label class="row"><span data-en="Inlet T limit (°C)">ขีดจำกัด T ลมเข้า (°C)</span> <input type="number" id="p-tlim" step="0.5"></label>
               <p class="note" data-en="Performance figures are approximate references; check them against the Engineering Databook of the model used">ค่าสมรรถนะเป็นค่าอ้างอิงโดยประมาณ ควรตรวจกับ Engineering Databook ของรุ่นที่ใช้</p>
+              <p class="note" data-en="VRV 6A (outdoor 10 – 52 °C), VRV IV S (10 – 39 °C) and VRV S Hi (10 – 45 °C) use Daikin's cooling capacity tables (indoor 19 °CWB) by each unit's combination ratio (default 100%); above the table range the capacity is an Estimate from each model's own trend, not based on Engineering Data — T rating / capacity loss / power increase above apply to the other models">VRV 6A (อากาศภายนอก 10 – 52 °C), VRV IV S (10 – 39 °C) และ VRV S Hi (10 – 45 °C) ใช้ตาราง Cooling Capacity ของ Daikin (คอยล์เย็น 19 °CWB) ตาม Combination ratio ของแต่ละเครื่อง (ค่าเริ่มต้น 100%) · เกินช่วงตารางเป็น Estimate จากเส้นแนวโน้มของตารางแต่ละรุ่น (ไม่ได้อ้างอิงจาก Engineering Data) — T พิกัด / capacity ลดลง / กำลังไฟเพิ่มขึ้น ด้านบนใช้กับรุ่นอื่น</p>
             </details>
           </div>
         </section>
@@ -610,7 +611,7 @@
         <li>เนื่องจากการจำลองการไหลของอากาศที่เกิดขึ้น เป็นการทดลองด้วย PROGRAM COMPUTER เท่านั้น วัตถุประสงค์เพื่อใช้ในการป้องกันหรือหาแนวทางแก้ไขปัญหาเรื่องของการระบายความร้อน ซึ่งไม่ใช่สภาวะอากาศจริงที่เกิดขึ้นกับ CDU</li>
         <li>ทิศทางลมที่เข้ามาจะขึ้นอยู่กับฤดูกาล และช่วงเวลาในขณะนั้นด้วย ซึ่งจะแตกต่างกับ CFD ที่มีอยู่เพียงทิศทางเดียว ดังนั้นควรจะทำการทดลองติดตั้ง MOCK UP ROOM เพื่อตรวจสอบ ผลที่ได้จาก CFD อีกครั้ง</li>
         <li>แบบจำลองความปั่นป่วนเป็น LES แบบหยาบ (Smagorinsky) ไม่มี wall function และไม่คิดการแผ่รังสีจากหลังคา/ผนังที่ร้อน</li>
-        <li>kW อัตราลม ขนาด และชุดผสมของแต่ละรุ่นมาจาก catalog EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRMT332104A (VRV S Hi), EDTTH042558 (Split FTKB-A — EER ใช้ COP จาก catalog) แต่ EER (3.5) และสมการ capacity ตามอุณหภูมิเป็นค่าประมาณ — แก้ได้ที่ ตั้งค่า → ขั้นสูง และแก้อัตราลมรายเครื่องได้</li>
+        <li>kW อัตราลม ขนาด และชุดผสมของแต่ละรุ่นมาจาก catalog EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRTH332028A, EDTRMT332104A (VRV S Hi), EDTTH042558 (Split FTKB-A — EER ใช้ COP จาก catalog) แต่ EER (3.5) และสมการ capacity ตามอุณหภูมิเป็นค่าประมาณ — แก้ได้ที่ ตั้งค่า → ขั้นสูง และแก้อัตราลมรายเครื่องได้</li>
         <li>ผนัง/อาคารแบบเฉียงถูกแทนด้วยเซลล์แบบขั้นบันได ขนาดที่เล็กกว่าเซลล์จะถูกปัดเป็นหนึ่งเซลล์</li>
         <li>ลมพัดผ่านโดเมนแบบคงที่ ไม่มีความปั่นป่วนของลมบรรยากาศ กรณีไม่มีลม (0 m/s) มักเป็นกรณีแย่ที่สุด</li>
       </ul>
@@ -770,14 +771,14 @@
         <li>The airflow simulation is a computer experiment only. It is intended to help prevent, or find solutions to, heat-rejection problems; it is not the actual air condition around the CDUs</li>
         <li>Wind direction depends on the season and the time of day, whereas the CFD uses a single direction. A mock-up installation should therefore be tested to verify the CFD results</li>
         <li>The turbulence model is a coarse LES (Smagorinsky) without wall functions, and radiation from hot roofs/walls is not included</li>
-        <li>kW, airflow, dimensions and combinations of each model come from catalogues EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRMT332104A (VRV S Hi) and EDTTH042558 (Split FTKB-A — EER uses the catalogue COP), but EER (3.5) and the capacity-versus-temperature relation are estimates — editable under Setup → Advanced, and the airflow of each unit can be overridden</li>
+        <li>kW, airflow, dimensions and combinations of each model come from catalogues EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRTH332028A, EDTRMT332104A (VRV S Hi) and EDTTH042558 (Split FTKB-A — EER uses the catalogue COP), but EER (3.5) and the capacity-versus-temperature relation are estimates — editable under Setup → Advanced, and the airflow of each unit can be overridden</li>
         <li>Oblique walls/buildings are represented by stair-stepped cells; anything smaller than a cell is rounded to one cell</li>
         <li>Wind through the domain is steady, without atmospheric turbulence. The no-wind case (0 m/s) is usually the worst</li>
       </ul>
     </article>
 
     <article class="models">
-      <h2 data-en="Model table (catalogues EDTRTH342529A · EDTRMT332049 · EDTRMT332104A · EDTTH042558)">ตารางรุ่น (catalog EDTRTH342529A · EDTRMT332049 · EDTRMT332104A · EDTTH042558)</h2>
+      <h2 data-en="Model table (catalogues EDTRTH342529A · EDTRMT332049 · EDTRTH332028A · EDTRMT332104A · EDTTH042558)">ตารางรุ่น (catalog EDTRTH342529A · EDTRMT332049 · EDTRTH332028A · EDTRMT332104A · EDTTH042558)</h2>
       <div class="table-wrap"><table class="doc" id="model-table"></table></div>
     </article>
   </section>

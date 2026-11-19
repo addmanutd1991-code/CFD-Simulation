@@ -262,7 +262,7 @@ export class Solver extends SolverBase {
         if (t > mx) mx = t;
       }
       const Tin = s / sa;
-      const p = modulePerf(m.kw, m.eer, Tin, this.perf);
+      const p = modulePerf(m, Tin, this.perf);
       st.Tin = Tin; st.TinMax = mx; st.Cin = sc / sa;
       st.capF = p.capF; st.qRej = p.qRej;
       st.Tdis = Tin + p.qRej / (rho * m.q * cp);
