@@ -248,10 +248,13 @@ VRV 6A: capacity / กำลังไฟเทียบอุณหภูมิ�
 คอยล์เย็น 19 °CWB) แยกตาม Combination ratio 10 – 130 % — ค่าเริ่มต้น 100 %; กำหนดรายเครื่องได้ในแผงคุณสมบัติ (ติ๊ก “กำหนด Combination ratio”
 จึงแสดงช่องกรอกและตาราง capacity เทียบ T ลมเข้า) · ค่าระหว่างจุดตารางเทียบเส้นตรง · ชุดผสมที่เกิน 60 HP (62 – 78 HP) ใช้ตารางของแต่ละโมดูล ·
 capacity % เทียบค่าที่ 35 °C ของ combination เดียวกัน · ความร้อนที่ระบายทิ้ง = TC + PI จากตาราง
-VRV IV S: ตาราง Cooling Capacity RXMQ4AVE, RXMQ5/6BVM (EDTRMT332049) และ RXMQ8/9AY1S (EDTH331523A) — อากาศภายนอก 10 – 39 °CDB,
-คอยล์เย็น 19 °CWB, Capacity ratio 50 – 130 % · ใช้แบบเดียวกับ VRV 6A (ค่าเริ่มต้น 100 %)
+VRV IV S: ตาราง Cooling Capacity RXMQ4AVE, RXMQ5/6BVM (EDTRMT332049) — อากาศภายนอก 10 – 39 °CDB, คอยล์เย็น 19 °CWB, Capacity ratio 50 – 130 %
+VRV S Hi: ตาราง Cooling Capacity RSUQ7/8/9AYM (EDTRMT332104) — อากาศภายนอก 10 – 45 °CDB, คอยล์เย็น 19 °CWB, Capacity ratio 30 – 130 %
+(เก็บตาราง RSUQ4/5/6AVMS ของ EDTRTH332028 ไว้ด้วย แต่ยังไม่มีรุ่นนี้ในเมนู) · ทั้งสองซีรีส์ใช้แบบเดียวกับ VRV 6A (ค่าเริ่มต้น 100 %)
 T ลมเข้าเกินช่วงตาราง = **Estimate (ไม่ได้อ้างอิงจาก Engineering Data)** — แสดงป้ายกำกับในแผงคุณสมบัติ ตารางผลลัพธ์ ป้ายบน 3D และ CSV
-· VRV IV S เกิน 39 °C: ค่าที่ 39 °C × สัดส่วนการลดลงของ VRV 6A 8 HP ที่ combination เดียวกันจาก 39 °C ถึง T · VRV 6A เกิน 52 °C: ใช้ค่าที่ 52 °C
+· ประเมินแยกรายรุ่นจากเส้นแนวโน้มของตารางรุ่นนั้นเอง: เส้นตรง least-squares ผ่าน 6 จุดสุดท้ายของตาราง (อุณหภูมิสูงสุด) ต่อจากจุดสุดท้าย
+  TC = ค่าต่ำกว่าระหว่างเส้นของ combination ที่เลือก กับเส้นของ combination 130 % (capacity สูงสุดของคอยล์ร้อน) · PI = เส้นของ combination ที่เลือก
+· แผงคุณสมบัติแสดงกราฟ capacity เทียบ T ลมเข้า (เส้นทึบ = ตาราง, เส้นประ = Estimate)
 ส่วน EER 3.5 ของ VRV รุ่นอื่น และ capacity ลดลง 2 %/°C (รุ่นที่ไม่มีตาราง) เป็นค่าประมาณ แก้ได้ในโปรแกรม
 ผลใช้เปรียบเทียบผังการวางเครื่อง ไม่ใช่ผลรับรองทางวิศวกรรม
 
@@ -268,6 +271,7 @@ src/case-thumbs.js    ภาพย่อแบบจำลองของกร�
 src/models.js         ตารางรุ่น VRV และสมการสมรรถนะ
 src/vrv6a-capacity.js  ตาราง Cooling Capacity VRV 6A ตาม Combination ratio (สร้างจาก PDF ของ Daikin)
 src/vrvivs-capacity.js ตาราง Cooling Capacity VRV IV S ตาม Capacity ratio (สร้างจาก PDF ของ Daikin)
+src/vrvshi-capacity.js ตาราง Cooling Capacity VRV S Hi ตาม Capacity ratio (สร้างจาก PDF ของ Daikin)
 src/grid.js           เส้นกริดของโดเมน: สม่ำเสมอ / ปรับความละเอียดอัตโนมัติ
 src/mesher.js         แปลงฉากเป็นกริด + เงื่อนไขขอบของ CDU
 src/solver.js         ตัวคำนวณ CFD แบบ CPU: ลำดับงานของ kernel WebAssembly

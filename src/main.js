@@ -2,7 +2,7 @@
  * main.js — ตัวควบคุมหลัก: เชื่อมหน้าจอ ↔ ข้อมูลฉาก ↔ มุมมอง 3D ↔ ตัวคำนวณ
  */
 
-import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus, hasCapTable, unitCombo, capLookup, capTableOf, capTableTmax, comboRange, CAP_RATED_T, CAP_TABLE_LABEL, COMBO_DEFAULT, EST_TEXT } from './models.js';
+import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus, hasCapTable, unitCombo, capLookup, capTableOf, capTableTmax, comboRange, CAP_RATED_T, CAP_TABLE_LABEL, COMBO_DEFAULT, EST_TEXT, EST_FIT_POINTS } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import CASE_THUMBS from './case-thumbs.js';
 import { buildMesh } from './mesher.js';
@@ -589,20 +589,57 @@ function renderProps() {
 let wallAnchor = 'start';
 
 /** อุณหภูมิลมเข้าคอยล์ที่แสดงในตาราง capacity ของแผงคุณสมบัติ (°C) */
-const COMBO_TEMPS = [35, 37, 39, 40, 43, 45, 46, 48, 50, 52];
+const COMBO_TEMPS = [35, 37, 39, 41, 43, 45, 47, 50, 52, 55];
+/** ช่วงแกนอุณหภูมิของกราฟ capacity (°C) */
+const CHART_T0 = 10, CHART_T1 = 55;
 
 /** ป้ายกำกับค่า capacity ที่เกินช่วงตาราง (ตารางผลลัพธ์) */
 function estTag(on) { return on ? ` <span class="est" title="${esc(EST_TEXT())}">(Estimate)</span>` : ''; }
 
 /**
- * ส่วน Combination ratio ของเครื่องที่มีตาราง capacity (VRV 6A / VRV IV S) ในแผงคุณสมบัติ
- *   ตัวเลือกปิดอยู่ = ใช้ Combination 100 % (ค่าเริ่มต้น) · เปิดแล้วจึงแสดงช่องกรอกและตาราง capacity เทียบอุณหภูมิลมเข้า
- *   แถวที่เกินช่วงตาราง = Estimate (ไม่ได้อ้างอิงจาก Engineering Data)
+ * กราฟ capacity (kW) เทียบอุณหภูมิลมเข้าของ combination ที่เลือก — เส้นทึบ = ตาราง, เส้นประ = Estimate
+ *   จุดบนเส้นทึบ = จุดในตาราง · เส้นแนวตั้งประ = อากาศภายนอก · ชี้ที่จุดเพื่อดูค่า
+ */
+function capChartSvg(capAt, tblTemps, tMax, amb) {
+  const W = 300, H = 160, pl = 34, pr = 8, pt = 18, pb = 24;
+  const t1 = Math.max(CHART_T1, Math.ceil(amb));
+  const all = [];
+  for (let T = CHART_T0; T <= t1; T++) all.push({ T, ...capAt(T) });
+  const yMax = Math.ceil(Math.max(...all.map(p => p.kw)) * 1.1 / 5) * 5 || 5;
+  const x = T => pl + (T - CHART_T0) / (t1 - CHART_T0) * (W - pl - pr);
+  const y = v => pt + (1 - v / yMax) * (H - pt - pb);
+  const path = pts => pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.T).toFixed(1)},${y(p.kw).toFixed(1)}`).join('');
+  const tbl = all.filter(p => p.T <= tMax), est = all.filter(p => p.T >= tMax);
+  const yTicks = [0, yMax / 2, yMax];
+  const xTicks = [10, 20, 30, 40, 50].filter(T => T <= t1);
+  const marks = tblTemps.filter(T => T >= CHART_T0).map(T => {
+    const r = capAt(T);
+    return `<circle cx="${x(T).toFixed(1)}" cy="${y(r.kw).toFixed(1)}" r="5" class="cc-hit"><title>${T} °C · ${r.kw.toFixed(1)} kW</title></circle>`;
+  }).join('');
+  const hits = est.filter(p => p.T > tMax && p.T % 2 === 1).map(p =>
+    `<circle cx="${x(p.T).toFixed(1)}" cy="${y(p.kw).toFixed(1)}" r="5" class="cc-hit"><title>${p.T} °C · ${p.kw.toFixed(1)} kW (Estimate)</title></circle>`).join('');
+  return `<svg class="cap-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${L('กราฟ capacity เทียบอุณหภูมิลมเข้า', 'Capacity vs inlet temperature')}">
+    ${yTicks.map(v => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" class="cc-grid"/><text x="${pl - 4}" y="${y(v) + 3.5}" class="cc-ax" text-anchor="end">${fmt(v)}</text>`).join('')}
+    ${xTicks.map(T => `<text x="${x(T)}" y="${H - 8}" class="cc-ax" text-anchor="middle">${T}</text>`).join('')}
+    <text x="${W - pr}" y="${H - 8}" class="cc-ax" text-anchor="end">°C</text>
+    <text x="${pl}" y="9" class="cc-ax">kW</text>
+    <line x1="${x(tMax)}" x2="${x(tMax)}" y1="${pt}" y2="${H - pb}" class="cc-edge"/>
+    <line x1="${x(amb)}" x2="${x(amb)}" y1="${pt}" y2="${H - pb}" class="cc-amb"><title>${L('อากาศภายนอก', 'Ambient')} ${fmt(amb)} °C</title></line>
+    <path d="${path(tbl)}" class="cc-line"/>
+    ${est.length > 1 ? `<path d="${path(est)}" class="cc-line cc-est"/><text x="${Math.min(W - pr, x(tMax) + 4)}" y="9" class="cc-tag">Estimate</text>` : ''}
+    ${marks}${hits}
+  </svg>`;
+}
+
+/**
+ * ส่วน Combination ratio ของเครื่องที่มีตาราง capacity (VRV 6A / VRV IV S / VRV S Hi) ในแผงคุณสมบัติ
+ *   ตัวเลือกปิดอยู่ = ใช้ Combination 100 % (ค่าเริ่มต้น) · เปิดแล้วจึงแสดงช่องกรอก กราฟ และตาราง capacity เทียบอุณหภูมิลมเข้า
+ *   ช่วงที่เกินตาราง = Estimate จากเส้นแนวโน้มของตารางรุ่นนั้นเอง (ไม่ได้อ้างอิงจาก Engineering Data)
  */
 function comboHtml(o, m) {
   const on = o.combo != null, c = unitCombo(o), [lo, hi] = comboRange(o);
   const tbl = capTableOf(o), tMax = capTableTmax(o), label = CAP_TABLE_LABEL[m.series];
-  // VRV 6A: ตารางทั้งระบบ (8 – 60 HP) · ชุดที่เกิน 60 HP รวมจากตารางของแต่ละโมดูล · VRV IV S: ตารางตามรหัสรุ่น
+  // VRV 6A: ตารางทั้งระบบ (8 – 60 HP) · ชุดที่เกิน 60 HP รวมจากตารางของแต่ละโมดูล · VRV IV S / S Hi: ตารางตามรหัสรุ่น
   const key = m.series === '6A' ? (tbl.data[m.hp] ? m.hp : null) : m.id;
   const capAt = (T) => {
     if (key != null) {
@@ -618,17 +655,16 @@ function comboHtml(o, m) {
     const r = capAt(t);
     return `<tr class="${t === amb ? 'amb' : ''}${r.est ? ' est' : ''}"><td class="n">${fmt(t)}${t === amb ? '*' : ''}</td><td class="n">${r.kw.toFixed(1)}</td><td class="n">${(r.kw / ref * 100).toFixed(1)}</td><td class="tag">${r.est ? '(Estimate)' : ''}</td></tr>`;
   }).join('');
-  const beyond = m.series === 'IVS'
-    ? L('ส่วนที่เกินประมาณจากอัตราการลดลงของ VRV 6A ที่ combination เดียวกัน', 'beyond that it follows the VRV 6A drop at the same combination')
-    : L('ส่วนที่เกินใช้ค่าที่ขอบตาราง', 'beyond that the edge value is used');
-  const estNote = temps.some(t => t > tMax)
-    ? `<br><span class="est">(Estimate) = ${EST_TEXT()}</span> — ${L(`ตารางของรุ่นนี้ถึง ${tMax} °C`, `this model's table ends at ${tMax} °C`)} · ${beyond}` : '';
-  const estDefault = tMax < 52
-    ? L(` · T ลมเข้าเกิน ${tMax} °C เป็น Estimate (ไม่ได้อ้างอิงจาก Engineering Data)`, ` · inlet T above ${tMax} °C is an estimate (not based on Engineering Data)`) : '';
+  const estNote = `<br><span class="est">(Estimate) = ${EST_TEXT()}</span> — ${L(
+    `ตารางของรุ่นนี้ถึง ${tMax} °C · ส่วนที่เกินต่อเส้นแนวโน้ม (เส้นตรง least-squares ของ ${EST_FIT_POINTS} จุดสุดท้าย) ของตารางรุ่นนี้เอง: TC = ค่าต่ำกว่าระหว่างเส้นของ combination ที่เลือกกับเส้นของ combination ${hi}% (capacity สูงสุดของคอยล์ร้อน)`,
+    `this model's table ends at ${tMax} °C · beyond that the model's own trend (least-squares line through its last ${EST_FIT_POINTS} points) is extended: TC = the lower of the selected combination's line and the ${hi}% line (maximum outdoor capacity)`)}`;
+  const estDefault = L(` · T ลมเข้าเกิน ${tMax} °C เป็น Estimate (ไม่ได้อ้างอิงจาก Engineering Data)`, ` · inlet T above ${tMax} °C is an estimate (not based on Engineering Data)`);
   return `
       <label class="chk combo-chk"><input type="checkbox" data-combo-on ${on ? 'checked' : ''}><span>${L('กำหนด Combination ratio', 'Set combination ratio')}</span></label>
       ${on ? `<div class="combo-box">
         <label class="row">${L('Combination ratio (%)', 'Combination ratio (%)')} <input type="number" step="10" min="${lo}" max="${hi}" data-k="combo" value="${c}"></label>
+        <div class="cap-chart-h">${L(`Capacity ${label} · combination ${c}%`, `${label} capacity · combination ${c}%`)}</div>
+        ${capChartSvg(capAt, tbl.temps, tMax, amb)}
         <table class="combo-tbl"><thead><tr><th>${L('T ลมเข้า °C', 'Inlet °C')}</th><th>kW</th><th>%</th><th></th></tr></thead><tbody>${rows}</tbody></table>
         <p class="note">${L(`ตาราง Cooling Capacity ${label} (${tbl.temps[0]} – ${tMax} °C, combination ${lo} – ${hi}%) · คอยล์เย็น ${tbl.wb} °CWB · % เทียบ capacity ที่ ${CAP_RATED_T} °C ของ combination เดียวกัน (${ref.toFixed(1)} kW)`, `${label} cooling capacity table (${tbl.temps[0]} – ${tMax} °C, combination ${lo} – ${hi}%) · indoor ${tbl.wb} °CWB · % relative to the capacity at ${CAP_RATED_T} °C for the same combination (${ref.toFixed(1)} kW)`)}
           ${L(`· * = อากาศภายนอก ${fmt(amb)} °C · ค่าระหว่างจุดตารางใช้การเทียบเส้นตรง`, `· * = ambient ${fmt(amb)} °C · values between table points are interpolated linearly`)}${estNote}</p>
