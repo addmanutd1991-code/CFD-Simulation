@@ -113,9 +113,9 @@ export class SolverBase {
       let Tin = this._windowMean(this.hist.tin[mi], t - win, t);
       let Cin = this._windowMean(this.hist.cin[mi], t - win, t);
       if (!isFinite(Tin)) { Tin = st.Tin; Cin = st.Cin; }
-      const p = modulePerf(m.kw, m.eer, Tin, this.perf);
+      const p = modulePerf(m, Tin, this.perf);
       return {
-        active: m.active, hp: m.hp, kw: m.kw, q: m.q,
+        active: m.active, hp: m.hp, kw: m.kw, kwRef: m.kwRef ?? m.kw, cap: m.cap, q: m.q,
         Tin, Cin, TinNow: st.Tin, TinMax: st.TinMax,
         Tdis: Tin + p.qRej / (this.rho * m.q * this.cp),
         capF: p.capF, qCool: p.qCool, qRej: p.qRej, pIn: p.pIn,

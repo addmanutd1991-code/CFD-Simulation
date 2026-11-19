@@ -409,6 +409,13 @@ summary:hover { color: var(--text); }
 .props-actions { display: flex; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .spec { font-size: 12px; color: var(--muted); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; line-height: 1.6; }
 .spec b { color: var(--text); font-weight: 500; }
+.combo-chk { align-self: flex-start; }
+.combo-box { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; background: var(--field); }
+.combo-tbl { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.combo-tbl th { color: var(--muted); font-weight: 500; text-align: right; padding: 2px 6px; border-bottom: 1px solid var(--line); }
+.combo-tbl td { color: var(--text-2); padding: 2px 6px; }
+.combo-tbl td.n { text-align: right; }
+.combo-tbl tr.amb td { color: var(--text); font-weight: 500; }
 .xz { display: flex; gap: 6px; }
 .xz input { width: 64px !important; }
 .unit-res { border-left: 3px solid var(--line-2); padding: 5px 9px; font-size: 12.5px; background: var(--field); border-radius: 0 6px 6px 0; }

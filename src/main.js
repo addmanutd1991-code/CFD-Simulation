@@ -2,7 +2,7 @@
  * main.js — ตัวควบคุมหลัก: เชื่อมหน้าจอ ↔ ข้อมูลฉาก ↔ มุมมอง 3D ↔ ตัวคำนวณ
  */
 
-import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus } from './models.js';
+import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus, hasCapTable, unitCombo, vrv6aCap, VRV6A_RATED_T, COMBO_DEFAULT, COMBO_MIN, COMBO_MAX } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import CASE_THUMBS from './case-thumbs.js';
 import { buildMesh } from './mesher.js';
@@ -448,7 +448,8 @@ function renderProps() {
         ${m.modules.length > 1 ? `${L('ชุด', 'Set')} <b>${m.modules.map(h => h + 'HP').join(' + ')}</b> · ` : ''}${L('ทำความเย็น', 'Cooling')} <b>${m.kw.toFixed(1)} kW</b> · EER <b>${m.eer.toFixed(2)}</b><br>
         ${L('ขนาด (ก × ส × ล)', 'Size (W × H × D)')} <b>${Math.round(sz.w * 1000)} × ${Math.round(sz.h * 1000)} × ${Math.round(sz.d * 1000)}</b> ${L('มม. · พัดลม', 'mm · fans')} <b>${m.fans}</b>${L(' ใบ', '')}<br>
         ${L('อัตราลมมาตรฐาน', 'Standard airflow')} <b>${m.cmm}</b> m³/min${o.airflow ? ` · <a href="#" data-reset-air>${L('ใช้ค่ามาตรฐาน', 'use standard')}</a>` : ''}
-      </div>`;
+      </div>
+      ${hasCapTable(o) ? comboHtml(o, m) : ''}`;
     const ur = unitsNow()?.find(u => u.id === o.id);
     if (ur) {
       html += `<div class="unit-res st-${ur.status.key}">${L('T ลมเข้า', 'Inlet T')} <span>${ur.Tin.toFixed(1)} °C</span> (ΔT <span>+${ur.dT.toFixed(2)} °C</span>)
@@ -512,7 +513,7 @@ function renderProps() {
     $('[data-act="unlock"]', box).addEventListener('click', () => setEditUnlocked(true));
   }
 
-  const NUM = new Set(['x', 'z', 'elev', 'duct', 'hoodOut', 'airflow', 'x1', 'z1', 'x2', 'z2', 'height', 'thick', 'gap', 'louver', 'w', 'd', 'h', 'rot', 'y', 'open']);
+  const NUM = new Set(['combo', 'x', 'z', 'elev', 'duct', 'hoodOut', 'airflow', 'x1', 'z1', 'x2', 'z2', 'height', 'thick', 'gap', 'louver', 'w', 'd', 'h', 'rot', 'y', 'open']);
   $$('[data-k]', box).forEach(inp => {
     const k = inp.dataset.k;
     const ev = inp.type === 'range' ? 'input' : 'change';
@@ -523,6 +524,7 @@ function renderProps() {
         if (!isFinite(v)) { renderProps(); return; }
         if (k === 'elev' || k === 'duct' || k === 'hoodOut' || k === 'gap' || k === 'y') v = Math.max(0, v);
         if (k === 'height' || k === 'h' || k === 'w' || k === 'd' || k === 'thick') v = Math.max(0.05, v);
+        if (k === 'combo') v = Math.min(COMBO_MAX, Math.max(COMBO_MIN, Math.round(v)));
       }
       if (inp.type === 'range') {
         // เลื่อนแถบ: บันทึก undo ครั้งเดียวต่อการลาก
@@ -576,6 +578,8 @@ function renderProps() {
     edit(() => { o.rot = Number(b.dataset.v); lastUsed.rot = o.rot; });
   }));
   $('[data-reset-air]', box)?.addEventListener('click', (e) => { e.preventDefault(); edit(() => { o.airflow = null; }); });
+  // Combination ratio (VRV 6A): ซ่อนไว้จนกว่าจะเลือก — ไม่เลือก = 100 %
+  $('[data-combo-on]', box)?.addEventListener('change', (e) => edit(() => { o.combo = e.target.checked ? COMBO_DEFAULT : null; }));
   $('[data-act="dup"]', box).addEventListener('click', duplicateSelected);
   $('[data-act="rot"]', box).addEventListener('click', rotateSelected);
   $('[data-act="del"]', box).addEventListener('click', deleteSelected);
@@ -583,6 +587,35 @@ function renderProps() {
 }
 
 let wallAnchor = 'start';
+
+/** อุณหภูมิลมเข้าคอยล์ที่แสดงในตาราง capacity ของแผงคุณสมบัติ (°C) */
+const COMBO_TEMPS = [35, 38, 40, 43, 45, 46, 48, 50, 52];
+
+/**
+ * ส่วน Combination ratio ของ VRV 6A ในแผงคุณสมบัติ
+ *   ตัวเลือกปิดอยู่ = ใช้ Combination 100 % (ค่าเริ่มต้น) · เปิดแล้วจึงแสดงช่องกรอกและตาราง capacity เทียบอุณหภูมิลมเข้า
+ */
+function comboHtml(o, m) {
+  const on = o.combo != null, c = unitCombo(o);
+  const hp = vrv6aCap(m.hp, 100, VRV6A_RATED_T) ? m.hp : null;
+  // ชุดคอมบิเนชันที่เกิน 38 HP ไม่มีตารางทั้งระบบ — รวมจากตารางของแต่ละโมดูล
+  const capAt = (T) => hp ? vrv6aCap(hp, c, T).tc * m.kw / vrv6aCap(hp, 100, VRV6A_RATED_T).tc
+    : m.modules.reduce((s, h) => s + vrv6aCap(h, c, T).tc * m.kwScale, 0);
+  const ref = capAt(VRV6A_RATED_T), amb = scene.site.ambient;
+  const temps = [...new Set([amb, ...COMBO_TEMPS])].filter(t => t >= VRV6A_RATED_T || t === amb).sort((a, b) => a - b);
+  const rows = temps.map(t => {
+    const kw = capAt(t);
+    return `<tr${t === amb ? ' class="amb"' : ''}><td class="n">${fmt(t)}${t === amb ? '*' : ''}</td><td class="n">${kw.toFixed(1)}</td><td class="n">${(kw / ref * 100).toFixed(1)}</td></tr>`;
+  }).join('');
+  return `
+      <label class="chk combo-chk"><input type="checkbox" data-combo-on ${on ? 'checked' : ''}><span>${L('กำหนด Combination ratio', 'Set combination ratio')}</span></label>
+      ${on ? `<div class="combo-box">
+        <label class="row">${L('Combination ratio (%)', 'Combination ratio (%)')} <input type="number" step="10" min="${COMBO_MIN}" max="${COMBO_MAX}" data-k="combo" value="${c}"></label>
+        <table class="combo-tbl"><thead><tr><th>${L('T ลมเข้า °C', 'Inlet °C')}</th><th>kW</th><th>%</th></tr></thead><tbody>${rows}</tbody></table>
+        <p class="note">${L(`ตาราง Cooling Capacity VRV 6A · คอยล์เย็น ${19} °CWB · % เทียบ capacity ที่ ${VRV6A_RATED_T} °C ของ combination เดียวกัน (${ref.toFixed(1)} kW)`, `VRV 6A cooling capacity table · indoor ${19} °CWB · % relative to the capacity at ${VRV6A_RATED_T} °C for the same combination (${ref.toFixed(1)} kW)`)}
+          ${L(`· * = อากาศภายนอก ${fmt(amb)} °C · ค่าระหว่างจุดตารางใช้การเทียบเส้นตรง`, `· * = ambient ${fmt(amb)} °C · values between table points are interpolated linearly`)}</p>
+      </div>` : `<p class="note">${L(`capacity ใช้ Combination ${COMBO_DEFAULT}% (ค่าเริ่มต้น) ตามตาราง Cooling Capacity VRV 6A`, `Capacity uses combination ${COMBO_DEFAULT}% (default) from the VRV 6A cooling capacity table`)}</p>`}`;
+}
 
 /** มุมแนวผนัง (องศา) จากจุดเริ่มไปจุดปลาย: 0° = +x (ตะวันออก), 90° = +z (ใต้) */
 function wallAngle(o) {
@@ -963,13 +996,14 @@ function unitsNow() {
     if (!ms.length) return null;
     const q = ms.reduce((s, m) => s + m.q, 0);
     const avg = k => ms.reduce((s, m) => s + m[k] * m.q, 0) / q;
-    const kwRated = ms.reduce((s, m) => s + m.kw, 0);
-    const kwAvail = ms.reduce((s, m) => s + m.kw * m.capF, 0);
+    const kwRated = ms.reduce((s, m) => s + (m.kwRef ?? m.kw), 0);
+    const kwAvail = ms.reduce((s, m) => s + (m.kwRef ?? m.kw) * m.capF, 0);
     const Tin = avg('Tin');
     const TinMax = Math.max(...ms.map(m => m.TinMax));
     const o = scene.objects.find(x => x.id === u.id);
     return {
       id: u.id, name: u.name, model: u.model, obj: o,
+      combo: o && hasCapTable(o) && o.combo != null ? unitCombo(o) : null,
       kwRated, kwAvail, capF: kwAvail / kwRated, cmm: q * 60,
       Tin, TinMax, dT: Tin - amb, Cin: avg('Cin'), Tdis: avg('Tdis'),
       blockedPct: avg('blockedPct'), status: unitStatus(Tin - amb, Tin, scene.perf),
@@ -1050,7 +1084,7 @@ function renderResults() {
   const rows = [];
   for (const u of units) {
     rows.push(`<tr data-id="${u.id}" class="${u.id === selectedId ? 'sel' : ''}">
-      <td><b>${esc(u.name)}</b></td><td>${esc(u.model)}</td><td class="n">${u.kwRated.toFixed(1)}</td><td class="n">${u.cmm.toFixed(0)}</td>
+      <td><b>${esc(u.name)}</b></td><td>${esc(u.model)}${u.combo != null ? ` <span class="muted">· ${u.combo}%</span>` : ''}</td><td class="n">${u.kwRated.toFixed(1)}</td><td class="n">${u.cmm.toFixed(0)}</td>
       <td class="n">${chip(Math.max(...u.modules.map(m => m.Tin)))}${u.Tin.toFixed(2)}</td><td class="n">${u.TinMax.toFixed(1)}</td><td class="n st-${u.status.key}">+${u.dT.toFixed(2)}</td>
       <td class="n">${(u.Cin * 100).toFixed(1)}</td><td class="n">${u.Tdis.toFixed(1)}</td><td class="n">${(u.capF * 100).toFixed(1)}</td>
       <td class="n">${u.kwAvail.toFixed(1)}</td><td class="n">${u.blockedPct.toFixed(0)}</td>
@@ -1059,7 +1093,7 @@ function renderResults() {
       rows.push(`<tr class="sub" data-id="${u.id}"><td>${L('โมดูล', 'Module')} ${m.hp} HP</td><td></td><td class="n">${m.kw.toFixed(1)}</td><td class="n">${(m.q * 60).toFixed(0)}</td>
         <td class="n">${chip(m.Tin)}${m.Tin.toFixed(2)}</td><td class="n">${m.TinMax.toFixed(1)}</td><td class="n">+${(m.Tin - scene.site.ambient).toFixed(2)}</td>
         <td class="n">${(m.Cin * 100).toFixed(1)}</td><td class="n">${m.Tdis.toFixed(1)}</td><td class="n">${(m.capF * 100).toFixed(1)}</td>
-        <td class="n">${(m.kw * m.capF).toFixed(1)}</td><td class="n">${m.blockedPct.toFixed(0)}</td><td></td></tr>`);
+        <td class="n">${((m.kwRef ?? m.kw) * m.capF).toFixed(1)}</td><td class="n">${m.blockedPct.toFixed(0)}</td><td></td></tr>`);
     }
   }
   tb.innerHTML = rows.join('');

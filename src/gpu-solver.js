@@ -798,7 +798,7 @@ export class GpuSolver extends SolverBase {
     mods.forEach((m, mi) => {
       if (!m.active) return;
       const st = this.modState[mi];
-      const p = modulePerf(m.kw, m.eer, st.Tin, this.perf);
+      const p = modulePerf(m, st.Tin, this.perf);
       st.capF = p.capF; st.qRej = p.qRej;
       st.Tdis = st.Tin + p.qRej / (this.rho * m.q * this.cp);
       tdis[mi] = st.Tdis - this.amb;

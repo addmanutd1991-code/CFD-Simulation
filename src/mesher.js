@@ -257,7 +257,7 @@ export function buildMesh(scene) {
       const g = gBase + mi;
       const q = md.cmm / 60;   // m³/s
       const rec = {
-        unit: ui, unitId: o.id, index: mi, hp: md.hp, kw: md.kw, eer: md.eer, q,
+        unit: ui, unitId: o.id, index: mi, hp: md.hp, kw: md.kw, kwRef: md.kwRef, cap: md.cap, eer: md.eer, q,
         fanFaces: [], fanAxis: [], fanVel: [], fanCells: [], dirFaces: [], dirAxis: [], dirVel: [], inAxis: [], inFaces: [], inVel: [], inCells: [], inArea: [],
         blockedPct: 0, fanAreaGrid: 0, fanAreaReal: md.fans * FAN_AREA, active: true,
       };
