@@ -6,7 +6,8 @@
  *     ขนาดโมดูล H × W × D = 1,660 × W × 765 mm · ชุดผสมเว้นระยะระหว่างโมดูล 100 mm
  *     ลมเข้า: ด้านหลังและด้านข้างทั้งสอง · ลมออก: พัดลมด้านบน
  *   VRV IV S (RXMQ-AVE/BVM) catalog EDTRMT332049  — เป่าลมออกด้านหน้า (side discharge) 990 × 940 × 320 mm
- *   VRV S Hi (RSUQ-AYM)     catalog EDTRMT332104A — เป่าลมออกด้านหน้า (side discharge) 870 × 1,100 × 460 mm
+ *   VRV S Hi (RSUQ-AVMS 4–6 HP, catalog EDTRTH332028A · RSUQ-AYM 7–9 HP, catalog EDTRMT332104A)
+ *     — เป่าลมออกด้านหน้า (side discharge) 870 × 1,100 × 460 mm ทุกรุ่น
  *     ลมเข้า: ด้านหลังและด้านซ้าย (มองจากด้านหน้า — ด้านขวาเป็นแผงบริการ/ท่อน้ำยา) · ลมออก: พัดลมหน้าเครื่อง
  *     ตำแหน่งและขนาดหน้ากากพัดลมประมาณจากแบบ Dimensions ของ catalog
  *   Split type FTKB-A (คอยล์ร้อน RKB09/12AV2S) catalog EDTTH042558 — เป่าลมออกด้านหน้า 461 × 650 × 244 mm
@@ -80,9 +81,12 @@ const FRONT_SERIES = {
     ],
   },
   SHI: {
-    label: 'VRV S Hi', code: 'RSUQ-AYM', h: 870, w: 1100, d: 460,
+    label: 'VRV S Hi', code: 'RSUQ-AVMS/AYM', h: 870, w: 1100, d: 460,
     fan: { lx: -0.15, y: 0.44, s: 0.70, dia: 0.64 },
     units: [
+      { id: 'RSUQ4AVMS', hp: 4, kw: 12.1, cmm: 87 },
+      { id: 'RSUQ5AVMS', hp: 5, kw: 14.0, cmm: 84 },
+      { id: 'RSUQ6AVMS', hp: 6, kw: 16.0, cmm: 87 },
       { id: 'RSUQ7AYM', hp: 7, kw: 20.0, cmm: 123 },
       { id: 'RSUQ8AYM', hp: 8, kw: 22.4, cmm: 123 },
       { id: 'RSUQ9AYM', hp: 9, kw: 24.0, cmm: 137 },
@@ -172,7 +176,7 @@ export const CATEGORIES = [
 export const SERIES = [
   { key: '6A', cat: 'vrv', label: 'VRV 6A', code: 'RXQ-BY1S', discharge: 'top', catalog: 'EDTRTH342529A' },
   { key: 'IVS', cat: 'vrv', label: 'VRV IV S', code: 'RXMQ', discharge: 'front', catalog: 'EDTRMT332049' },
-  { key: 'SHI', cat: 'vrv', label: 'VRV S Hi', code: 'RSUQ-AYM', discharge: 'front', catalog: 'EDTRMT332104A' },
+  { key: 'SHI', cat: 'vrv', label: 'VRV S Hi', code: 'RSUQ-AVMS/AYM', discharge: 'front', catalog: 'EDTRTH332028A / EDTRMT332104A' },
   { key: 'FTKB', cat: 'split', label: 'Split FTKB-A', code: 'RKB-AV2S', discharge: 'front', catalog: 'EDTTH042558' },
   { key: 'RKB', cat: 'split', label: 'Split RKB-ZV2S', code: 'RKB-ZV2S', discharge: 'front', catalog: 'RKB15-24 Specification' },
   { key: 'RKC', cat: 'split', label: 'Split RKC-ZV2S', code: 'RKC-ZV2S', discharge: 'front', catalog: 'RKC-ZV2S Specification' },

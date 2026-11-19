@@ -611,7 +611,7 @@
         <li>เนื่องจากการจำลองการไหลของอากาศที่เกิดขึ้น เป็นการทดลองด้วย PROGRAM COMPUTER เท่านั้น วัตถุประสงค์เพื่อใช้ในการป้องกันหรือหาแนวทางแก้ไขปัญหาเรื่องของการระบายความร้อน ซึ่งไม่ใช่สภาวะอากาศจริงที่เกิดขึ้นกับ CDU</li>
         <li>ทิศทางลมที่เข้ามาจะขึ้นอยู่กับฤดูกาล และช่วงเวลาในขณะนั้นด้วย ซึ่งจะแตกต่างกับ CFD ที่มีอยู่เพียงทิศทางเดียว ดังนั้นควรจะทำการทดลองติดตั้ง MOCK UP ROOM เพื่อตรวจสอบ ผลที่ได้จาก CFD อีกครั้ง</li>
         <li>แบบจำลองความปั่นป่วนเป็น LES แบบหยาบ (Smagorinsky) ไม่มี wall function และไม่คิดการแผ่รังสีจากหลังคา/ผนังที่ร้อน</li>
-        <li>kW อัตราลม ขนาด และชุดผสมของแต่ละรุ่นมาจาก catalog EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRMT332104A (VRV S Hi), EDTTH042558 (Split FTKB-A — EER ใช้ COP จาก catalog) แต่ EER (3.5) และสมการ capacity ตามอุณหภูมิเป็นค่าประมาณ — แก้ได้ที่ ตั้งค่า → ขั้นสูง และแก้อัตราลมรายเครื่องได้</li>
+        <li>kW อัตราลม ขนาด และชุดผสมของแต่ละรุ่นมาจาก catalog EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRTH332028A, EDTRMT332104A (VRV S Hi), EDTTH042558 (Split FTKB-A — EER ใช้ COP จาก catalog) แต่ EER (3.5) และสมการ capacity ตามอุณหภูมิเป็นค่าประมาณ — แก้ได้ที่ ตั้งค่า → ขั้นสูง และแก้อัตราลมรายเครื่องได้</li>
         <li>ผนัง/อาคารแบบเฉียงถูกแทนด้วยเซลล์แบบขั้นบันได ขนาดที่เล็กกว่าเซลล์จะถูกปัดเป็นหนึ่งเซลล์</li>
         <li>ลมพัดผ่านโดเมนแบบคงที่ ไม่มีความปั่นป่วนของลมบรรยากาศ กรณีไม่มีลม (0 m/s) มักเป็นกรณีแย่ที่สุด</li>
       </ul>
@@ -771,14 +771,14 @@
         <li>The airflow simulation is a computer experiment only. It is intended to help prevent, or find solutions to, heat-rejection problems; it is not the actual air condition around the CDUs</li>
         <li>Wind direction depends on the season and the time of day, whereas the CFD uses a single direction. A mock-up installation should therefore be tested to verify the CFD results</li>
         <li>The turbulence model is a coarse LES (Smagorinsky) without wall functions, and radiation from hot roofs/walls is not included</li>
-        <li>kW, airflow, dimensions and combinations of each model come from catalogues EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRMT332104A (VRV S Hi) and EDTTH042558 (Split FTKB-A — EER uses the catalogue COP), but EER (3.5) and the capacity-versus-temperature relation are estimates — editable under Setup → Advanced, and the airflow of each unit can be overridden</li>
+        <li>kW, airflow, dimensions and combinations of each model come from catalogues EDTRTH342529A (VRV 6A), EDTRMT332049 (VRV IV S), EDTRTH332028A, EDTRMT332104A (VRV S Hi) and EDTTH042558 (Split FTKB-A — EER uses the catalogue COP), but EER (3.5) and the capacity-versus-temperature relation are estimates — editable under Setup → Advanced, and the airflow of each unit can be overridden</li>
         <li>Oblique walls/buildings are represented by stair-stepped cells; anything smaller than a cell is rounded to one cell</li>
         <li>Wind through the domain is steady, without atmospheric turbulence. The no-wind case (0 m/s) is usually the worst</li>
       </ul>
     </article>
 
     <article class="models">
-      <h2 data-en="Model table (catalogues EDTRTH342529A · EDTRMT332049 · EDTRMT332104A · EDTTH042558)">ตารางรุ่น (catalog EDTRTH342529A · EDTRMT332049 · EDTRMT332104A · EDTTH042558)</h2>
+      <h2 data-en="Model table (catalogues EDTRTH342529A · EDTRMT332049 · EDTRTH332028A · EDTRMT332104A · EDTTH042558)">ตารางรุ่น (catalog EDTRTH342529A · EDTRMT332049 · EDTRTH332028A · EDTRMT332104A · EDTTH042558)</h2>
       <div class="table-wrap"><table class="doc" id="model-table"></table></div>
     </article>
   </section>
