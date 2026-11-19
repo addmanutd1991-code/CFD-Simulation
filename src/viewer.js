@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { unitModules, unitSize, getModel, hasStand, COIL_LO, COIL_HI, suctionSides, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
+import { EST_TEXT, unitModules, unitSize, getModel, hasStand, COIL_LO, COIL_HI, suctionSides, DEFLECT_DIRS, HOOD_DIRS, elbowOpen, elbowDir } from './models.js';
 import { cduFootprint, slabRange, insideRect, objectBounds } from './scene.js';
 import { rgb } from './colormap.js';
 import { axisLocator } from './grid.js';
@@ -1389,7 +1389,7 @@ export class Viewer {
       html += `<div class="pop-row pop-big"><span>${tr('อุณหภูมิลมกลับ', 'Return-air temperature')}</span><b class="mono">${chip(tMax)}${u.Tin.toFixed(1)} °C</b></div>
         <div class="pop-row"><span>${tr('จุดร้อนสุดหน้าคอยล์', 'Coil hot spot')}</span><span class="mono">${u.TinMax.toFixed(1)} °C</span></div>
         <div class="pop-row"><span>${tr('สูงกว่าอากาศภายนอก', 'Above ambient')}</span><span class="mono st-${u.status.key}">+${u.dT.toFixed(2)} °C</span></div>
-        <div class="pop-row"><span>${tr('capacity ที่ได้', 'Available capacity')}</span><span class="mono">${(u.capF * 100).toFixed(1)}%</span></div>`;
+        <div class="pop-row"><span>${tr('capacity ที่ได้', 'Available capacity')}</span><span class="mono">${(u.capF * 100).toFixed(1)}%</span></div>${u.est ? `<div class="pop-row est-note">(${EST_TEXT()})</div>` : ''}`;
       if (u.modules.length > 1)
         html += `<div class="pop-mods">${u.modules.map((q, i) => `<span>${chip(q.Tin)}${tr('โมดูล', 'Module')} ${i + 1}: <b class="mono">${q.Tin.toFixed(1)} °C</b></span>`).join('')}</div>`;
     } else html += `<div class="pop-row muted">${tr('ยังไม่มีผล — กด คำนวณ เพื่อดูอุณหภูมิลมกลับ', 'No results yet — press Run to see the return-air temperature')}</div>`;

@@ -19,12 +19,14 @@
  *     — เก็บเฉพาะคอยล์ร้อน (CDU) · kW และ EER ใช้ค่าที่จับคู่กับคอยล์เย็นแบบ Cassette (FCTF / FCFC;
  *       RZFS38DY2S ใช้คู่ FCF(S)) · อัตราลมของคอยล์ร้อนจาก Specification · ตัวเครื่อง 3 ขนาด (L / XL / XXL)
  * EER ของ VRV ใช้ค่าเฉลี่ย 3.5 ทุกรุ่น (catalog ไม่ได้ใช้ในแบบจำลองนี้) — แก้อัตราลมได้รายเครื่องในแผงคุณสมบัติ
- * VRV 6A: capacity และกำลังไฟเทียบอุณหภูมิลมเข้าคอยล์ใช้ตาราง Cooling Capacity ของ Daikin (vrv6a-capacity.js)
- *   ตาม Combination ratio ของแต่ละเครื่อง (ค่าเริ่มต้น 100 %) — รุ่นอื่นใช้สมการเส้นตรงใน DEFAULT_PERF
+ * VRV 6A / VRV IV S: capacity และกำลังไฟเทียบอุณหภูมิลมเข้าคอยล์ใช้ตาราง Cooling Capacity ของ Daikin
+ *   (vrv6a-capacity.js 10 – 52 °C, vrvivs-capacity.js 10 – 39 °C) ตาม Combination ratio ของแต่ละเครื่อง (ค่าเริ่มต้น 100 %)
+ *   — เกินช่วงตารางเป็นค่าประมาณ (Estimate) ไม่ได้อ้างอิงจาก Engineering Data · รุ่นอื่นใช้สมการเส้นตรงใน DEFAULT_PERF
  */
 
 import { L } from './i18n.js';
 import { VRV6A_CAP } from './vrv6a-capacity.js';
+import { VRVIVS_CAP } from './vrvivs-capacity.js';
 const EER = 3.5;
 
 /** โมดูลเดี่ยว — ความกว้างเป็นมิลลิเมตร อัตราลมเป็น m³/min */
@@ -260,29 +262,48 @@ export function unitModules(unit) {
   return m.mods.map(s => {
     const w = s.w / 1000;
     const kw = s.kw * m.kwScale;
-    // VRV 6A: ใช้ตารางของทั้งระบบถ้ามี (8 – 60 HP) ไม่เช่นนั้นใช้ตารางของโมดูลเอง
-    const tblHp = m.series === '6A' ? (VRV6A_CAP.data[m.hp] ? m.hp : s.hp) : null;
-    const cap = tblHp && VRV6A_CAP.data[tblHp] ? { hp: tblHp, combo } : null;
-    const kwRef = cap ? kw * vrv6aCap(cap.hp, combo, VRV6A_RATED_T).tc / vrv6aCap(cap.hp, 100, VRV6A_RATED_T).tc : kw;
+    // VRV 6A: ใช้ตารางของทั้งระบบถ้ามี (8 – 60 HP) ไม่เช่นนั้นใช้ตารางของโมดูลเอง · VRV IV S: ตารางตามรหัสรุ่น
+    const key = m.series === '6A' ? (VRV6A_CAP.data[m.hp] ? m.hp : s.hp) : m.id;
+    const cap = CAP_TABLES[m.series]?.data[key] ? { series: m.series, key, combo } : null;
+    const kwRef = cap ? kw * capLookup(cap.series, key, combo, CAP_RATED_T).tc / capLookup(cap.series, key, 100, CAP_RATED_T).tc : kw;
     const r = { hp: s.hp, kw, kwRef, cap, cmm: s.cmm * scale, eer: s.eer, fans: s.fans, w, x0: x, x1: x + w };
     x += w + MODULE_GAP / 1000;
     return r;
   });
 }
 
-/* ───────── ตาราง Capacity VRV 6A ตาม Combination ratio ───────── */
+/* ───────── ตาราง Capacity ตาม Combination ratio (VRV 6A / VRV IV S) ───────── */
 
-export const COMBO_DEFAULT = 100, COMBO_MIN = 10, COMBO_MAX = 130;
+/** ซีรีส์ → ตาราง: temps (°CDB), combos (%), data[key] = { tc, pi }[combo][temp] */
+const CAP_TABLES = { '6A': VRV6A_CAP, IVS: VRVIVS_CAP };
+export const COMBO_DEFAULT = 100;
 /** อุณหภูมิอากาศภายนอกที่พิกัดของตาราง (°CDB) — capacity ที่ 35 °C / 19 °CWB / 100 % = kW ใน catalog */
-export const VRV6A_RATED_T = 35;
+export const CAP_RATED_T = 35;
+/** ชื่อซีรีส์ที่แสดงคู่กับตาราง */
+export const CAP_TABLE_LABEL = { '6A': 'VRV 6A', IVS: 'VRV IV S' };
+/** ข้อความกำกับค่าที่เกินช่วงตาราง */
+export const EST_TEXT = () => L('Estimate — ไม่ได้อ้างอิงจาก Engineering Data', 'Estimate — not based on Engineering Data');
 
-/** เครื่องนี้ใช้ตาราง capacity VRV 6A หรือไม่ */
-export function hasCapTable(unit) { return getModel(unit.model).series === '6A'; }
+/** ตาราง capacity ของเครื่อง (null = ไม่มี ใช้สมการเส้นตรง) */
+export function capTableOf(unit) {
+  const m = getModel(unit.model), t = CAP_TABLES[m.series];
+  return t && (m.series === '6A' || t.data[m.id]) ? t : null;
+}
+export function hasCapTable(unit) { return !!capTableOf(unit); }
+/** ช่วง Combination ratio ที่กรอกได้ตามตารางของเครื่อง */
+export function comboRange(unit) {
+  const t = capTableOf(unit) || VRV6A_CAP;
+  return [t.combos[0], t.combos[t.combos.length - 1]];
+}
+/** อุณหภูมิสูงสุดในตารางของเครื่อง — เกินนี้เป็น Estimate */
+export function capTableTmax(unit) { const t = capTableOf(unit); return t ? t.temps[t.temps.length - 1] : Infinity; }
 
 /** Combination ratio ของเครื่อง (%) — ไม่ได้กำหนด = 100 % */
 export function unitCombo(unit) {
   const c = Number(unit?.combo);
-  return unit?.combo != null && isFinite(c) ? Math.min(COMBO_MAX, Math.max(COMBO_MIN, c)) : COMBO_DEFAULT;
+  if (unit?.combo == null || !isFinite(c)) return COMBO_DEFAULT;
+  const [lo, hi] = comboRange(unit);
+  return Math.min(hi, Math.max(lo, c));
 }
 
 /** หาค่าบนเส้นตรงระหว่างจุดตาราง (นอกช่วงใช้ค่าปลาย) */
@@ -295,21 +316,40 @@ function lerpAt(xs, x) {
   return [i, i + 1, (x - xs[i]) / (xs[i + 1] - xs[i])];
 }
 
-/**
- * TC / PI (kW) ของ VRV 6A จากตาราง ที่ HP ของระบบ, Combination ratio (%) และอุณหภูมิลมเข้าคอยล์ร้อน T (°CDB)
- * ห้องฝั่งคอยล์เย็น 19 °CWB · หาค่าระหว่างจุดตารางแบบเส้นตรงทั้งแกน combination และอุณหภูมิ
- * T ต่ำกว่า 10 °C / สูงกว่า 52 °C ใช้ค่าที่ขอบตาราง
- */
-export function vrv6aCap(hp, combo, T) {
-  const d = VRV6A_CAP.data[hp];
+/** ค่าในตารางเดียว: หาค่าระหว่างจุดแบบเส้นตรงทั้งแกน combination และอุณหภูมิ (นอกช่วงใช้ค่าขอบ) */
+function rawLookup(T0, key, combo, T) {
+  const d = T0.data[key];
   if (!d) return null;
-  const [c0, c1, fc] = lerpAt(VRV6A_CAP.combos, combo);
-  const [t0, t1, ft] = lerpAt(VRV6A_CAP.temps, T);
+  const [c0, c1, fc] = lerpAt(T0.combos, combo);
+  const [t0, t1, ft] = lerpAt(T0.temps, T);
   const at = (tbl) => {
     const row = (c) => tbl[c][t0] + (tbl[c][t1] - tbl[c][t0]) * ft;
     return row(c0) + (row(c1) - row(c0)) * fc;
   };
   return { tc: at(d.tc), pi: at(d.pi) };
+}
+
+/** รูปแบบการลดลงของ capacity เมื่อร้อนเกินตาราง — ใช้เส้นของ VRV 6A 8 HP (ตารางถึง 52 °C) */
+const EST_SHAPE_KEY = 8;
+
+/**
+ * TC / PI (kW) จากตาราง Cooling Capacity ที่คีย์ของตาราง (VRV 6A = HP ของระบบ, VRV IV S = รหัสรุ่น),
+ * Combination ratio (%) และอุณหภูมิลมเข้าคอยล์ร้อน T (°CDB) · คอยล์เย็น 19 °CWB
+ *   T ≤ ค่าสูงสุดของตาราง: ค่าจากตาราง (est = false)
+ *   T > ค่าสูงสุดของตาราง: Estimate (est = true) — ไม่ได้อ้างอิงจาก Engineering Data
+ *     VRV IV S (> 39 °C): ค่าที่ 39 °C × สัดส่วนการลดลงของ VRV 6A 8 HP ที่ combination เดียวกันจาก 39 °C ถึง T
+ *     VRV 6A (> 52 °C): ใช้ค่าที่ 52 °C
+ *   T ต่ำกว่า 10 °C ใช้ค่าที่ขอบตาราง
+ */
+export function capLookup(series, key, combo, T) {
+  const tbl = CAP_TABLES[series];
+  if (!tbl?.data[key]) return null;
+  const tMax = tbl.temps[tbl.temps.length - 1];
+  const base = rawLookup(tbl, key, combo, Math.min(T, tMax));
+  if (T <= tMax) return { ...base, est: false };
+  if (tbl === VRV6A_CAP) return { ...base, est: true };
+  const a = rawLookup(VRV6A_CAP, EST_SHAPE_KEY, combo, tMax), b = rawLookup(VRV6A_CAP, EST_SHAPE_KEY, combo, T);
+  return { tc: base.tc * b.tc / a.tc, pi: base.pi * b.pi / a.pi, est: true };
 }
 
 /** ช่วงความสูงของคอยล์ดูดลม (สัดส่วนความสูงเครื่อง) — ใช้ทั้งตัวคำนวณและภาพแสดงด้านดูด */
@@ -380,7 +420,7 @@ export const DEFAULT_PERF = {
 
 /**
  * สมรรถนะของโมดูล mod ({kw, eer, cap?}) ที่อุณหภูมิลมเข้าคอยล์ Tin
- *   VRV 6A (mod.cap = {hp, combo}) — ตาราง Cooling Capacity ของ Daikin
+ *   VRV 6A / VRV IV S (mod.cap = {series, key, combo}) — ตาราง Cooling Capacity ของ Daikin (est = เกินช่วงตาราง)
  *     Qcool = kw·TC(combo, Tin)/TC(100 %, 35 °C)   Pin = kw·PI(combo, Tin)/TC(100 %, 35 °C)
  *     capF  = TC(combo, Tin) / TC(combo, 35 °C)     — เทียบ capacity ของ combination เดียวกันที่อากาศ 35 °C
  *   รุ่นอื่น — สมการเส้นตรง
@@ -390,19 +430,19 @@ export const DEFAULT_PERF = {
  */
 export function modulePerf(mod, Tin, perf = DEFAULT_PERF) {
   const { kw, eer, cap } = mod;
-  if (cap && VRV6A_CAP.data[cap.hp]) {
-    const rated = vrv6aCap(cap.hp, 100, VRV6A_RATED_T), ref = vrv6aCap(cap.hp, cap.combo, VRV6A_RATED_T);
-    const now = vrv6aCap(cap.hp, cap.combo, Tin);
+  if (cap && CAP_TABLES[cap.series]?.data[cap.key]) {
+    const rated = capLookup(cap.series, cap.key, 100, CAP_RATED_T), ref = capLookup(cap.series, cap.key, cap.combo, CAP_RATED_T);
+    const now = capLookup(cap.series, cap.key, cap.combo, Tin);
     const qCool = kw * 1000 * now.tc / rated.tc;
     const pIn = kw * 1000 * now.pi / rated.tc;
-    return { capF: now.tc / ref.tc, powF: now.pi / ref.pi, qCool, pIn, qRej: qCool + pIn };
+    return { capF: now.tc / ref.tc, powF: now.pi / ref.pi, qCool, pIn, qRej: qCool + pIn, est: now.est };
   }
   const d = Tin - perf.Tref;
   const capF = Math.min(1.10, Math.max(0.4, 1 - perf.kCap * d));
   const powF = Math.max(0.6, 1 + perf.kPow * d);
   const qCool = kw * 1000 * capF;
   const pIn = kw * 1000 / eer * powF;
-  return { capF, powF, qCool, pIn, qRej: qCool + pIn };
+  return { capF, powF, qCool, pIn, qRej: qCool + pIn, est: false };
 }
 
 /** ระดับความรุนแรงจากอุณหภูมิลมเข้าคอยล์ที่สูงขึ้นเทียบอากาศภายนอก */

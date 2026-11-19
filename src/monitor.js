@@ -118,7 +118,7 @@ export class SolverBase {
         active: m.active, hp: m.hp, kw: m.kw, kwRef: m.kwRef ?? m.kw, cap: m.cap, q: m.q,
         Tin, Cin, TinNow: st.Tin, TinMax: st.TinMax,
         Tdis: Tin + p.qRej / (this.rho * m.q * this.cp),
-        capF: p.capF, qCool: p.qCool, qRej: p.qRej, pIn: p.pIn,
+        capF: p.capF, est: !!p.est, qCool: p.qCool, qRej: p.qRej, pIn: p.pIn,
         blockedPct: m.blockedPct, fanAreaGrid: m.fanAreaGrid, fanAreaReal: m.fanAreaReal,
       };
     });

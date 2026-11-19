@@ -2,7 +2,7 @@
  * main.js — ตัวควบคุมหลัก: เชื่อมหน้าจอ ↔ ข้อมูลฉาก ↔ มุมมอง 3D ↔ ตัวคำนวณ
  */
 
-import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus, hasCapTable, unitCombo, vrv6aCap, VRV6A_RATED_T, COMBO_DEFAULT, COMBO_MIN, COMBO_MAX } from './models.js';
+import { MODELS, SERIES, CATEGORIES, getModel, seriesOf, unitSize, elbowOpen, hasStand, status as unitStatus, hasCapTable, unitCombo, capLookup, capTableOf, capTableTmax, comboRange, CAP_RATED_T, CAP_TABLE_LABEL, COMBO_DEFAULT, EST_TEXT } from './models.js';
 import { newScene, makeObject, domainOf, presetScene, PRESETS, normalizeScene, BC_FACES, insideRect } from './scene.js';
 import CASE_THUMBS from './case-thumbs.js';
 import { buildMesh } from './mesher.js';
@@ -454,7 +454,7 @@ function renderProps() {
     if (ur) {
       html += `<div class="unit-res st-${ur.status.key}">${L('T ลมเข้า', 'Inlet T')} <span>${ur.Tin.toFixed(1)} °C</span> (ΔT <span>+${ur.dT.toFixed(2)} °C</span>)
         · ${L('ลมวนกลับ', 'recirculation')} <span>${(ur.Cin * 100).toFixed(1)}%</span><br>capacity <span>${(ur.capF * 100).toFixed(1)}%</span>
-        = <span>${ur.kwAvail.toFixed(1)}</span> / ${ur.kwRated.toFixed(1)} kW · <b class="st-${ur.status.key}">${ur.status.label}</b></div>`;
+        = <span>${ur.kwAvail.toFixed(1)}</span> / ${ur.kwRated.toFixed(1)} kW · <b class="st-${ur.status.key}">${ur.status.label}</b>${ur.est ? `<br><span class="est">(${EST_TEXT()})</span>` : ''}</div>`;
     }
   } else if (o.type === 'wall') {
     const wallLen = Math.hypot(o.x2 - o.x1, o.z2 - o.z1);
@@ -524,7 +524,7 @@ function renderProps() {
         if (!isFinite(v)) { renderProps(); return; }
         if (k === 'elev' || k === 'duct' || k === 'hoodOut' || k === 'gap' || k === 'y') v = Math.max(0, v);
         if (k === 'height' || k === 'h' || k === 'w' || k === 'd' || k === 'thick') v = Math.max(0.05, v);
-        if (k === 'combo') v = Math.min(COMBO_MAX, Math.max(COMBO_MIN, Math.round(v)));
+        if (k === 'combo') { const [lo, hi] = comboRange(o); v = Math.min(hi, Math.max(lo, Math.round(v))); }
       }
       if (inp.type === 'range') {
         // เลื่อนแถบ: บันทึก undo ครั้งเดียวต่อการลาก
@@ -589,32 +589,50 @@ function renderProps() {
 let wallAnchor = 'start';
 
 /** อุณหภูมิลมเข้าคอยล์ที่แสดงในตาราง capacity ของแผงคุณสมบัติ (°C) */
-const COMBO_TEMPS = [35, 38, 40, 43, 45, 46, 48, 50, 52];
+const COMBO_TEMPS = [35, 37, 39, 40, 43, 45, 46, 48, 50, 52];
+
+/** ป้ายกำกับค่า capacity ที่เกินช่วงตาราง (ตารางผลลัพธ์) */
+function estTag(on) { return on ? ` <span class="est" title="${esc(EST_TEXT())}">(Estimate)</span>` : ''; }
 
 /**
- * ส่วน Combination ratio ของ VRV 6A ในแผงคุณสมบัติ
+ * ส่วน Combination ratio ของเครื่องที่มีตาราง capacity (VRV 6A / VRV IV S) ในแผงคุณสมบัติ
  *   ตัวเลือกปิดอยู่ = ใช้ Combination 100 % (ค่าเริ่มต้น) · เปิดแล้วจึงแสดงช่องกรอกและตาราง capacity เทียบอุณหภูมิลมเข้า
+ *   แถวที่เกินช่วงตาราง = Estimate (ไม่ได้อ้างอิงจาก Engineering Data)
  */
 function comboHtml(o, m) {
-  const on = o.combo != null, c = unitCombo(o);
-  const hp = vrv6aCap(m.hp, 100, VRV6A_RATED_T) ? m.hp : null;
-  // ชุดคอมบิเนชันที่เกิน 60 HP ไม่มีตารางทั้งระบบ — รวมจากตารางของแต่ละโมดูล
-  const capAt = (T) => hp ? vrv6aCap(hp, c, T).tc * m.kw / vrv6aCap(hp, 100, VRV6A_RATED_T).tc
-    : m.modules.reduce((s, h) => s + vrv6aCap(h, c, T).tc * m.kwScale, 0);
-  const ref = capAt(VRV6A_RATED_T), amb = scene.site.ambient;
-  const temps = [...new Set([amb, ...COMBO_TEMPS])].filter(t => t >= VRV6A_RATED_T || t === amb).sort((a, b) => a - b);
+  const on = o.combo != null, c = unitCombo(o), [lo, hi] = comboRange(o);
+  const tbl = capTableOf(o), tMax = capTableTmax(o), label = CAP_TABLE_LABEL[m.series];
+  // VRV 6A: ตารางทั้งระบบ (8 – 60 HP) · ชุดที่เกิน 60 HP รวมจากตารางของแต่ละโมดูล · VRV IV S: ตารางตามรหัสรุ่น
+  const key = m.series === '6A' ? (tbl.data[m.hp] ? m.hp : null) : m.id;
+  const capAt = (T) => {
+    if (key != null) {
+      const r = capLookup(m.series, key, c, T);
+      return { kw: r.tc * m.kw / capLookup(m.series, key, 100, CAP_RATED_T).tc, est: r.est };
+    }
+    const rs = m.modules.map(h => capLookup(m.series, h, c, T));
+    return { kw: rs.reduce((s, r) => s + r.tc * m.kwScale, 0), est: rs.some(r => r.est) };
+  };
+  const ref = capAt(CAP_RATED_T).kw, amb = scene.site.ambient;
+  const temps = [...new Set([amb, ...COMBO_TEMPS])].filter(t => t >= CAP_RATED_T || t === amb).sort((a, b) => a - b);
   const rows = temps.map(t => {
-    const kw = capAt(t);
-    return `<tr${t === amb ? ' class="amb"' : ''}><td class="n">${fmt(t)}${t === amb ? '*' : ''}</td><td class="n">${kw.toFixed(1)}</td><td class="n">${(kw / ref * 100).toFixed(1)}</td></tr>`;
+    const r = capAt(t);
+    return `<tr class="${t === amb ? 'amb' : ''}${r.est ? ' est' : ''}"><td class="n">${fmt(t)}${t === amb ? '*' : ''}</td><td class="n">${r.kw.toFixed(1)}</td><td class="n">${(r.kw / ref * 100).toFixed(1)}</td><td class="tag">${r.est ? '(Estimate)' : ''}</td></tr>`;
   }).join('');
+  const beyond = m.series === 'IVS'
+    ? L('ส่วนที่เกินประมาณจากอัตราการลดลงของ VRV 6A ที่ combination เดียวกัน', 'beyond that it follows the VRV 6A drop at the same combination')
+    : L('ส่วนที่เกินใช้ค่าที่ขอบตาราง', 'beyond that the edge value is used');
+  const estNote = temps.some(t => t > tMax)
+    ? `<br><span class="est">(Estimate) = ${EST_TEXT()}</span> — ${L(`ตารางของรุ่นนี้ถึง ${tMax} °C`, `this model's table ends at ${tMax} °C`)} · ${beyond}` : '';
+  const estDefault = tMax < 52
+    ? L(` · T ลมเข้าเกิน ${tMax} °C เป็น Estimate (ไม่ได้อ้างอิงจาก Engineering Data)`, ` · inlet T above ${tMax} °C is an estimate (not based on Engineering Data)`) : '';
   return `
       <label class="chk combo-chk"><input type="checkbox" data-combo-on ${on ? 'checked' : ''}><span>${L('กำหนด Combination ratio', 'Set combination ratio')}</span></label>
       ${on ? `<div class="combo-box">
-        <label class="row">${L('Combination ratio (%)', 'Combination ratio (%)')} <input type="number" step="10" min="${COMBO_MIN}" max="${COMBO_MAX}" data-k="combo" value="${c}"></label>
-        <table class="combo-tbl"><thead><tr><th>${L('T ลมเข้า °C', 'Inlet °C')}</th><th>kW</th><th>%</th></tr></thead><tbody>${rows}</tbody></table>
-        <p class="note">${L(`ตาราง Cooling Capacity VRV 6A · คอยล์เย็น ${19} °CWB · % เทียบ capacity ที่ ${VRV6A_RATED_T} °C ของ combination เดียวกัน (${ref.toFixed(1)} kW)`, `VRV 6A cooling capacity table · indoor ${19} °CWB · % relative to the capacity at ${VRV6A_RATED_T} °C for the same combination (${ref.toFixed(1)} kW)`)}
-          ${L(`· * = อากาศภายนอก ${fmt(amb)} °C · ค่าระหว่างจุดตารางใช้การเทียบเส้นตรง`, `· * = ambient ${fmt(amb)} °C · values between table points are interpolated linearly`)}</p>
-      </div>` : `<p class="note">${L(`capacity ใช้ Combination ${COMBO_DEFAULT}% (ค่าเริ่มต้น) ตามตาราง Cooling Capacity VRV 6A`, `Capacity uses combination ${COMBO_DEFAULT}% (default) from the VRV 6A cooling capacity table`)}</p>`}`;
+        <label class="row">${L('Combination ratio (%)', 'Combination ratio (%)')} <input type="number" step="10" min="${lo}" max="${hi}" data-k="combo" value="${c}"></label>
+        <table class="combo-tbl"><thead><tr><th>${L('T ลมเข้า °C', 'Inlet °C')}</th><th>kW</th><th>%</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+        <p class="note">${L(`ตาราง Cooling Capacity ${label} (${tbl.temps[0]} – ${tMax} °C, combination ${lo} – ${hi}%) · คอยล์เย็น ${tbl.wb} °CWB · % เทียบ capacity ที่ ${CAP_RATED_T} °C ของ combination เดียวกัน (${ref.toFixed(1)} kW)`, `${label} cooling capacity table (${tbl.temps[0]} – ${tMax} °C, combination ${lo} – ${hi}%) · indoor ${tbl.wb} °CWB · % relative to the capacity at ${CAP_RATED_T} °C for the same combination (${ref.toFixed(1)} kW)`)}
+          ${L(`· * = อากาศภายนอก ${fmt(amb)} °C · ค่าระหว่างจุดตารางใช้การเทียบเส้นตรง`, `· * = ambient ${fmt(amb)} °C · values between table points are interpolated linearly`)}${estNote}</p>
+      </div>` : `<p class="note">${L(`capacity ใช้ Combination ${COMBO_DEFAULT}% (ค่าเริ่มต้น) ตามตาราง Cooling Capacity ${label}`, `Capacity uses combination ${COMBO_DEFAULT}% (default) from the ${label} cooling capacity table`)}${estDefault}</p>`}`;
 }
 
 /** มุมแนวผนัง (องศา) จากจุดเริ่มไปจุดปลาย: 0° = +x (ตะวันออก), 90° = +z (ใต้) */
@@ -1004,7 +1022,7 @@ function unitsNow() {
     return {
       id: u.id, name: u.name, model: u.model, obj: o,
       combo: o && hasCapTable(o) && o.combo != null ? unitCombo(o) : null,
-      kwRated, kwAvail, capF: kwAvail / kwRated, cmm: q * 60,
+      kwRated, kwAvail, capF: kwAvail / kwRated, est: ms.some(m => m.est), cmm: q * 60,
       Tin, TinMax, dT: Tin - amb, Cin: avg('Cin'), Tdis: avg('Tdis'),
       blockedPct: avg('blockedPct'), status: unitStatus(Tin - amb, Tin, scene.perf),
       modules: ms,
@@ -1086,19 +1104,20 @@ function renderResults() {
     rows.push(`<tr data-id="${u.id}" class="${u.id === selectedId ? 'sel' : ''}">
       <td><b>${esc(u.name)}</b></td><td>${esc(u.model)}${u.combo != null ? ` <span class="muted">· ${u.combo}%</span>` : ''}</td><td class="n">${u.kwRated.toFixed(1)}</td><td class="n">${u.cmm.toFixed(0)}</td>
       <td class="n">${chip(Math.max(...u.modules.map(m => m.Tin)))}${u.Tin.toFixed(2)}</td><td class="n">${u.TinMax.toFixed(1)}</td><td class="n st-${u.status.key}">+${u.dT.toFixed(2)}</td>
-      <td class="n">${(u.Cin * 100).toFixed(1)}</td><td class="n">${u.Tdis.toFixed(1)}</td><td class="n">${(u.capF * 100).toFixed(1)}</td>
+      <td class="n">${(u.Cin * 100).toFixed(1)}</td><td class="n">${u.Tdis.toFixed(1)}</td><td class="n">${(u.capF * 100).toFixed(1)}${estTag(u.est)}</td>
       <td class="n">${u.kwAvail.toFixed(1)}</td><td class="n">${u.blockedPct.toFixed(0)}</td>
       <td><span class="pill st-${u.status.key}">${u.status.short}</span></td></tr>`);
     if (u.modules.length > 1) for (const m of u.modules) {
       rows.push(`<tr class="sub" data-id="${u.id}"><td>${L('โมดูล', 'Module')} ${m.hp} HP</td><td></td><td class="n">${m.kw.toFixed(1)}</td><td class="n">${(m.q * 60).toFixed(0)}</td>
         <td class="n">${chip(m.Tin)}${m.Tin.toFixed(2)}</td><td class="n">${m.TinMax.toFixed(1)}</td><td class="n">+${(m.Tin - scene.site.ambient).toFixed(2)}</td>
-        <td class="n">${(m.Cin * 100).toFixed(1)}</td><td class="n">${m.Tdis.toFixed(1)}</td><td class="n">${(m.capF * 100).toFixed(1)}</td>
+        <td class="n">${(m.Cin * 100).toFixed(1)}</td><td class="n">${m.Tdis.toFixed(1)}</td><td class="n">${(m.capF * 100).toFixed(1)}${estTag(m.est)}</td>
         <td class="n">${((m.kwRef ?? m.kw) * m.capF).toFixed(1)}</td><td class="n">${m.blockedPct.toFixed(0)}</td><td></td></tr>`);
     }
   }
+  if (units.some(u => u.est)) rows.push(`<tr class="est-row"><td colspan="13">(Estimate) = ${EST_TEXT()} — ${L('T ลมเข้าเกินช่วงตาราง Cooling Capacity', 'inlet T beyond the cooling capacity table')}</td></tr>`);
   tb.innerHTML = rows.join('');
   $('#criteria').innerHTML = bandCriteriaHTML();
-  $$('tr', tb).forEach(tr => tr.addEventListener('click', () => select(Number(tr.dataset.id))));
+  $$('tr[data-id]', tb).forEach(tr => tr.addEventListener('click', () => select(Number(tr.dataset.id))));
 
   // ตัวเลขสรุป
   const worst = units.reduce((a, b) => (b.dT > a.dT ? b : a));
@@ -1177,7 +1196,7 @@ function renderAdvice(units) {
     if (solidNear.length) tips.push(L(`ผนังทึบใกล้เครื่อง (${solidNear.map(w => esc(w.name)).join(', ')}) — เปลี่ยนเป็น louver หรือเว้นระยะมากขึ้น`, `Solid wall near the unit (${solidNear.map(w => esc(w.name)).join(', ')}) — change it to a louver or increase the clearance`));
     if (u.blockedPct > 20) tips.push(L(`หน้าคอยล์ถูกบัง ${u.blockedPct.toFixed(0)}% — เพิ่มระยะจากผนัง/เครื่องข้างเคียง`, `Coil face ${u.blockedPct.toFixed(0)}% blocked — increase the distance from walls/neighbouring units`));
     if (!tips.length) tips.push(L('ขยับให้ห่างจากเครื่องที่อยู่ต้นลม หรือเพิ่มระยะระหว่างแถว', 'Move it away from upwind units, or increase the row spacing'));
-    out.push(`<li><b class="st-${u.status.key}">${esc(u.name)}</b> ΔT +${u.dT.toFixed(2)} °C · ${L('ลมวนกลับ', 'recirculation')} ${(u.Cin * 100).toFixed(1)}%<span class="adv-cap"> · capacity ${(u.capF * 100).toFixed(1)}%</span>
+    out.push(`<li><b class="st-${u.status.key}">${esc(u.name)}</b> ΔT +${u.dT.toFixed(2)} °C · ${L('ลมวนกลับ', 'recirculation')} ${(u.Cin * 100).toFixed(1)}%<span class="adv-cap"> · capacity ${(u.capF * 100).toFixed(1)}%${u.est ? ` (${EST_TEXT()})` : ''}</span>
       <br>${tips.map(t => '→ ' + t).join('<br>')}</li>`);
   }
   if (!out.length) out.push(L('<li><b class="st-ok">ทุกเครื่อง ΔT &lt; 1 °C</b> — ลมร้อนวนกลับน้อย ผังนี้ใช้ได้ในเงื่อนไขที่ตั้งไว้</li>', '<li><b class="st-ok">All units ΔT &lt; 1 °C</b> — little recirculation; this layout works under the set conditions</li>'));
@@ -1533,7 +1552,7 @@ function exportCSV() {
   const head = L(['CDU', 'รุ่น', 'kW พิกัด', 'อัตราลม m3/min', 'T ลมเข้าเฉลี่ย C', 'T ลมเข้าสูงสุด C', 'dT C', 'ลมวนกลับ %', 'T ลมเป่า C', 'Capacity %', 'kW ที่ได้', 'คอยล์ถูกบัง %', 'สถานะ', 'เกณฑ์ T ลมกลับ'],
     ['CDU', 'Model', 'Rated kW', 'Airflow m3/min', 'Mean inlet T C', 'Max inlet T C', 'dT C', 'Recirculation %', 'Discharge T C', 'Capacity %', 'Available kW', 'Coil blocked %', 'Status', 'Return-air criterion']);
   const rows = units.map(u => [u.name, u.model, u.kwRated.toFixed(1), u.cmm.toFixed(0), u.Tin.toFixed(2), u.TinMax.toFixed(2), u.dT.toFixed(2),
-    (u.Cin * 100).toFixed(1), u.Tdis.toFixed(1), (u.capF * 100).toFixed(1), u.kwAvail.toFixed(1), u.blockedPct.toFixed(0), u.status.label, BAND_TEXT()[unitBand(u)].label]);
+    (u.Cin * 100).toFixed(1), u.Tdis.toFixed(1), (u.capF * 100).toFixed(1) + (u.est ? ` (${EST_TEXT()})` : ''), u.kwAvail.toFixed(1), u.blockedPct.toFixed(0), u.status.label, BAND_TEXT()[unitBand(u)].label]);
   const csv = '﻿' + [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
   download(`${safeName(scene.name)}-results.csv`, csv, 'text/csv');
 }
@@ -1550,7 +1569,7 @@ const REPORT_COLS = () => [
   { k: 'tmax', th: L('สูงสุด °C', 'Max °C'), td: u => `<td class="n">${u.TinMax.toFixed(1)}</td>` },
   { k: 'dt', th: 'ΔT °C', td: u => `<td class="n">+${u.dT.toFixed(2)}</td>` },
   { k: 'recirc', th: L('ลมวนกลับ %', 'Recirc. %'), td: u => `<td class="n">${(u.Cin * 100).toFixed(1)}</td>` },
-  { k: 'cap', th: 'Capacity %', td: u => `<td class="n">${(u.capF * 100).toFixed(1)}</td>`, off: true },
+  { k: 'cap', th: 'Capacity %', td: u => `<td class="n">${(u.capF * 100).toFixed(1)}${u.est ? ` (${EST_TEXT()})` : ''}</td>`, off: true },
   { k: 'kwa', th: L('kW ที่ได้', 'Available kW'), td: u => `<td class="n">${u.kwAvail.toFixed(1)}</td>`, off: true },
   { k: 'status', th: L('สถานะ', 'Status'), td: u => `<td class="${u.status.key}">${u.status.label}</td>` },
   { k: 'band', th: L('เกณฑ์ T ลมกลับ', 'Return-air criterion'), td: u => `<td><i class="chip chip-${unitBand(u)}"></i>${BAND_TEXT()[unitBand(u)].label}</td>` },
