@@ -598,7 +598,7 @@ const COMBO_TEMPS = [35, 38, 40, 43, 45, 46, 48, 50, 52];
 function comboHtml(o, m) {
   const on = o.combo != null, c = unitCombo(o);
   const hp = vrv6aCap(m.hp, 100, VRV6A_RATED_T) ? m.hp : null;
-  // ชุดคอมบิเนชันที่เกิน 38 HP ไม่มีตารางทั้งระบบ — รวมจากตารางของแต่ละโมดูล
+  // ชุดคอมบิเนชันที่เกิน 60 HP ไม่มีตารางทั้งระบบ — รวมจากตารางของแต่ละโมดูล
   const capAt = (T) => hp ? vrv6aCap(hp, c, T).tc * m.kw / vrv6aCap(hp, 100, VRV6A_RATED_T).tc
     : m.modules.reduce((s, h) => s + vrv6aCap(h, c, T).tc * m.kwScale, 0);
   const ref = capAt(VRV6A_RATED_T), amb = scene.site.ambient;

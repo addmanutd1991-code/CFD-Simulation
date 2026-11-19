@@ -260,7 +260,7 @@ export function unitModules(unit) {
   return m.mods.map(s => {
     const w = s.w / 1000;
     const kw = s.kw * m.kwScale;
-    // VRV 6A: ใช้ตารางของทั้งระบบถ้ามี (8 – 38 HP) ไม่เช่นนั้นใช้ตารางของโมดูลเอง
+    // VRV 6A: ใช้ตารางของทั้งระบบถ้ามี (8 – 60 HP) ไม่เช่นนั้นใช้ตารางของโมดูลเอง
     const tblHp = m.series === '6A' ? (VRV6A_CAP.data[m.hp] ? m.hp : s.hp) : null;
     const cap = tblHp && VRV6A_CAP.data[tblHp] ? { hp: tblHp, combo } : null;
     const kwRef = cap ? kw * vrv6aCap(cap.hp, combo, VRV6A_RATED_T).tc / vrv6aCap(cap.hp, 100, VRV6A_RATED_T).tc : kw;
