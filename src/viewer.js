@@ -91,7 +91,15 @@ export class Viewer {
     this.gObjects = new THREE.Group();
     this.gHandles = new THREE.Group();
     this.gPreview = new THREE.Group();
-    this.scene3.add(this.gGround, this.gObjects, this.gHandles, this.gPreview);
+    this.gUnder = new THREE.Group();   // แบบ DXF ฉากหลัง (underlay)
+    this.scene3.add(this.gGround, this.gObjects, this.gHandles, this.gPreview, this.gUnder);
+    this.ul = { pts: null, bbox: null, snap: true };
+    this.snapMark = new THREE.Mesh(new THREE.RingGeometry(0.09, 0.15, 24), new THREE.MeshBasicMaterial({ color: 0xff6d00, depthTest: false, transparent: true }));
+    this.snapMark.rotation.x = -Math.PI / 2;
+    this.snapMark.renderOrder = 20;
+    this.snapMark.visible = false;
+    this.snapMark.raycast = () => {};
+    this.scene3.add(this.snapMark);
 
     this.#initSection();
     this.meshLines = null;
@@ -1503,7 +1511,57 @@ export class Viewer {
   #ground(e, y = 0) {
     const ray = this.#pick(e);
     const pt = new THREE.Vector3();
-    return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), pt) ? pt : null;
+    const hit = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), pt) ? pt : null;
+    this.snapHit = false;
+    // ดูดเข้าจุดปลายเส้นของแบบ DXF: ขณะถือเครื่องมือวาง/แก้ไข หรือขณะลาก (ปุ่มซ้ายค้าง) · Alt = ไม่ดูด
+    const active = hit && y === 0 && this.ul.snap && this.ul.pts && !e.altKey && (this.tool !== 'select' || (e.buttons & 1));
+    if (active) {
+      const cam = this.camera.isOrthographicCamera ? this.orthoSize : this.camera.position.distanceTo(this.controls.target);
+      const tol = Math.max(0.12, cam * 0.012);
+      const P = this.ul.pts;
+      let best = tol * tol, bi = -1;
+      for (let k = 0; k < P.length; k += 2) {
+        const dx = P[k] - hit.x, dz = P[k + 1] - hit.z, d2 = dx * dx + dz * dz;
+        if (d2 < best) { best = d2; bi = k; }
+      }
+      if (bi >= 0) { hit.x = P[bi]; hit.z = P[bi + 1]; this.snapHit = true; }
+    }
+    this.snapMark.visible = this.snapHit;
+    if (this.snapHit) this.snapMark.position.set(hit.x, 0.03, hit.z);
+    return hit;
+  }
+
+  /**
+   * แบบ DXF ฉากหลัง: layers = [{ color, visible, segs: Float32Array [x1, z1, x2, z2, …] (พิกัดโลก ม.) }]
+   * snapPts = Float32Array [x, z, …] จุดปลายเส้นสำหรับดูด · bbox = { x0, z0, x1, z1 } · opacity 0–1
+   */
+  setUnderlay(layers, snapPts, bbox, opacity = 0.85) {
+    for (const c of [...this.gUnder.children]) { this.gUnder.remove(c); c.geometry?.dispose(); c.material?.dispose(); }
+    this.ul.pts = layers && snapPts?.length ? snapPts : null;
+    this.ul.bbox = layers ? bbox : null;
+    for (const l of layers || []) {
+      if (!l.visible || !l.segs.length) continue;
+      const pos = new Float32Array(l.segs.length / 2 * 3);
+      for (let k = 0, q = 0; k < l.segs.length; k += 2, q += 3) { pos[q] = l.segs[k]; pos[q + 1] = 0.015; pos[q + 2] = l.segs[k + 1]; }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const m = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: new THREE.Color(l.color), transparent: true, opacity, depthWrite: false }));
+      m.renderOrder = 2;
+      m.raycast = () => {};
+      this.gUnder.add(m);
+    }
+  }
+
+  setUnderlaySnap(on) { this.ul.snap = !!on; if (!on) this.snapMark.visible = false; }
+
+  /** พื้นที่ที่วางวัตถุได้: กริดแกนของโดเมน รวมกับขอบเขตของแบบ DXF ฉากหลัง */
+  #area() {
+    const d = this.dom;
+    if (!d) return null;
+    const b = this.ul.bbox;
+    if (!b) return { ox: d.ox, oz: d.oz, W: d.W, D: d.D };
+    const x0 = Math.min(d.ox, b.x0), z0 = Math.min(d.oz, b.z0);
+    return { ox: x0, oz: z0, W: Math.max(d.ox + d.W, b.x1) - x0, D: Math.max(d.oz + d.D, b.z1) - z0 };
   }
 
   /** ล็อกแนวแกน: โหมด Ortho (F8) หรือกด Shift — กด Shift ขณะเปิด Ortho = ปลดล็อกชั่วคราว */
@@ -1523,7 +1581,7 @@ export class Viewer {
 
   /** บีบจุด (x, z) ให้อยู่ในพื้นที่แกน (กริดพื้นของโดเมน) — inset = ระยะเว้นจากขอบ */
   #clampXZ(x, z, ix = 0, iz = 0) {
-    const d = this.dom;
+    const d = this.#area();
     if (!d) return { x, z };
     const cl = (v, a, b) => (a > b ? (a + b) / 2 : Math.min(b, Math.max(a, v)));
     const r = v => Math.round(v * 1000) / 1000;
@@ -1532,7 +1590,7 @@ export class Viewer {
 
   /** เลื่อนวัตถุทั้งชิ้นกลับเข้ามาในพื้นที่แกน ถ้ามีส่วนใดล้นขอบ */
   #keepInside(o) {
-    const d = this.dom;
+    const d = this.#area();
     if (!d) return;
     const b = objectBounds(o);
     const shift = (lo, hi, a, w) => (hi - lo > w ? a + w / 2 - (lo + hi) / 2 : lo < a ? a - lo : hi > a + w ? a + w - hi : 0);
@@ -1578,7 +1636,8 @@ export class Viewer {
 
   #initInput() {
     const el = this.renderer.domElement;
-    const snap = (v, e) => e.altKey ? Math.round(v * 100) / 100 : Math.round(v / SNAP) * SNAP;
+    // จุดที่ดูดเข้าปลายเส้น DXF แล้วใช้ค่าตรงตามแบบ ไม่ปัดเศษ
+    const snap = (v, e) => this.snapHit ? v : e.altKey ? Math.round(v * 100) / 100 : Math.round(v / SNAP) * SNAP;
     this.snapFn = snap;
     let drag = null, down = null;
 

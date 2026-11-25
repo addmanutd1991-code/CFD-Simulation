@@ -13,6 +13,7 @@ import { Runner } from './runner.js';
 import { cssGradient, FIELDS, rgb } from './colormap.js';
 import { L, getLang, setLang } from './i18n.js';
 import { WIND_PROFILES, windParams, windFactorFn } from './wind.js';
+import { parseDXF, guessUnits, simplifyCollinear, rectOf } from './dxf.js';
 import { BATCH_KINDS, KIND_INFO, MAX_CASES, WIND4, buildCases, validateVars, parseValues, dirName } from './batch.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1598,15 +1599,19 @@ function showProbe(info) {
 /* ───────── ไฟล์ / ส่งออก ───────── */
 
 function saveProject() {
-  download(`${safeName(scene.name)}.json`, JSON.stringify(scene, null, 2), 'application/json');
+  // แบบ DXF ฉากหลังเก็บไว้ในไฟล์โปรเจกต์ด้วย (ฟิลด์ underlay — ไม่อยู่ในฉากที่ใช้คำนวณ)
+  const out = underlay ? { ...scene, underlay } : scene;
+  download(`${safeName(scene.name)}.json`, JSON.stringify(out, null, underlay ? 0 : 2), 'application/json');
 }
 
 function openProject(file) {
   const rd = new FileReader();
   rd.onload = () => {
     try {
-      const s = normalizeScene(JSON.parse(rd.result));
+      const raw = JSON.parse(rd.result);
+      const s = normalizeScene(raw);
       edit(() => { scene = s; selectedId = null; }, true, true);
+      setUnderlay(raw.underlay?.layers ? raw.underlay : null);
       showTab('tool');
       viewer.setView(viewer.view);
       initSection();
@@ -2057,6 +2062,234 @@ function exportBatchCSV() {
   download(`${safeName(ok[0].snap.name.split(' — ')[0])}-batch.csv`, csv, 'text/csv');
 }
 
+/* ───────── แบบ DXF ฉากหลัง (underlay) ─────────
+ * เส้นของแบบวาดบนพื้น ใช้ดูดจุดปลายเส้นขณะวาดผนัง/วางวัตถุ และแปลงเลเยอร์ที่เลือกเป็นผนัง / louver / อาคาร / CDU
+ * เก็บแยกจากฉาก (ไม่อยู่ใน undo และไม่มีผลกับการคำนวณ) — จำไว้กับเบราว์เซอร์ และบันทึกลงไฟล์โปรเจกต์ .json
+ * พิกัด: แกน X ของแบบ → ทิศตะวันออก (+x), แกน Y ของแบบ → ทิศเหนือ (−z) แล้วหมุน/เลื่อนตามค่าตำแหน่ง */
+const UNDERLAY_KEY = 'cdu-airflow-cfd:underlay';
+const DXF_UNITS = [['auto', 0], ['mm', 0.001], ['cm', 0.01], ['m', 1], ['in', 0.0254], ['ft', 0.3048]];
+const DXF_MODES = () => [['none', L('ไม่แปลง', 'Keep as lines')], ['wall', L('ผนังทึบ', 'Solid wall')], ['louver', 'Louver'], ['building', L('อาคาร (สี่เหลี่ยมปิด)', 'Building (closed rectangle)')], ['cdu', L('CDU (สี่เหลี่ยมปิด)', 'CDU (closed rectangle)')]];
+let underlay = null;
+let ulWorld = null;   // แคชพิกัดโลกของเส้นทุกเลเยอร์
+
+function loadUnderlay() {
+  try { const v = JSON.parse(localStorage.getItem(UNDERLAY_KEY) || 'null'); return v?.layers ? v : null; } catch { return null; }
+}
+function saveUnderlay() {
+  try {
+    if (underlay) localStorage.setItem(UNDERLAY_KEY, JSON.stringify(underlay)); else localStorage.removeItem(UNDERLAY_KEY);
+  } catch { toast(L('แบบ DXF ใหญ่เกินกว่าจะจำไว้ในเบราว์เซอร์ — บันทึกไฟล์โปรเจกต์ .json เพื่อเก็บไว้', 'The DXF is too large to keep in the browser — save the project .json file to keep it'), 5000); }
+}
+
+/** แปลงพิกัดแบบ (หน่วยไฟล์) → พิกัดโลก (ม.) */
+function ulXform(u = underlay) {
+  const s = u.scale, r = (u.rot || 0) * Math.PI / 180, c = Math.cos(r), n = Math.sin(r);
+  return (X, Y) => { const a = X * s, b = Y * s; return [a * c - b * n + u.dx, -(a * n + b * c) + u.dz]; };
+}
+
+function setUnderlay(u, persist = true) {
+  underlay = u;
+  if (u) {
+    u.opacity ??= 0.85; u.show ??= true; u.snap ??= true; u.rot ??= 0;
+    u.conv = { wallH: 2.4, thick: 0.15, louver: 50, bldgH: 6, ...(u.conv || {}) };
+  }
+  applyUnderlay();
+  if (persist) saveUnderlay();
+}
+
+function applyUnderlay() {
+  const u = underlay;
+  if (!u) { ulWorld = null; viewer.setUnderlay(null); updateDxfButton(); return; }
+  const f = ulXform(u);
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  const pts = new Map();
+  ulWorld = u.layers.map(l => {
+    const segs = [];
+    const polys = l.polys.map(p => {
+      const w = [];
+      for (let k = 0; k < p.pts.length; k += 2) w.push(f(p.pts[k], p.pts[k + 1]));
+      for (const [x, z] of w) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+      const n = w.length, last = p.closed ? n : n - 1;
+      for (let k = 0; k < last; k++) { const a = w[k], b = w[(k + 1) % n]; segs.push(a[0], a[1], b[0], b[1]); }
+      if (l.visible) for (const [x, z] of w) pts.set(`${x.toFixed(3)},${z.toFixed(3)}`, [x, z]);
+      return { pts: w, closed: p.closed };
+    });
+    return { name: l.name, color: l.color, visible: l.visible, segs: new Float32Array(segs), polys };
+  });
+  const snapPts = new Float32Array([...pts.values()].flat());
+  viewer.setUnderlay(u.show ? ulWorld : [], u.show ? snapPts : null, isFinite(x0) ? { x0, z0, x1, z1 } : null, u.opacity);
+  viewer.setUnderlaySnap(u.show && u.snap);
+  updateDxfButton();
+}
+
+function updateDxfButton() {
+  const b = $('#btn-dxf-view');
+  if (!b) return;
+  b.hidden = !underlay;
+  b.classList.toggle('on', !!underlay?.show);
+}
+
+function toggleDxfPop(show) {
+  if (show) renderDxfPop();
+  $('#dxf-pop').hidden = !show;
+}
+
+function importDxfFile(file) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const d = parseDXF(String(rd.result));
+      if (!d.polys.length) { toast(L('ไม่พบเส้นในไฟล์ DXF (รองรับ LINE / POLYLINE / ARC / CIRCLE / บล็อก)', 'No lines found in the DXF (LINE / POLYLINE / ARC / CIRCLE / blocks are supported)'), 6000); return; }
+      const scale = d.units || guessUnits(d.bbox);
+      const byLayer = new Map();
+      for (const p of d.polys) {
+        if (!byLayer.has(p.layer)) byLayer.set(p.layer, []);
+        byLayer.get(p.layer).push({ pts: p.pts.flat().map(v => Math.round(v * 1000) / 1000), closed: p.closed });
+      }
+      const layers = [...byLayer].map(([name, polys]) => ({ name, color: d.layers.get(name)?.color || '#37474f', visible: !d.layers.get(name)?.off, polys, mode: 'none' }));
+      layers.sort((a, b) => a.name.localeCompare(b.name));
+      const u = { name: file.name, unitAuto: !d.units, scale, rot: 0, dx: 0, dz: 0, layers, bbox: d.bbox };
+      // วางมุมซ้ายบนของแบบ (X น้อยสุด, Y มากสุด) ไว้ที่จุด (0, 0) — ปรับได้ภายหลัง
+      fitUnderlayOrigin(u);
+      setUnderlay(u);
+      renderDxfPop();
+      viewer.setView(viewer.view);
+      const nSeg = layers.reduce((s, l) => s + l.polys.length, 0);
+      toast(L(`นำเข้า ${file.name}: ${layers.length} เลเยอร์ ${nSeg} เส้น · หน่วย ${unitName(scale)}${d.units ? '' : ' (เดา — ตรวจสอบ)'}${d.skipped ? ` · ข้าม ${d.skipped} รายการที่ไม่รองรับ` : ''}`,
+        `Imported ${file.name}: ${layers.length} layers, ${nSeg} lines · units ${unitName(scale)}${d.units ? '' : ' (guessed — please check)'}${d.skipped ? ` · ${d.skipped} unsupported entities skipped` : ''}`), 6000);
+    } catch (e) {
+      toast(/Binary/.test(e.message) ? L('ไฟล์ DXF แบบ binary ยังไม่รองรับ — บันทึกจาก CAD เป็น DXF แบบ ASCII', 'Binary DXF is not supported — save it from CAD as ASCII DXF') : L('อ่านไฟล์ DXF ไม่ได้: ', 'Cannot read the DXF: ') + e.message, 6000);
+    }
+  };
+  rd.readAsText(file);
+}
+
+const unitName = s => (DXF_UNITS.find(u => u[1] === s)?.[0] || `${s} m`);
+
+function fitUnderlayOrigin(u) {
+  u.dx = 0; u.dz = 0;
+  const f = ulXform(u), b = u.bbox;
+  const cs = [f(b.x0, b.y0), f(b.x1, b.y0), f(b.x0, b.y1), f(b.x1, b.y1)];
+  u.dx = -Math.min(...cs.map(c => c[0]));
+  u.dz = -Math.min(...cs.map(c => c[1]));
+  u.dx = round3(u.dx); u.dz = round3(u.dz);
+}
+
+function renderDxfPop() {
+  const u = underlay;
+  $('#dxf-body').hidden = !u;
+  $('#dxf-name').textContent = u ? u.name : L('ยังไม่มีแบบ', 'No drawing yet');
+  if (!u) return;
+  $('#dxf-unit').value = DXF_UNITS.find(x => x[1] === u.scale)?.[0] || 'mm';
+  $('#dxf-dx').value = fmt(u.dx); $('#dxf-dz').value = fmt(u.dz); $('#dxf-rot').value = fmt(u.rot);
+  $('#dxf-show').checked = u.show; $('#dxf-snap').checked = u.snap;
+  $('#dxf-op').value = u.opacity;
+  for (const k of ['wallH', 'thick', 'louver', 'bldgH']) $(`#dxf-${k}`).value = u.conv[k];
+  const modes = DXF_MODES();
+  $('#dxf-layers tbody').innerHTML = u.layers.map((l, i) => `<tr data-i="${i}">
+    <td><input type="checkbox" data-f="vis" ${l.visible ? 'checked' : ''} title="${L('แสดง / ซ่อน', 'Show / hide')}"></td>
+    <td><i class="swatch" style="background:${esc(l.color)}"></i>${esc(l.name)}</td><td class="n">${l.polys.length}</td>
+    <td><select data-f="mode">${modes.map(([v, t]) => `<option value="${v}" ${l.mode === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td></tr>`).join('');
+  $$('#dxf-layers tbody tr').forEach(tr => {
+    const l = u.layers[Number(tr.dataset.i)];
+    $('[data-f="vis"]', tr).addEventListener('change', (e) => { l.visible = e.target.checked; applyUnderlay(); saveUnderlay(); });
+    $('[data-f="mode"]', tr).addEventListener('change', (e) => { l.mode = e.target.value; saveUnderlay(); renderDxfCount(); });
+  });
+  renderDxfCount();
+}
+
+/** วัตถุที่จะได้จากการแปลง (ยังไม่สร้าง) */
+function dxfObjects() {
+  const u = underlay, c = u.conv, out = [];
+  let skipped = 0;
+  const r3 = round3;
+  u.layers.forEach((l, i) => {
+    if (l.mode === 'none') return;
+    for (const p of ulWorld[i].polys) {
+      if (l.mode === 'building' || l.mode === 'cdu') {
+        const rc = p.closed ? rectOf(p.pts) : null;
+        if (!rc) { skipped++; continue; }
+        if (l.mode === 'building') {
+          // ขอบแรกของสี่เหลี่ยมทิศ (ex, ez) = แกน x ของอาคารหลังหมุน: rotation.y = θ → (cos θ, −sin θ)
+          let rot = -rc.ang * 180 / Math.PI;
+          rot = Math.round((((rot % 360) + 360) % 360) * 10) / 10;
+          out.push({ type: 'building', props: { name: undefined, x: r3(rc.cx), z: r3(rc.cy), w: r3(rc.w), d: r3(rc.d), h: c.bldgH, rot } });
+        } else {
+          // CDU: ด้านยาวตามแนวแกนใด → rot 0 / 90 (หน้าเครื่องหัน +z หรือ +x — หมุนเพิ่มได้ภายหลัง)
+          const along = Math.abs(Math.cos(rc.ang)) > 0.7 ? (rc.w >= rc.d ? 'x' : 'z') : (rc.w >= rc.d ? 'z' : 'x');
+          out.push({ type: 'cdu', props: { x: r3(rc.cx), z: r3(rc.cy), rot: along === 'x' ? 0 : 90, model: lastUsed.model, elev: round2(supportAt(rc.cx, rc.cy) + 0.2) } });
+        }
+        continue;
+      }
+      const pts = simplifyCollinear(p.pts, p.closed);
+      const n = pts.length, last = p.closed ? n : n - 1;
+      for (let k = 0; k < last; k++) {
+        const a = pts[k], b = pts[(k + 1) % n];
+        if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.1) { skipped++; continue; }
+        out.push({ type: 'wall', props: { x1: r3(a[0]), z1: r3(a[1]), x2: r3(b[0]), z2: r3(b[1]), height: c.wallH, thick: c.thick, louver: l.mode === 'louver' ? c.louver : 0 } });
+      }
+    }
+  });
+  return { out, skipped };
+}
+
+function renderDxfCount() {
+  if (!underlay) return;
+  const { out, skipped } = dxfObjects();
+  const cnt = t => out.filter(o => o.type === t).length;
+  $('#dxf-count').textContent = out.length
+    ? L(`จะได้ ผนัง/louver ${cnt('wall')} · อาคาร ${cnt('building')} · CDU ${cnt('cdu')}${skipped ? ` (ข้าม ${skipped} — เส้นสั้นกว่า 0.1 ม. หรือไม่ใช่สี่เหลี่ยมปิด)` : ''}`,
+      `Will create walls/louvers ${cnt('wall')} · buildings ${cnt('building')} · CDUs ${cnt('cdu')}${skipped ? ` (${skipped} skipped — shorter than 0.1 m or not a closed rectangle)` : ''}`)
+    : L('เลือก "แปลงเป็น" ของเลเยอร์ที่ต้องการก่อน', 'Choose "Convert to" for the layers you want first');
+  $('#dxf-convert').disabled = !out.length;
+}
+
+function convertDxf() {
+  const { out } = dxfObjects();
+  if (!out.length) return;
+  if (out.length > 400 && !confirm(L(`จะสร้างวัตถุ ${out.length} ชิ้น — มากเกินไปอาจทำให้เมชและการแสดงผลช้า ทำต่อหรือไม่?`, `This creates ${out.length} objects — too many may slow the mesh and display. Continue?`))) return;
+  if (blockIfLocked()) return;
+  edit(() => {
+    for (const o of out) {
+      const { name, ...props } = o.props;
+      void name;
+      scene.objects.push(makeObject(scene, o.type, props));
+    }
+  });
+  for (const l of underlay.layers) l.mode = 'none';
+  saveUnderlay();
+  renderDxfPop();
+  viewer.setView(viewer.view);
+  toast(L(`สร้างวัตถุจากแบบ DXF ${out.length} ชิ้น — Ctrl+Z เพื่อย้อน`, `Created ${out.length} objects from the DXF — Ctrl+Z to undo`), 5000);
+}
+
+function bindDxf() {
+  $('#btn-dxf').addEventListener('click', () => toggleDxfPop(true));
+  $('#btn-dxf-view').addEventListener('click', () => toggleDxfPop(true));
+  $('#dxf-pop .keys-x').addEventListener('click', () => toggleDxfPop(false));
+  $('#dxf-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleDxfPop(false); });
+  $('#dxf-pick').addEventListener('click', () => $('#dxf-file').click());
+  $('#dxf-file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importDxfFile(f); e.target.value = ''; });
+  const upd = (fn) => () => { if (!underlay) return; fn(); applyUnderlay(); saveUnderlay(); renderDxfPop(); };
+  $('#dxf-unit').addEventListener('change', upd(() => { const s = DXF_UNITS.find(x => x[0] === $('#dxf-unit').value)?.[1]; underlay.scale = s || guessUnits(underlay.bbox); fitUnderlayOrigin(underlay); }));
+  for (const [id, k] of [['#dxf-dx', 'dx'], ['#dxf-dz', 'dz'], ['#dxf-rot', 'rot']]) {
+    $(id).addEventListener('change', upd(() => { const v = parseFloat($(id).value); if (isFinite(v)) underlay[k] = v; }));
+  }
+  $('#dxf-fit').addEventListener('click', upd(() => fitUnderlayOrigin(underlay)));
+  $('#dxf-show').addEventListener('change', upd(() => { underlay.show = $('#dxf-show').checked; }));
+  $('#dxf-snap').addEventListener('change', upd(() => { underlay.snap = $('#dxf-snap').checked; }));
+  $('#dxf-op').addEventListener('input', () => { if (!underlay) return; underlay.opacity = parseFloat($('#dxf-op').value); applyUnderlay(); });
+  $('#dxf-op').addEventListener('change', () => saveUnderlay());
+  for (const k of ['wallH', 'thick', 'louver', 'bldgH']) {
+    $(`#dxf-${k}`).addEventListener('change', (e) => {
+      const v = parseFloat(e.target.value);
+      if (underlay && isFinite(v) && v >= 0) { underlay.conv[k] = k === 'louver' ? Math.min(100, v) : v; saveUnderlay(); renderDxfCount(); }
+    });
+  }
+  $('#dxf-convert').addEventListener('click', convertDxf);
+  $('#dxf-remove').addEventListener('click', () => { if (confirm(L('ลบแบบ DXF ฉากหลัง? (วัตถุที่แปลงไปแล้วยังอยู่)', 'Remove the DXF underlay? (Objects already converted stay)'))) { setUnderlay(null); renderDxfPop(); } });
+}
+
 function download(name, data, type) {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const a = document.createElement('a');
@@ -2122,6 +2355,7 @@ function applyLang() {
   $('#remark-body').innerHTML = remarkHTML();
   renderBatchResults();
   if (!$('#batch-pop').hidden) renderBatchPop();
+  if (!$('#dxf-pop').hidden) renderDxfPop();
   viewer.refreshTexts();
   renderProps();
   renderSettings();
@@ -2294,6 +2528,7 @@ function bindUI() {
   $('#btn-run').addEventListener('click', startOrToggle);
   $('#btn-reset').addEventListener('click', () => (batch.active ? cancelBatch() : resetResults()));
   bindBatch();
+  bindDxf();
   $('#btn-edit').addEventListener('click', () => setEditUnlocked(modelLocked()));
   $('#btn-save').addEventListener('click', saveProject);
   $('#btn-open').addEventListener('click', () => $('#file-open').click());
@@ -2388,6 +2623,7 @@ function bindUI() {
     if (!$('#cases-pop').hidden) { if (k === 'escape') toggleCases(false); return; }
     if (!$('#report-pop').hidden) { if (k === 'escape') toggleReportPop(false); return; }
     if (!$('#batch-pop').hidden) { if (k === 'escape') toggleBatchPop(false); return; }
+    if (!$('#dxf-pop').hidden) { if (k === 'escape') toggleDxfPop(false); return; }
     if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if (ctrl && k === 'c') { if (selected()) { e.preventDefault(); copySelected(); } }
@@ -2452,5 +2688,6 @@ updateColorbar();
 renderResults();
 renderCompare();
 renderBatchResults();
+setUnderlay(loadUnderlay(), false);
 applyTheme();
 applyLang();

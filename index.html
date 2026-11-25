@@ -77,6 +77,7 @@
           <button class="mi" id="btn-new"><svg class="ic"><use href="#i-new"/></svg><span class="mi-t" data-en="New project">โปรเจกต์ใหม่</span></button>
           <button class="mi" id="btn-open"><svg class="ic"><use href="#i-open"/></svg><span class="mi-t" data-en="Open project file (.json)">เปิดไฟล์โปรเจกต์ (.json)</span></button>
           <button class="mi" id="btn-save"><svg class="ic"><use href="#i-save"/></svg><span class="mi-t" data-en="Save as .json file">บันทึกเป็นไฟล์ .json</span><kbd>Ctrl+S</kbd></button>
+          <button class="mi" id="btn-dxf"><svg class="ic"><use href="#i-open"/></svg><span class="mi-t"><b data-en="Import DXF drawing (underlay)…">นำเข้าแบบ DXF (ฉากหลัง)…</b><small data-en="Trace over it with snapping, or convert layers to walls / buildings / CDUs">วาดทับพร้อมดูดจุดปลายเส้น หรือแปลงเลเยอร์เป็นผนัง / อาคาร / CDU</small></span></button>
           <div class="menu-h" data-en="Examples">ตัวอย่างสำเร็จรูป</div>
           <div id="preset-list"></div>
           <div class="menu-h" data-en="Case studies">กรณีศึกษา</div>
@@ -159,6 +160,7 @@
               </div>
               <div class="vseg glass">
                 <button class="vact" id="btn-mesh" aria-pressed="false" title="Show mesh: แสดงเส้นกริดของเมชที่ใช้คำนวณ บนพื้นและระนาบตัด (G)" data-en-title="Show mesh: draw the calculation grid on the floor and the section plane (G)"><svg class="ic"><use href="#i-mesh"/></svg><span>Mesh</span></button>
+                <button class="vact" id="btn-dxf-view" hidden title="แบบ DXF ฉากหลัง: แสดง/ซ่อน ดูดจุด แปลงเลเยอร์" data-en-title="DXF underlay: show/hide, snapping, convert layers"><svg class="ic"><use href="#i-open"/></svg><span>DXF</span></button>
                 <button class="vact" id="btn-suction" aria-pressed="false" title="แสดงด้านดูดลม (หน้าคอยล์) ของ CDU ทุกเครื่อง (I)" data-en-title="Show the suction (coil) faces of every CDU (I)"><svg class="ic"><use href="#i-suction"/></svg><span data-en="Suction">ลมดูด</span></button>
                 <button class="vact" id="btn-capture" title="Capture: บันทึกภาพมุมมองนี้ (พร้อมแถบสี) ไว้ใส่รายงาน — กดได้หลายมุม (P)" data-en-title="Capture: save this view (with the colour bar) for the report — as many views as you like (P)" aria-label="Capture"><svg class="ic"><use href="#i-camera"/></svg></button>
                 <button class="vact" id="btn-full" title="เต็มจอ (Esc เพื่อออก)" aria-label="Fullscreen"><svg class="ic"><use id="full-ic" href="#i-full"/></svg></button>
@@ -881,6 +883,42 @@
     <h3 data-en="Case studies — outdoor unit layout guide">กรณีศึกษา — คู่มือการวางคอยล์ร้อน</h3>
     <p class="note" data-en="From the Siam Daikin “CFD Simulation Standard — Outdoor unit layout guide”. Click a picture to open that model, then press Run and compare the inlet temperatures of the original and the fixed layout.">จากคู่มือ “CFD Simulation Standard — Outdoor unit layout guide” ของ Siam Daikin · คลิกภาพเพื่อเปิดแบบจำลองนั้น แล้วกด คำนวณ เพื่อเทียบอุณหภูมิลมเข้าของแบบเดิมกับแบบแก้ไข</p>
     <div class="case-grid" id="case-grid"></div>
+  </div>
+</div>
+
+<!-- แบบ DXF ฉากหลัง -->
+<div class="modal" id="dxf-pop" hidden>
+  <div class="keys-pop dxf-pop" role="dialog" aria-label="แบบ DXF" data-en-label="DXF drawing">
+    <button class="keys-x" title="ปิด (Esc)" data-en-title="Close (Esc)" aria-label="ปิด" data-en-label="Close">×</button>
+    <h3 data-en="DXF drawing (underlay)">แบบ DXF ฉากหลัง</h3>
+    <p class="note" data-en="The drawing is shown on the ground. While drawing walls or placing objects the cursor snaps to line end points (orange ring; hold Alt to stop snapping). Pick a layer's “Convert to” to create walls, louvers, buildings or CDUs from it. ASCII DXF: LINE, POLYLINE, ARC, CIRCLE and blocks.">แบบแสดงบนพื้น ขณะวาดผนังหรือวางวัตถุ เมาส์จะดูดเข้าจุดปลายเส้น (วงสีส้ม · กด Alt ค้างเพื่อไม่ดูด) · เลือก “แปลงเป็น” ของเลเยอร์เพื่อสร้างผนัง louver อาคาร หรือ CDU จากเส้นในเลเยอร์นั้น · รองรับ DXF แบบ ASCII: LINE, POLYLINE, ARC, CIRCLE และบล็อก</p>
+    <div class="dxf-file"><button id="dxf-pick" class="primary"><svg class="ic"><use href="#i-open"/></svg><span data-en="Choose DXF file…">เลือกไฟล์ DXF…</span></button> <span id="dxf-name" class="muted"></span>
+      <input type="file" id="dxf-file" accept=".dxf" hidden></div>
+    <div id="dxf-body" hidden>
+      <div class="rep-h" data-en="Units and position">หน่วยและตำแหน่ง</div>
+      <div class="dxf-grid">
+        <label><span data-en="Drawing units">หน่วยของแบบ</span> <select id="dxf-unit"><option value="mm" data-en="millimetre">มิลลิเมตร</option><option value="cm" data-en="centimetre">เซนติเมตร</option><option value="m" data-en="metre">เมตร</option><option value="in" data-en="inch">นิ้ว</option><option value="ft" data-en="foot">ฟุต</option></select></label>
+        <label><span data-en="Shift x (m)">เลื่อน x (ม.)</span> <input type="number" id="dxf-dx" step="0.1"></label>
+        <label><span data-en="Shift z (m)">เลื่อน z (ม.)</span> <input type="number" id="dxf-dz" step="0.1"></label>
+        <label><span data-en="Rotate (°)">หมุน (°)</span> <input type="number" id="dxf-rot" step="1"></label>
+        <button class="ghost mini" id="dxf-fit" data-en="Top-left corner to (0, 0)">มุมซ้ายบนของแบบไปที่ (0, 0)</button>
+      </div>
+      <div class="dxf-grid">
+        <label><input type="checkbox" id="dxf-show"> <span data-en="Show drawing">แสดงแบบ</span></label>
+        <label><input type="checkbox" id="dxf-snap"> <span data-en="Snap to end points">ดูดจุดปลายเส้น</span></label>
+        <label><span data-en="Opacity">ความเข้ม</span> <input type="range" id="dxf-op" min="0.15" max="1" step="0.05"></label>
+      </div>
+      <div class="rep-h" data-en="Layers">เลเยอร์</div>
+      <div class="table-wrap dxf-layers"><table class="cmp-table" id="dxf-layers"><thead><tr><th></th><th data-en="Layer">เลเยอร์</th><th class="n" data-en="Lines">เส้น</th><th data-en="Convert to">แปลงเป็น</th></tr></thead><tbody></tbody></table></div>
+      <div class="dxf-grid">
+        <label><span data-en="Wall height (m)">ผนังสูง (ม.)</span> <input type="number" id="dxf-wallH" step="0.1" min="0.1"></label>
+        <label><span data-en="Wall thickness (m)">ผนังหนา (ม.)</span> <input type="number" id="dxf-thick" step="0.05" min="0.05"></label>
+        <label><span data-en="Louver open %">Louver เปิด %</span> <input type="number" id="dxf-louver" step="5" min="0" max="100"></label>
+        <label><span data-en="Building height (m)">อาคารสูง (ม.)</span> <input type="number" id="dxf-bldgH" step="0.5" min="0.5"></label>
+      </div>
+      <p class="note" id="dxf-count"></p>
+      <div class="rep-go dxf-act"><button class="ghost danger" id="dxf-remove" data-en="Remove drawing">ลบแบบ</button><button class="primary" id="dxf-convert" data-en="Convert to objects">แปลงเป็นวัตถุ</button></div>
+    </div>
   </div>
 </div>
 

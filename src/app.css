@@ -749,3 +749,13 @@ body.model-locked .tool:not([data-tool="select"]) { opacity: .4; }
 .wind4 td.worst { font-weight: 700; outline: 2px solid var(--warn, #f5c518); outline-offset: -2px; }
 .case-vars { font-weight: 600; margin: 8px 0 2px; }
 @media (max-width: 640px) { .bt-var { grid-template-columns: 1fr; } }
+
+/* ───────── แบบ DXF ฉากหลัง ───────── */
+.dxf-pop { max-width: 720px; }
+.dxf-file { display: flex; gap: 10px; align-items: center; margin: 6px 0 4px; flex-wrap: wrap; }
+.dxf-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 6px 0; font-size: 13px; }
+.dxf-grid label { display: flex; gap: 6px; align-items: center; }
+.dxf-grid input[type=number] { width: 80px; }
+.dxf-layers { max-height: 240px; overflow: auto; }
+.swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.dxf-act { display: flex; justify-content: space-between; }
