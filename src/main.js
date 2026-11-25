@@ -13,6 +13,7 @@ import { Runner } from './runner.js';
 import { cssGradient, FIELDS, rgb } from './colormap.js';
 import { L, getLang, setLang } from './i18n.js';
 import { WIND_PROFILES, windParams, windFactorFn } from './wind.js';
+import { BATCH_KINDS, KIND_INFO, MAX_CASES, WIND4, buildCases, validateVars, parseValues, dirName } from './batch.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -94,6 +95,7 @@ function blockIfLocked() {
 }
 
 function setEditUnlocked(on) {
+  if (on && batch.active) { toast(L('กำลังรัน Batch — ยกเลิก Batch ก่อนแก้แบบ', 'A batch is running — cancel the batch before editing')); return; }
   editUnlocked = on;
   if (on) toast(L('ปลดล็อกแล้ว — ผลคำนวณยังอยู่ แต่ถ้าแก้แบบ ผลเดิมจะเป็นผลเก่าและต้องคำนวณใหม่', 'Unlocked — the results stay until you change the model; any change marks them stale and needs a new run'), 4500);
   updateLockUI();
@@ -884,14 +886,21 @@ function startOrToggle() {
     updateRunUI();
     return;
   }
-  if (!scene.objects.some(o => o.type === 'cdu')) { toast(L('ยังไม่มี CDU ในฉาก — เลือกเครื่องมือ CDU ที่แถบด้านซ้าย แล้ววางเครื่องก่อน', 'No CDU in the scene — pick the CDU tool on the left bar and place a unit first')); showTab('tool'); return; }
-  if (!hasOpenFace()) { toast(L('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน ไม่เช่นนั้นลมร้อนออกไม่ได้และผลจะไม่ลู่เข้า', 'At least one domain boundary must be "Open"; otherwise hot air cannot leave and the result will not converge'), 5000); showTab('tool'); showSide('sim'); return; }
+  startNewRun();
+}
+
+/** เริ่มคำนวณแบบปัจจุบันใหม่ตั้งแต่ต้น — คืน '' เมื่อเริ่มได้ หรือข้อความเหตุผลที่เริ่มไม่ได้
+ *  quiet = เรียกจาก batch: ไม่ถามยืนยันเมชใหญ่ ไม่เปลี่ยนหน้า */
+function startNewRun(quiet = false) {
+  if (!scene.objects.some(o => o.type === 'cdu')) { if (quiet) return L('ไม่มี CDU', 'no CDU'); toast(L('ยังไม่มี CDU ในฉาก — เลือกเครื่องมือ CDU ที่แถบด้านซ้าย แล้ววางเครื่องก่อน', 'No CDU in the scene — pick the CDU tool on the left bar and place a unit first')); showTab('tool'); return 'x'; }
+  if (!hasOpenFace()) { if (quiet) return L('ไม่มีขอบโดเมนแบบเปิด', 'no open boundary'); toast(L('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน ไม่เช่นนั้นลมร้อนออกไม่ได้และผลจะไม่ลู่เข้า', 'At least one domain boundary must be "Open"; otherwise hot air cannot leave and the result will not converge'), 5000); showTab('tool'); showSide('sim'); return 'x'; }
   const d = domainOf(scene);
   if (meshTooBig(d)) {
+    if (quiet) return meshTooBig(d);
     toast(L(`เมชใหญ่เกินไป (${fmtK(d.cells)} เซลล์ ≈ ${fmtMem(meshBytes(d))}) ${meshTooBig(d)} — เพิ่มขนาดเซลล์ หรือลดระยะเผื่อขอบโดเมน`, `Mesh too large (${fmtK(d.cells)} cells ≈ ${fmtMem(meshBytes(d))}): ${meshTooBig(d)} — increase the cell size or reduce the domain margins`), 6000);
-    return;
+    return 'x';
   }
-  if (d.cells > BIG_MESH && !confirm(L(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`, `A ${fmtK(d.cells)}-cell mesh may take very long and use a lot of memory. Continue?`))) return;
+  if (!quiet && d.cells > BIG_MESH && !confirm(L(`เมช ${fmtK(d.cells)} เซลล์ อาจใช้เวลานานมากและใช้หน่วยความจำสูง คำนวณต่อหรือไม่?`, `A ${fmtK(d.cells)}-cell mesh may take very long and use a lot of memory. Continue?`))) return 'x';
 
   const mesh = buildMesh(scene);
   run.mesh = mesh;
@@ -910,8 +919,9 @@ function startOrToggle() {
   });
   runner.send({ cmd: 'run' });
   renderWarnings(mesh.warnings);
-  if (!selected()) showSide('view', false);   // ผลเริ่มขึ้นในภาพ → เตรียมตัวเลือกการแสดงผลไว้ให้
+  if (!selected() && !quiet) showSide('view', false);   // ผลเริ่มขึ้นในภาพ → เตรียมตัวเลือกการแสดงผลไว้ให้
   updateRunUI();
+  return '';
 }
 
 /** พารามิเตอร์ที่ส่งให้ solver จากฉาก */
@@ -964,6 +974,7 @@ function onEngineMessage(msg) {
     toast(msg.message, 8000);
     renderResults();
     updateRunUI();
+    if (batch.active) batchCaseFailed(msg.message);
     return;
   }
   if (!run.mesh || run.stale) return;
@@ -988,6 +999,7 @@ function onEngineMessage(msg) {
   }
   renderResults();
   updateRunUI();
+  if (msg.type === 'done' && batch.active) setTimeout(batchCaseDone, 0);
 }
 
 function pushFieldsToViewer() {
@@ -1694,38 +1706,355 @@ function toggleSuction(on = !viewer.display.suction) {
   b.setAttribute('aria-pressed', String(on));
 }
 
-function exportReport() {
+/** เก็บข้อมูลที่รายงานต้องใช้จากผลปัจจุบัน (ใช้ทั้งรายงานเดี่ยว และเก็บผลแต่ละ case ของ batch) */
+function reportSnapshot(shots) {
   const units = unitsNow();
-  if (!units) return;
-  const shots = captures.length ? captures : [{ url: viewer.snapshot(), caption: L('ภาพ 3 มิติ', '3D view') }];
+  if (!units) return null;
   const r = run.report;
-  const date = new Date().toLocaleString(L('th-TH', 'en-GB'));
-  const css = `body{font-family:"IBM Plex Sans Thai",Tahoma,sans-serif;color:#1c2a36;max-width:1000px;margin:24px auto;padding:0 18px}
+  return {
+    name: scene.name, site: { ...scene.site }, units,
+    mesh: { h: run.mesh.h, nx: run.mesh.nx, ny: run.mesh.ny, nz: run.mesh.nz },
+    time: r.time, converged: r.converged, balance: r.balance.ratio, avgWindow: r.avgWindow,
+    advice: $('#advice').innerHTML,
+    shots: shots || (captures.length ? captures.map(c => ({ ...c })) : [{ url: viewer.snapshot(), caption: L('ภาพ 3 มิติ', '3D view') }]),
+    date: new Date().toLocaleString(L('th-TH', 'en-GB')),
+  };
+}
+
+const REPORT_CSS = `body{font-family:"IBM Plex Sans Thai",Tahoma,sans-serif;color:#1c2a36;max-width:1000px;margin:24px auto;padding:0 18px}
     h1{margin:0}table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}th,td{border:1px solid #c8d3dc;padding:5px 7px;text-align:left}
     td.n{text-align:right;font-family:monospace}th{background:#eef3f7}img{width:100%;border:1px solid #c8d3dc;border-radius:6px}figure{margin:14px 0;page-break-inside:avoid}figcaption{font-size:13px;color:#4a5d6c;margin-top:4px}
     .muted{color:#667a8a}.criteria{list-style:none;padding-left:0}.criteria li{margin:4px 0}
     .chip{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
     .chip-green{background:#3ecf6e}.chip-yellow{background:#f5c518}.chip-red{background:#e5433b}
-    .remark{border-top:1px solid #c8d3dc;margin-top:22px;padding-top:8px;font-size:13px}.ok{color:#1c8a55}.watch{color:#b8860b}.bad{color:#c8551b}.trip{color:#c21d2d}ul{padding-left:18px}`;
+    .remark{border-top:1px solid #c8d3dc;margin-top:22px;padding-top:8px;font-size:13px}.ok{color:#1c8a55}.watch{color:#b8860b}.bad{color:#c8551b}.trip{color:#c21d2d}ul{padding-left:18px}
+    .case{page-break-before:always;border-top:2px solid #1c2a36;margin-top:28px;padding-top:6px}.case-vars{font-weight:600}.worst{font-weight:700;background:#fff4e5}
+    @media print{body{margin:0;max-width:none}}`;
+
+function reportDoc(title, body) {
+  return `<!DOCTYPE html><html lang="${getLang()}"><head><meta charset="utf-8"><title>${esc(title)} — CDU Airflow CFD</title><style>${REPORT_CSS}</style></head><body>${body}</body></html>`;
+}
+
+/** สภาพลมเป็นข้อความ */
+function windText(site) {
+  if (!(site.windSpeed > 0)) return L('ไม่มีลม', 'no wind');
+  const p = WIND_PROFILES[site.windProfile] && site.windProfile !== 'uniform'
+    ? L(` · โปรไฟล์ ${WIND_PROFILES[site.windProfile].th} ที่ความสูงอ้างอิง ${site.windRefH} ม. (พื้นที่วางเครื่องสูง ${site.groundElev} ม. จากพื้นดิน)`, ` · ${WIND_PROFILES[site.windProfile].en} profile at ${site.windRefH} m reference height (site ${site.groundElev} m above ground)`) : '';
+  return `${L('ลม', 'wind')} ${site.windSpeed} m/s · ${dirName(site.windDir)} (${site.windDir}°)${p}`;
+}
+
+/** เนื้อหารายงานของผลหนึ่งชุด — level = ระดับหัวข้อ (1 = รายงานเดี่ยว, 2 = case ในรายงานรวม) */
+function reportBody(snap, { level = 1, caseLine = '' } = {}) {
+  const H = level === 1 ? 'h1' : 'h2', h = level === 1 ? 'h2' : 'h3';
   const cols = REPORT_COLS().filter(c => repOpts.cols[c.k]);
   const sec = repOpts.secs;
-  const tbl = units.map(u => `<tr>${cols.map(c => c.td(u)).join('')}</tr>`).join('');
-  let advice = $('#advice').innerHTML;
+  const tbl = snap.units.map(u => `<tr>${cols.map(c => c.td(u)).join('')}</tr>`).join('');
+  let advice = snap.advice;
   if (!repOpts.cols.cap) advice = advice.replace(/<span class="adv-cap">.*?<\/span>/g, '');
-  const html = `<!DOCTYPE html><html lang="${getLang()}"><head><meta charset="utf-8"><title>${esc(scene.name)} — CDU Airflow CFD</title><style>${css}</style></head><body>
-    <h1>${esc(scene.name)}</h1><p class="muted">${L('รายงานจาก CDU Airflow CFD', 'Report from CDU Airflow CFD')} · ${date}</p>
-    <p>${L('อากาศภายนอก', 'Ambient')} ${scene.site.ambient} °C · ${L('ลม', 'wind')} ${scene.site.windSpeed} m/s ${L('จากทิศ', 'from')} ${scene.site.windDir}° · ${L('เซลล์', 'cell')} ${run.mesh.h} ${L('ม.', 'm')}
-      (${run.mesh.nx}×${run.mesh.ny}×${run.mesh.nz}) · ${L('เวลาจำลอง', 'simulated time')} ${r.time.toFixed(0)} s · ${r.converged ? L('ลู่เข้าแล้ว', 'Converged') : L('ยังไม่ลู่เข้า', 'not converged')}
-      · ${L('สมดุลพลังงาน', 'energy balance')} ${(r.balance.ratio * 100).toFixed(1)}%</p>
-    ${sec.figs ? shots.map((c, i) => `<figure><img src="${c.url}" alt="${esc(c.caption)}"><figcaption>${L('รูปที่', 'Figure')} ${i + 1} — ${esc(c.caption)}</figcaption></figure>`).join('') : ''}
-    ${cols.length ? `<h2>${L('ผลรายเครื่อง', 'Results per unit')}</h2>
+  return `<${H}>${esc(snap.name)}</${H}>${level === 1 ? `<p class="muted">${L('รายงานจาก CDU Airflow CFD', 'Report from CDU Airflow CFD')} · ${snap.date}</p>` : ''}
+    ${caseLine ? `<p class="case-vars">${esc(caseLine)}</p>` : ''}
+    <p>${L('อากาศภายนอก', 'Ambient')} ${snap.site.ambient} °C · ${windText(snap.site)} · ${L('เซลล์', 'cell')} ${snap.mesh.h} ${L('ม.', 'm')}
+      (${snap.mesh.nx}×${snap.mesh.ny}×${snap.mesh.nz}) · ${L('เวลาจำลอง', 'simulated time')} ${snap.time.toFixed(0)} s · ${snap.converged ? L('ลู่เข้าแล้ว', 'Converged') : L('ยังไม่ลู่เข้า', 'not converged')}
+      · ${L('สมดุลพลังงาน', 'energy balance')} ${(snap.balance * 100).toFixed(1)}%</p>
+    ${sec.figs ? snap.shots.map((c, i) => `<figure><img src="${c.url}" alt="${esc(c.caption)}"><figcaption>${L('รูปที่', 'Figure')} ${i + 1} — ${esc(c.caption)}</figcaption></figure>`).join('') : ''}
+    ${cols.length ? `<${h}>${L('ผลรายเครื่อง', 'Results per unit')}</${h}>
     <table><tr>${cols.map(c => `<th>${c.th}</th>`).join('')}</tr>${tbl}</table>` : ''}
-    ${sec.criteria ? `<h2>${L('เกณฑ์อุณหภูมิลมกลับ', 'Return-air temperature criteria')}</h2>${bandCriteriaHTML()}` : ''}
-    ${sec.advice ? `<h2>${L('ข้อสังเกต', 'Observations')}</h2><ul>${advice}</ul>` : ''}
-    <p class="muted">${L(`ค่าเฉลี่ยตามเวลาในช่วง ${r.avgWindow.toFixed(0)} วินาทีสุดท้าย · ตัวเลขสมรรถนะเป็นค่าอ้างอิงโดยประมาณ ใช้เพื่อเปรียบเทียบผังการวางเครื่อง`, `Time-averaged over the last ${r.avgWindow.toFixed(0)} s · performance figures are approximate references for comparing layouts`)}</p>
-    ${sec.remark ? `<div class="remark">${remarkHTML()}</div>` : ''}
-    </body></html>`;
-  download(`${safeName(scene.name)}-report.html`, html, 'text/html');
+    ${sec.advice ? `<${h}>${L('ข้อสังเกต', 'Observations')}</${h}><ul>${advice}</ul>` : ''}
+    <p class="muted">${L(`ค่าเฉลี่ยตามเวลาในช่วง ${snap.avgWindow.toFixed(0)} วินาทีสุดท้าย · ตัวเลขสมรรถนะเป็นค่าอ้างอิงโดยประมาณ ใช้เพื่อเปรียบเทียบผังการวางเครื่อง`, `Time-averaged over the last ${snap.avgWindow.toFixed(0)} s · performance figures are approximate references for comparing layouts`)}</p>`;
+}
+
+/** ท้ายรายงาน: เกณฑ์อุณหภูมิลมกลับ + หมายเหตุ */
+function reportTail() {
+  const sec = repOpts.secs;
+  return `${sec.criteria ? `<h2>${L('เกณฑ์อุณหภูมิลมกลับ', 'Return-air temperature criteria')}</h2>${bandCriteriaHTML()}` : ''}
+    ${sec.remark ? `<div class="remark">${remarkHTML()}</div>` : ''}`;
+}
+
+function exportReport() {
+  const snap = reportSnapshot();
+  if (!snap) return;
+  download(`${safeName(scene.name)}-report.html`, reportDoc(scene.name, reportBody(snap) + reportTail()), 'text/html');
+}
+
+/* ───────── Batch: รันหลายทางเลือกต่อกันอัตโนมัติ ─────────
+ * ตัวแปร (batch.js) → ผลคูณของค่าทุกตัวเป็น case → คำนวณทีละ case จนลู่เข้า (หรือถึงเพดานเวลา)
+ * → เก็บผล + ภาพ 2 มุม → case ถัดไป → จบแล้วคืนแบบตั้งต้น ผลทุก case ขึ้นตาราง Batch และตารางเปรียบเทียบ
+ * ผลเก็บไว้ในหน่วยความจำของรอบนี้ (ปิดหน้าแล้วหาย) — ดาวน์โหลดรายงานไว้ก่อนปิด */
+const batch = {
+  vars: [], wind: false, windSpeed: 2,
+  active: false, cases: [], i: -1, results: [], baseJSON: null, startWall: 0,
+};
+
+function toggleBatchPop(show) {
+  if (show) {
+    if (batch.active) { toast(L('กำลังรัน Batch อยู่', 'A batch is already running')); return; }
+    if (!batch.vars.length && !batch.wind) batch.wind = true;
+    if (!(batch.windSpeed > 0)) batch.windSpeed = scene.site.windSpeed > 0 ? scene.site.windSpeed : 2;
+    renderBatchPop();
+  }
+  $('#batch-pop').hidden = !show;
+}
+
+/** ตัวแปรที่ใช้จริง (รวมทิศลม 4 ทิศถ้าเลือก) */
+function batchVars() {
+  return [...batch.vars.map(v => ({ ...v, values: parseValues(v.text) })), ...(batch.wind ? [{ kind: 'wind', target: 'all', values: [...WIND4] }] : [])];
+}
+
+function renderBatchPop() {
+  const info = KIND_INFO();
+  const objOpts = (v) => {
+    const t = info[v.kind].objType;
+    const objs = scene.objects.filter(o => o.type === t && (v.kind !== 'louver' || true));
+    return `<option value="all" ${v.target === 'all' ? 'selected' : ''}>${info[v.kind].allLabel}</option>` + objs.map(o => `<option value="${o.id}" ${String(v.target) === String(o.id) ? 'selected' : ''}>${esc(o.name)}${o.type === 'wall' ? ` (${o.louver > 0 ? `louver ${o.louver}%` : L('ทึบ', 'solid')} · ${fmt(o.height)} ${L('ม.', 'm')})` : ` (${esc(o.model)})`}</option>`).join('');
+  };
+  $('#bt-vars').innerHTML = batch.vars.length ? batch.vars.map((v, i) => `<div class="bt-var" data-i="${i}">
+      <b>${info[v.kind].label}</b>
+      <select data-f="target" title="${L('วัตถุที่จะปรับ', 'Object to change')}">${objOpts(v)}</select>
+      <label>${L('ค่า', 'Values')} (${info[v.kind].unit}) <input type="text" data-f="text" value="${esc(v.text)}" placeholder="${info[v.kind].def}" title="${L('คั่นด้วยจุลภาค เช่น', 'Comma-separated, e.g.')} ${info[v.kind].def}"></label>
+      <button class="ghost danger" data-f="del" title="${L('ลบตัวแปรนี้', 'Remove this variable')}">✕</button></div>`).join('')
+    : `<p class="muted small">${L('ยังไม่มีตัวแปร — เพิ่มด้านล่าง หรือรันเฉพาะลม 4 ทิศ', 'No variables yet — add one below, or run the 4 wind directions only')}</p>`;
+  $('#bt-add').innerHTML = BATCH_KINDS.filter(k => k !== 'wind').map(k => `<button class="ghost mini" data-k="${k}">+ ${info[k].label}</button>`).join('');
+  $('#bt-wind').checked = batch.wind;
+  $('#bt-wspeed').value = batch.windSpeed;
+  $('#bt-wspeed').disabled = !batch.wind;
+  $$('#bt-vars .bt-var').forEach(row => {
+    const v = batch.vars[Number(row.dataset.i)];
+    $('[data-f="target"]', row).addEventListener('change', (e) => { v.target = e.target.value; renderBatchPreview(); });
+    $('[data-f="text"]', row).addEventListener('input', (e) => { v.text = e.target.value; renderBatchPreview(); });
+    $('[data-f="del"]', row).addEventListener('click', () => { batch.vars.splice(Number(row.dataset.i), 1); renderBatchPop(); });
+  });
+  $$('#bt-add button').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.k;
+    batch.vars.push({ kind: k, target: 'all', text: info[k].def });
+    renderBatchPop();
+  }));
+  renderBatchPreview();
+}
+
+function renderBatchPreview() {
+  const vars = batchVars();
+  const err = validateVars(scene, vars, batch.windSpeed);
+  const box = $('#bt-preview'), go = $('#bt-go');
+  if (err) { box.innerHTML = `<p class="warn-text">${esc(err)}</p>`; go.disabled = true; return; }
+  const cases = buildCases(scene, vars, batch.windSpeed);
+  const d = domainOf(scene);
+  const over = cases.length > MAX_CASES;
+  go.disabled = over;
+  box.innerHTML = `<p><b>${cases.length} case</b> · ${L(`เมชละ ≈ ${fmtK(d.cells)} เซลล์`, `≈ ${fmtK(d.cells)} cells each`)}${over ? ` — <span class="warn-text">${L(`เกิน ${MAX_CASES} case ลดจำนวนค่า`, `more than ${MAX_CASES} cases — use fewer values`)}</span>` : ''}</p>
+    <ol class="bt-list">${cases.slice(0, 60).map(c => `<li>${esc(c.label)}</li>`).join('')}</ol>`;
+}
+
+function bindBatch() {
+  for (const id of ['#btn-batch', '#btn-batch2']) $(id)?.addEventListener('click', () => toggleBatchPop(true));
+  $('#btn-wind4')?.addEventListener('click', () => { batch.vars = []; batch.wind = true; toggleBatchPop(true); });
+  $('#batch-pop .keys-x').addEventListener('click', () => toggleBatchPop(false));
+  $('#batch-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleBatchPop(false); });
+  $('#bt-wind').addEventListener('change', (e) => { batch.wind = e.target.checked; renderBatchPop(); });
+  $('#bt-wspeed').addEventListener('input', (e) => { batch.windSpeed = parseFloat(e.target.value) || 0; renderBatchPreview(); });
+  $('#bt-go').addEventListener('click', startBatch);
+  $('#bt-cancel').addEventListener('click', cancelBatch);
+  $('#bt-rep-all').addEventListener('click', exportBatchReport);
+  $('#bt-rep-each').addEventListener('click', exportBatchCaseReports);
+  $('#bt-csv').addEventListener('click', exportBatchCSV);
+  $('#bt-clear').addEventListener('click', () => { if (!batch.active && confirm(L('ล้างผล Batch ทั้งหมด?', 'Clear all batch results?'))) { batch.results = []; batch.cases = []; renderBatchResults(); } });
+}
+
+function startBatch() {
+  const vars = batchVars();
+  const err = validateVars(scene, vars, batch.windSpeed);
+  if (err) { toast(err); return; }
+  const cases = buildCases(scene, vars, batch.windSpeed);
+  if (cases.length > MAX_CASES) return;
+  if (!hasOpenFace()) { toast(L('ต้องมีขอบโดเมนแบบ "เปิด" อย่างน้อยหนึ่งด้าน', 'At least one domain boundary must be "Open"'), 5000); return; }
+  const d = domainOf(scene);
+  if (meshTooBig(d)) { toast(meshTooBig(d), 6000); return; }
+  if (d.cells > BIG_MESH && !confirm(L(`เมช ${fmtK(d.cells)} เซลล์ × ${cases.length} case อาจใช้เวลานานมาก คำนวณต่อหรือไม่?`, `${fmtK(d.cells)} cells × ${cases.length} cases may take very long. Continue?`))) return;
+  toggleBatchPop(false);
+  if (run.state === 'running') runner.send({ cmd: 'pause' });
+  Object.assign(batch, { active: true, cases, i: -1, results: [], baseJSON: JSON.stringify(scene), startWall: performance.now() });
+  showTab('results');
+  batchNext();
+}
+
+function loadSceneQuiet(json) {
+  scene = normalizeScene(JSON.parse(json));
+  selectedId = null;
+  afterChange(false);
+}
+
+function batchNext() {
+  if (!batch.active) return;
+  batch.i++;
+  if (batch.i >= batch.cases.length) { finishBatch(); return; }
+  const c = batch.cases[batch.i];
+  loadSceneQuiet(c.sceneJSON);
+  resetResults();
+  const why = startNewRun(true);
+  renderBatchResults();
+  if (why) batchCaseFailed(why);
+}
+
+/** ภาพของ case: มุมมองที่ผู้ใช้ตั้งไว้ + มุมมองด้านบน (แถบสีและหัวเรื่องในภาพ) */
+async function batchShots(c) {
+  const v0 = viewer.view, shots = [];
+  const cap = () => `Case ${c.no}: ${c.label} — ${VIEW_NAME()[viewer.view] || viewer.view} · ${FIELDS[viewer.display.field].label}`;
+  shots.push({ url: await composeCapture(cap()), caption: cap() });
+  if (v0 !== 'top') {
+    viewer.setView('top');
+    shots.push({ url: await composeCapture(cap()), caption: cap() });
+    viewer.setView(v0);
+  }
+  return shots;
+}
+
+async function batchCaseDone() {
+  if (!batch.active) return;
+  const c = batch.cases[batch.i];
+  try {
+    const snap = reportSnapshot(await batchShots(c));
+    batch.results.push({ ...c, snap, ok: !!snap });
+  } catch (e) { batch.results.push({ ...c, ok: false, error: e.message || String(e) }); }
+  batchNext();
+}
+
+function batchCaseFailed(why) {
+  if (!batch.active) return;
+  batch.results.push({ ...batch.cases[batch.i], ok: false, error: why });
+  setTimeout(batchNext, 0);
+}
+
+function finishBatch(cancelled = false) {
+  batch.active = false;
+  if (batch.baseJSON) loadSceneQuiet(batch.baseJSON);
+  batch.baseJSON = null;
+  resetResults();
+  renderBatchResults();
+  showTab('results');
+  const n = batch.results.filter(r => r.ok).length;
+  toast(cancelled ? L(`ยกเลิก Batch — เก็บผลไว้ ${n} case`, `Batch cancelled — ${n} case(s) kept`)
+    : L(`Batch เสร็จ ${n}/${batch.cases.length} case ใน ${fmtDur((performance.now() - batch.startWall) / 1000)} — คืนแบบตั้งต้นแล้ว`, `Batch finished: ${n}/${batch.cases.length} cases in ${fmtDur((performance.now() - batch.startWall) / 1000)} — the original model is restored`), 6000);
+}
+
+function cancelBatch() {
+  if (!batch.active) return;
+  if (!confirm(L('ยกเลิก Batch? case ที่คำนวณเสร็จแล้วยังเก็บไว้', 'Cancel the batch? Finished cases are kept'))) return;
+  runner.send({ cmd: 'pause' });
+  finishBatch(true);
+}
+
+/** ค่าสรุปของ case */
+function caseSummary(r) {
+  const u = r.snap.units;
+  const worst = u.reduce((a, b) => (b.dT > a.dT ? b : a));
+  const avg = u.reduce((s, x) => s + x.dT * x.cmm, 0) / u.reduce((s, x) => s + x.cmm, 0);
+  return { worst, avg, tinMax: Math.max(...u.map(x => x.TinMax)) };
+}
+
+/** ตารางลม 4 ทิศ: แยกตามกลุ่ม (ค่าตัวแปรอื่นที่เหมือนกัน) แถว = CDU, คอลัมน์ = ทิศลม, ช่องท้าย = ทิศที่แย่ที่สุด */
+function windTables(results, forReport = false) {
+  const groups = new Map();
+  for (const r of results) if (r.ok && r.parts.some(p => p.kind === 'wind')) {
+    if (!groups.has(r.group)) groups.set(r.group, []);
+    groups.get(r.group).push(r);
+  }
+  const out = [];
+  for (const [g, rs] of groups) {
+    rs.sort((a, b) => a.windDir - b.windDir);
+    const names = rs[0].snap.units.map(u => u.name);
+    const rows = names.map((n, k) => {
+      const tins = rs.map(r => r.snap.units[k]?.Tin ?? NaN);
+      const wi = tins.reduce((m, t, i) => (t > tins[m] ? i : m), 0);
+      const cell = (t, i) => `<td class="n${i === wi ? ' worst' : ''}">${forReport ? `<i class="chip chip-${band(t)}"></i>` : chip(t)}${t.toFixed(2)}</td>`;
+      return `<tr><td>${esc(n)}</td>${tins.map(cell).join('')}<td class="n"><b>${tins[wi].toFixed(2)}</b> · ${dirName(rs[wi].windDir, true)}</td></tr>`;
+    });
+    const sp = rs[0].snap.site.windSpeed;
+    out.push(`<div class="wind4">${g ? `<p class="case-vars">${esc(g)}</p>` : ''}
+      <table class="cmp-table"><thead><tr><th>CDU</th>${rs.map(r => `<th class="n">${dirName(r.windDir, true)} ${sp} m/s</th>`).join('')}<th class="n">${L('แย่ที่สุด', 'Worst')}</th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table></div>`);
+  }
+  return out.join('');
+}
+
+function renderBatchResults() {
+  const card = $('#batch-card');
+  if (!card) return;
+  const has = batch.results.length || batch.active;
+  card.hidden = !has;
+  if (!has) return;
+  $('#bt-status').textContent = batch.active
+    ? L(`กำลังรัน Case ${batch.i + 1} / ${batch.cases.length} — ${batch.cases[batch.i]?.label || ''}`, `Running case ${batch.i + 1} / ${batch.cases.length} — ${batch.cases[batch.i]?.label || ''}`)
+    : L(`${batch.results.filter(r => r.ok).length} case เสร็จ`, `${batch.results.filter(r => r.ok).length} case(s) done`);
+  $('#bt-cancel').hidden = !batch.active;
+  for (const id of ['#bt-rep-all', '#bt-rep-each', '#bt-csv', '#bt-clear']) $(id).disabled = batch.active || !batch.results.some(r => r.ok);
+  const rows = batch.results.map((r, i) => {
+    if (!r.ok) return `<tr><td>${r.no}</td><td>${esc(r.label)}</td><td colspan="4" class="warn-text">${L('คำนวณไม่ได้', 'Failed')}: ${esc(r.error || '')}</td><td></td></tr>`;
+    const s = caseSummary(r);
+    return `<tr><td>${r.no}</td><td>${esc(r.label)}${r.snap.converged ? '' : ` <span class="muted small">(${L('ยังไม่นิ่ง', 'not settled')})</span>`}</td>
+      <td class="n st-${s.worst.status.key}">+${s.worst.dT.toFixed(2)}</td><td>${esc(s.worst.name)}</td><td class="n">+${s.avg.toFixed(2)}</td><td class="n">${s.tinMax.toFixed(1)}</td>
+      <td class="bt-act"><button class="ghost mini" data-rep="${i}">${L('รายงาน', 'Report')}</button><button class="ghost mini" data-open="${i}">${L('เปิด', 'Open')}</button></td></tr>`;
+  });
+  if (batch.active) for (let k = batch.results.length; k < batch.cases.length; k++) {
+    const c = batch.cases[k];
+    rows.push(`<tr class="muted"><td>${c.no}</td><td>${esc(c.label)}</td><td colspan="5">${k === batch.i ? L('กำลังคำนวณ…', 'running…') : L('รอคิว', 'queued')}</td></tr>`);
+  }
+  $('#bt-table tbody').innerHTML = rows.join('');
+  $('#bt-wind4').innerHTML = windTables(batch.results);
+  $$('#bt-table [data-rep]').forEach(b => b.addEventListener('click', () => exportCaseReport(batch.results[Number(b.dataset.rep)])));
+  $$('#bt-table [data-open]').forEach(b => b.addEventListener('click', () => {
+    if (batch.active) return;
+    const r = batch.results[Number(b.dataset.open)];
+    edit(() => { scene = normalizeScene(JSON.parse(r.sceneJSON)); }, true, true);
+    resetResults();
+    showTab('tool');
+    toast(L(`เปิดแบบของ Case ${r.no} — กดคำนวณเพื่อดูสนามลมในภาพ 3D`, `Opened case ${r.no} — press Run to see its flow field in 3D`));
+  }));
+}
+
+function caseReportHTML(r) {
+  return reportDoc(r.snap.name, reportBody(r.snap) + reportTail());
+}
+
+function exportCaseReport(r) {
+  if (!r?.ok) return;
+  download(`${safeName(r.snap.name.split(' — ')[0])}-case${String(r.no).padStart(2, '0')}-report.html`, caseReportHTML(r), 'text/html');
+}
+
+/** ดาวน์โหลดรายงานแยกทุก case (ไฟล์ละ case — เบราว์เซอร์อาจถามอนุญาตดาวน์โหลดหลายไฟล์) */
+function exportBatchCaseReports() {
+  const ok = batch.results.filter(r => r.ok);
+  ok.forEach((r, k) => setTimeout(() => exportCaseReport(r), k * 400));
+}
+
+/** รายงานรวม: ตารางสรุปทุก case + ตารางลม 4 ทิศ + รายละเอียดแต่ละ case */
+function exportBatchReport() {
+  const ok = batch.results.filter(r => r.ok);
+  if (!ok.length) return;
+  const base = ok[0].snap.name.split(' — ')[0];
+  const sum = ok.map(r => {
+    const s = caseSummary(r);
+    return `<tr><td>${r.no}</td><td>${esc(r.label)}</td><td class="n ${s.worst.status.key}">+${s.worst.dT.toFixed(2)}</td><td>${esc(s.worst.name)}</td><td class="n">+${s.avg.toFixed(2)}</td><td class="n">${s.tinMax.toFixed(1)}</td><td>${r.snap.converged ? L('ลู่เข้า', 'yes') : L('ยังไม่ลู่เข้า', 'no')}</td></tr>`;
+  }).join('');
+  const w4 = windTables(ok, true);
+  const body = `<h1>${esc(base)} — ${L('ผลการเปรียบเทียบหลายทางเลือก (Batch)', 'Comparison of options (batch)')}</h1>
+    <p class="muted">${L('รายงานจาก CDU Airflow CFD', 'Report from CDU Airflow CFD')} · ${new Date().toLocaleString(L('th-TH', 'en-GB'))} · ${ok.length} case</p>
+    <h2>${L('สรุปทุก Case', 'Summary of all cases')}</h2>
+    <table><tr><th>Case</th><th>${L('ตัวแปร', 'Variables')}</th><th>${L('ΔT สูงสุด °C', 'Max ΔT °C')}</th><th>${L('เครื่องที่แย่สุด', 'Worst unit')}</th><th>${L('ΔT เฉลี่ย °C', 'Mean ΔT °C')}</th><th>${L('T ลมเข้าสูงสุด °C', 'Max inlet T °C')}</th><th>${L('ลู่เข้า', 'Converged')}</th></tr>${sum}</table>
+    ${w4 ? `<h2>${L('T ลมเข้าเฉลี่ยรายเครื่อง ลม 4 ทิศ (°C)', 'Mean inlet T per unit, 4 wind directions (°C)')}</h2>
+      <p class="muted">${L('ช่องเน้น = ทิศลมที่ทำให้เครื่องนั้นมี T ลมเข้าสูงที่สุด', 'Highlighted = the wind direction giving that unit its highest inlet T')}</p>${w4}` : ''}
+    ${ok.map(r => `<section class="case">${reportBody(r.snap, { level: 2 })}</section>`).join('')}
+    ${reportTail()}`;
+  download(`${safeName(base)}-batch-report.html`, reportDoc(base, body), 'text/html');
+}
+
+function exportBatchCSV() {
+  const ok = batch.results.filter(r => r.ok);
+  if (!ok.length) return;
+  const head = L(['Case', 'ตัวแปร', 'ทิศลม', 'CDU', 'รุ่น', 'T ลมเข้าเฉลี่ย C', 'T ลมเข้าสูงสุด C', 'dT C', 'ลมวนกลับ %', 'T ลมเป่า C', 'สถานะ', 'ลู่เข้า'],
+    ['Case', 'Variables', 'Wind', 'CDU', 'Model', 'Mean inlet T C', 'Max inlet T C', 'dT C', 'Recirculation %', 'Discharge T C', 'Status', 'Converged']);
+  const rows = ok.flatMap(r => r.snap.units.map(u => [r.no, r.label, r.snap.site.windSpeed > 0 ? `${dirName(r.snap.site.windDir, true)} ${r.snap.site.windSpeed} m/s` : '-', u.name, u.model,
+    u.Tin.toFixed(2), u.TinMax.toFixed(2), u.dT.toFixed(2), (u.Cin * 100).toFixed(1), u.Tdis.toFixed(1), u.status.label, r.snap.converged ? 'Y' : 'N']));
+  const csv = '﻿' + [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  download(`${safeName(ok[0].snap.name.split(' — ')[0])}-batch.csv`, csv, 'text/csv');
 }
 
 function download(name, data, type) {
@@ -1791,6 +2120,8 @@ function applyLang() {
   $$('#seg-lang button').forEach(b => b.classList.toggle('on', b.dataset.v === getLang()));
   renderPresets();
   $('#remark-body').innerHTML = remarkHTML();
+  renderBatchResults();
+  if (!$('#batch-pop').hidden) renderBatchPop();
   viewer.refreshTexts();
   renderProps();
   renderSettings();
@@ -1961,7 +2292,8 @@ function bindUI() {
   $('#keys-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleKeys(false); });
   $('#btn-redo').addEventListener('click', redo);
   $('#btn-run').addEventListener('click', startOrToggle);
-  $('#btn-reset').addEventListener('click', resetResults);
+  $('#btn-reset').addEventListener('click', () => (batch.active ? cancelBatch() : resetResults()));
+  bindBatch();
   $('#btn-edit').addEventListener('click', () => setEditUnlocked(modelLocked()));
   $('#btn-save').addEventListener('click', saveProject);
   $('#btn-open').addEventListener('click', () => $('#file-open').click());
@@ -2055,6 +2387,7 @@ function bindUI() {
     if (!$('#keys-pop').hidden && (k === 'escape' || k === '?')) { toggleKeys(false); return; }
     if (!$('#cases-pop').hidden) { if (k === 'escape') toggleCases(false); return; }
     if (!$('#report-pop').hidden) { if (k === 'escape') toggleReportPop(false); return; }
+    if (!$('#batch-pop').hidden) { if (k === 'escape') toggleBatchPop(false); return; }
     if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if (ctrl && k === 'c') { if (selected()) { e.preventDefault(); copySelected(); } }
@@ -2118,5 +2451,6 @@ updateRunUI();
 updateColorbar();
 renderResults();
 renderCompare();
+renderBatchResults();
 applyTheme();
 applyLang();

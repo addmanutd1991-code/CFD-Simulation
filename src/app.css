@@ -733,3 +733,19 @@ body.model-locked .tool:not([data-tool="select"]) { opacity: .4; }
 .rep-act { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
 .rep-act .spacer { flex: 1; }
 .inlet-bar { display: inline-block; width: 110px; height: 10px; border-radius: 3px; vertical-align: -1px; }
+
+/* ───────── Batch ───────── */
+.batch-pop { max-width: 760px; }
+.bt-var { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(120px, 1fr) minmax(150px, 1.2fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); }
+.bt-var label { display: flex; gap: 6px; align-items: center; font-size: 12.5px; }
+.bt-var input[type=text] { flex: 1; min-width: 0; }
+.bt-add { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.bt-wind { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; font-size: 13px; }
+.bt-wind input[type=number] { width: 70px; }
+.bt-list { max-height: 180px; overflow: auto; margin: 4px 0; padding-left: 22px; font-size: 12.5px; }
+.warn-text { color: var(--bad, #e5433b); }
+.batch-card .bt-act { white-space: nowrap; display: flex; gap: 4px; }
+.wind4 { margin-top: 10px; }
+.wind4 td.worst { font-weight: 700; outline: 2px solid var(--warn, #f5c518); outline-offset: -2px; }
+.case-vars { font-weight: 600; margin: 8px 0 2px; }
+@media (max-width: 640px) { .bt-var { grid-template-columns: 1fr; } }
