@@ -759,3 +759,16 @@ body.model-locked .tool:not([data-tool="select"]) { opacity: .4; }
 .dxf-layers { max-height: 240px; overflow: auto; }
 .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 .dxf-act { display: flex; justify-content: space-between; }
+
+/* ───────── รายงานแบบฟอร์ม Excel ───────── */
+.form-pop { max-width: 760px; }
+.fm-row { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin: 6px 0; font-size: 13px; }
+.fm-card { flex: 1 1 260px; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 8px; cursor: pointer; }
+.fm-card small { grid-column: 2; color: var(--muted); font-size: 12px; }
+.fm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; font-size: 13px; }
+.fm-grid label { display: flex; flex-direction: column; gap: 2px; }
+.fm-logo img { height: 36px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 4px; background: #fff; }
+.btn-like { cursor: pointer; display: inline-flex; align-items: center; }
+.fm-notes { display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin-top: 6px; }
+.fm-notes textarea { width: 100%; font: inherit; }
+@media (max-width: 640px) { .fm-grid { grid-template-columns: 1fr; } }

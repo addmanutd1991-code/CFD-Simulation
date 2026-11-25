@@ -20,6 +20,8 @@ const supportAt = (sc, x, z) => sc.objects.filter(s => s.type === 'slab' && insi
 export const BATCH_KINDS = ['louver', 'hood', 'wallH', 'elev', 'wind'];
 export const MAX_CASES = 48;
 export const WIND4 = [0, 90, 180, 270];
+/** ค่าพิเศษของตัวแปรทิศลม = ไม่มีลม (ความเร็ว 0) */
+export const CALM = -1;
 
 export const KIND_INFO = () => ({
   louver: { label: L('% เปิดของ louver / ระแนง', 'Louver / screen open %'), unit: '%', objType: 'wall', allLabel: L('ทุกผนังที่เป็น louver', 'All louvred walls'), def: '50, 70, 90' },
@@ -31,6 +33,7 @@ export const KIND_INFO = () => ({
 
 /** ชื่อทิศลมจากองศา "พัดมาจาก" */
 export function dirName(deg, short = false) {
+  if (deg === CALM) return short ? L('ไม่มีลม', 'Calm') : L('ไม่มีลม', 'No wind');
   const i = Math.round((((deg % 360) + 360) % 360) / 45) % 8;
   const th = ['เหนือ', 'ตะวันออกเฉียงเหนือ', 'ตะวันออก', 'ตะวันออกเฉียงใต้', 'ใต้', 'ตะวันตกเฉียงใต้', 'ตะวันตก', 'ตะวันตกเฉียงเหนือ'];
   const en = ['North', 'North-east', 'East', 'South-east', 'South', 'South-west', 'West', 'North-west'];
@@ -67,7 +70,10 @@ export function targetsOf(scene, v) {
 
 /** ปรับฉาก (สำเนา) ตามค่าของตัวแปรหนึ่งตัว */
 function applyVar(scene, v, val, windSpeed) {
-  if (v.kind === 'wind') { scene.site.windDir = val; scene.site.windSpeed = windSpeed; return; }
+  if (v.kind === 'wind') {
+    if (val === CALM) { scene.site.windSpeed = 0; return; }
+    scene.site.windDir = val; scene.site.windSpeed = windSpeed; return;
+  }
   for (const o of targetsOf(scene, v)) {
     if (v.kind === 'louver') o.louver = Math.min(100, Math.max(0, val));
     else if (v.kind === 'wallH') o.height = Math.max(0.1, val);
@@ -114,6 +120,7 @@ export function buildCases(baseScene, vars, windSpeed) {
     const group = parts.filter(p => p.kind !== 'wind').map(p => p.text).join(' · ');
     const label = parts.map(p => p.text).join(' · ');
     s.name = `${baseScene.name} — Case ${i + 1}: ${label}`;
-    return { no: i + 1, label, group, parts, windDir: s.site.windDir, sceneJSON: JSON.stringify(s) };
+    const w = c.find(x => x.v.kind === 'wind');
+    return { no: i + 1, label, group, parts, windDir: w ? w.val : (s.site.windSpeed > 0 ? s.site.windDir : CALM), sceneJSON: JSON.stringify(s) };
   });
 }

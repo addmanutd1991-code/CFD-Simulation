@@ -384,6 +384,7 @@
         <div class="spacer"></div>
         <button id="btn-csv" disabled title="ตารางผลรายเครื่องเป็นไฟล์ CSV" data-en-title="Per-unit results table as a CSV file"><svg class="ic"><use href="#i-download"/></svg>CSV</button>
         <button id="btn-report" disabled title="รายงาน HTML พร้อมภาพที่ Capture ไว้" data-en-title="HTML report with the captured images"><svg class="ic"><use href="#i-download"/></svg><span data-en="Report (HTML)">รายงาน (HTML)</span></button>
+        <button id="btn-form" title="รายงาน Excel ตามแบบฟอร์ม CFD Simulation Report (A3 board / A4 report)" data-en-title="Excel report in the CFD Simulation Report form (A3 board / A4 report)"><svg class="ic"><use href="#i-download"/></svg><span data-en="Report form (Excel)">รายงานแบบฟอร์ม (Excel)</span></button>
         <button id="btn-batch" title="รันหลายทางเลือกต่อกันอัตโนมัติ (louver / Hood / ความสูงผนัง / ยกเครื่อง / ลม 4 ทิศ)" data-en-title="Run several options one after another (louver / Hood / wall height / raise unit / 4 wind directions)"><svg class="ic"><use href="#i-play"/></svg>Batch…</button>
         <button id="btn-png" title="ภาพ 3 มิติของมุมมองปัจจุบัน" data-en-title="3D image of the current view"><svg class="ic"><use href="#i-download"/></svg><span data-en="3D image (PNG)">ภาพ 3D (PNG)</span></button>
       </div>
@@ -394,6 +395,7 @@
             <button class="ghost mini danger" id="bt-cancel" hidden data-en="Cancel batch">ยกเลิก Batch</button>
             <button class="ghost mini" id="bt-rep-all" disabled title="รายงาน HTML ไฟล์เดียว: สรุปทุก case + ตารางลม 4 ทิศ + รายละเอียดแต่ละ case" data-en-title="One HTML report: summary of all cases + 4-direction wind table + each case in detail" data-en="Combined report">รายงานรวม</button>
             <button class="ghost mini" id="bt-rep-each" disabled title="ดาวน์โหลดรายงาน HTML แยกไฟล์ละ case" data-en-title="Download a separate HTML report for every case" data-en="Separate report per case">รายงานแยกทุก Case</button>
+            <button class="ghost mini" id="bt-form" disabled title="รายงาน Excel ตามแบบฟอร์ม" data-en-title="Excel report in the company form" data-en="Report form (Excel)">รายงานแบบฟอร์ม (Excel)</button>
             <button class="ghost mini" id="bt-csv" disabled>CSV</button>
             <button class="ghost mini" id="bt-clear" disabled data-en="Clear">ล้าง</button>
             <button class="ghost mini" id="btn-batch2" data-en="New batch…">Batch ใหม่…</button>
@@ -886,6 +888,42 @@
   </div>
 </div>
 
+<!-- รายงาน Excel ตามแบบฟอร์ม -->
+<div class="modal" id="form-pop" hidden>
+  <div class="keys-pop form-pop" role="dialog" aria-label="รายงานแบบฟอร์ม" data-en-label="Report form">
+    <button class="keys-x" title="ปิด (Esc)" data-en-title="Close (Esc)" aria-label="ปิด" data-en-label="Close">×</button>
+    <h3 data-en="CFD Simulation Report — Excel form">รายงาน CFD Simulation — แบบฟอร์ม Excel</h3>
+    <div class="rep-h" data-en="Form">แบบฟอร์ม</div>
+    <div class="fm-row">
+      <label class="fm-card"><input type="radio" name="fm-style" id="fm-style-board"> <b data-en="A3 board (landscape)">A3 board (แนวนอน)</b><small data-en="One page per option: model views, a column per wind case, suction temperature table (like Form01 / 05 / 06)">หน้าเดียวต่อทางเลือก: ภาพแบบ ผลแยกคอลัมน์ตามสภาพลม ตาราง Suction Temp. (แบบ Form01 / 05 / 06)</small></label>
+      <label class="fm-card"><input type="radio" name="fm-style" id="fm-style-a4"> <b data-en="A4 report (portrait)">A4 report (แนวตั้ง)</b><small data-en="Cover + 1. Simulation condition, 2. Simulation model, 3. Simulation result per wind case with tables (like Form02 / 03 / 04)">หน้าปก + 1. Simulation condition · 2. Simulation model · 3. Simulation result รายสภาพลมพร้อมตาราง (แบบ Form02 / 03 / 04)</small></label>
+    </div>
+    <div class="rep-h" data-en="Results">ผลที่ใช้</div>
+    <div class="fm-row">
+      <label><input type="radio" name="fm-src" id="fm-src-batch"> <span data-en="Batch results (each option = one sheet, each wind case = one column / section)">ผล Batch (ทางเลือกละชีต · สภาพลมละคอลัมน์ / หัวข้อ)</span></label>
+      <label><input type="radio" name="fm-src" id="fm-src-run"> <span data-en="Current result">ผลปัจจุบัน</span></label>
+    </div>
+    <div class="rep-h" data-en="Project">ข้อมูลโครงการ</div>
+    <div class="fm-grid">
+      <label><span data-en="Project name">ชื่อโครงการ</span><input type="text" id="fm-project"></label>
+      <label><span data-en="Zone / location">โซน / ตำแหน่ง</span><input type="text" id="fm-zone" placeholder="ZONE 5 / 1st Fl. Public"></label>
+      <label><span>Rev.</span><input type="text" id="fm-rev" placeholder="Rev.1"></label>
+      <label><span data-en="Date">วันที่</span><input type="text" id="fm-date"></label>
+      <label><span>Simulated by</span><input type="text" id="fm-simBy"></label>
+      <label><span>Sold by</span><input type="text" id="fm-soldBy"></label>
+      <label><span data-en="Company (cover)">บริษัท (หน้าปก)</span><input type="text" id="fm-company"></label>
+      <label><span data-en="Division (cover)">ฝ่าย (หน้าปก)</span><input type="text" id="fm-division"></label>
+    </div>
+    <div class="fm-row fm-logo"><span data-en="Logo (remembered in this browser)">โลโก้ (จำไว้กับเบราว์เซอร์)</span>
+      <img id="fm-logo-img" alt="" hidden><label class="ghost mini btn-like"><input type="file" id="fm-logo" accept="image/png,image/jpeg" hidden><span data-en="Choose image…">เลือกรูป…</span></label>
+      <button class="ghost mini danger" id="fm-logo-clear" hidden data-en="Remove">ลบ</button></div>
+    <label class="fm-row"><input type="checkbox" id="fm-pressure"> <span data-en="Add a pressure section image (like Form04)">เพิ่มภาพหน้าตัดความดัน (แบบ Form04)</span></label>
+    <label class="fm-notes"><span data-en="Remark / conclusion for this job">Remark / ข้อสรุปของงานนี้</span><textarea id="fm-notes" rows="4"></textarea></label>
+    <p class="note" data-en="Images: top view and side section of temperature, 3D, and suction faces are captured automatically for every wind case (batch runs capture them as each case finishes). Suction table: K and °C (°C = K − 273.15 as a formula), coloured by the return-air criteria.">ภาพ: อุณหภูมิมุมบน หน้าตัดด้านข้าง 3D และหน้าคอยล์ดูดลม ถ่ายอัตโนมัติทุกสภาพลม (Batch ถ่ายตอนแต่ละ case เสร็จ) · ตาราง Suction Temp.: K และ °C (°C = K − 273.15 เป็นสูตร) ระบายสีตามเกณฑ์อุณหภูมิลมกลับ</p>
+    <div class="rep-go"><button class="primary" id="fm-go"><svg class="ic"><use href="#i-download"/></svg><span data-en="Download .xlsx">ดาวน์โหลด .xlsx</span></button></div>
+  </div>
+</div>
+
 <!-- แบบ DXF ฉากหลัง -->
 <div class="modal" id="dxf-pop" hidden>
   <div class="keys-pop dxf-pop" role="dialog" aria-label="แบบ DXF" data-en-label="DXF drawing">
@@ -934,6 +972,7 @@
     <div class="rep-h" data-en="Wind">ลม</div>
     <div class="bt-wind">
       <label><input type="checkbox" id="bt-wind"> <span data-en="4 wind directions: N, E, S, W">ลม 4 ทิศ: เหนือ ตะวันออก ใต้ ตะวันตก</span></label>
+      <label><input type="checkbox" id="bt-calm"> <span data-en="+ no-wind case">+ กรณีไม่มีลม</span></label>
       <label><span data-en="Speed (m/s)">ความเร็ว (m/s)</span> <input type="number" id="bt-wspeed" step="0.5" min="0.5" max="10"></label>
     </div>
     <p class="note" data-en="The wind profile (terrain) and other settings come from the Settings tab.">โปรไฟล์ลมตามความสูงและค่าอื่นใช้ตามแท็บ ตั้งค่า</p>

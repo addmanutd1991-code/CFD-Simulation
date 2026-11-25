@@ -14,7 +14,8 @@ import { cssGradient, FIELDS, rgb } from './colormap.js';
 import { L, getLang, setLang } from './i18n.js';
 import { WIND_PROFILES, windParams, windFactorFn } from './wind.js';
 import { parseDXF, guessUnits, simplifyCollinear, rectOf } from './dxf.js';
-import { BATCH_KINDS, KIND_INFO, MAX_CASES, WIND4, buildCases, validateVars, parseValues, dirName } from './batch.js';
+import { BATCH_KINDS, KIND_INFO, MAX_CASES, WIND4, CALM, buildCases, validateVars, parseValues, dirName } from './batch.js';
+import { buildFormReport } from './form-report.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1786,7 +1787,7 @@ function exportReport() {
  * → เก็บผล + ภาพ 2 มุม → case ถัดไป → จบแล้วคืนแบบตั้งต้น ผลทุก case ขึ้นตาราง Batch และตารางเปรียบเทียบ
  * ผลเก็บไว้ในหน่วยความจำของรอบนี้ (ปิดหน้าแล้วหาย) — ดาวน์โหลดรายงานไว้ก่อนปิด */
 const batch = {
-  vars: [], wind: false, windSpeed: 2,
+  vars: [], wind: false, calm: true, windSpeed: 2, model: new Map(),
   active: false, cases: [], i: -1, results: [], baseJSON: null, startWall: 0,
 };
 
@@ -1802,7 +1803,7 @@ function toggleBatchPop(show) {
 
 /** ตัวแปรที่ใช้จริง (รวมทิศลม 4 ทิศถ้าเลือก) */
 function batchVars() {
-  return [...batch.vars.map(v => ({ ...v, values: parseValues(v.text) })), ...(batch.wind ? [{ kind: 'wind', target: 'all', values: [...WIND4] }] : [])];
+  return [...batch.vars.map(v => ({ ...v, values: parseValues(v.text) })), ...(batch.wind ? [{ kind: 'wind', target: 'all', values: [...WIND4, ...(batch.calm ? [CALM] : [])] }] : [])];
 }
 
 function renderBatchPop() {
@@ -1820,6 +1821,8 @@ function renderBatchPop() {
     : `<p class="muted small">${L('ยังไม่มีตัวแปร — เพิ่มด้านล่าง หรือรันเฉพาะลม 4 ทิศ', 'No variables yet — add one below, or run the 4 wind directions only')}</p>`;
   $('#bt-add').innerHTML = BATCH_KINDS.filter(k => k !== 'wind').map(k => `<button class="ghost mini" data-k="${k}">+ ${info[k].label}</button>`).join('');
   $('#bt-wind').checked = batch.wind;
+  $('#bt-calm').checked = batch.calm;
+  $('#bt-calm').disabled = !batch.wind;
   $('#bt-wspeed').value = batch.windSpeed;
   $('#bt-wspeed').disabled = !batch.wind;
   $$('#bt-vars .bt-var').forEach(row => {
@@ -1855,6 +1858,7 @@ function bindBatch() {
   $('#batch-pop .keys-x').addEventListener('click', () => toggleBatchPop(false));
   $('#batch-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleBatchPop(false); });
   $('#bt-wind').addEventListener('change', (e) => { batch.wind = e.target.checked; renderBatchPop(); });
+  $('#bt-calm').addEventListener('change', (e) => { batch.calm = e.target.checked; renderBatchPreview(); });
   $('#bt-wspeed').addEventListener('input', (e) => { batch.windSpeed = parseFloat(e.target.value) || 0; renderBatchPreview(); });
   $('#bt-go').addEventListener('click', startBatch);
   $('#bt-cancel').addEventListener('click', cancelBatch);
@@ -1876,7 +1880,7 @@ function startBatch() {
   if (d.cells > BIG_MESH && !confirm(L(`เมช ${fmtK(d.cells)} เซลล์ × ${cases.length} case อาจใช้เวลานานมาก คำนวณต่อหรือไม่?`, `${fmtK(d.cells)} cells × ${cases.length} cases may take very long. Continue?`))) return;
   toggleBatchPop(false);
   if (run.state === 'running') runner.send({ cmd: 'pause' });
-  Object.assign(batch, { active: true, cases, i: -1, results: [], baseJSON: JSON.stringify(scene), startWall: performance.now() });
+  Object.assign(batch, { active: true, cases, i: -1, results: [], model: new Map(), baseJSON: JSON.stringify(scene), startWall: performance.now() });
   showTab('results');
   batchNext();
 }
@@ -1887,37 +1891,32 @@ function loadSceneQuiet(json) {
   afterChange(false);
 }
 
-function batchNext() {
+async function batchNext() {
   if (!batch.active) return;
   batch.i++;
   if (batch.i >= batch.cases.length) { finishBatch(); return; }
   const c = batch.cases[batch.i];
   loadSceneQuiet(c.sceneJSON);
   resetResults();
+  // ภาพแบบจำลอง (Plan / front / isometric / top) ของทางเลือกนี้ — ถ่ายครั้งเดียวต่อกลุ่ม (ต่างกันแค่ทิศลม = แบบเดียวกัน)
+  if (!batch.model.has(c.group)) {
+    renderBatchResults();
+    try { batch.model.set(c.group, await captureModelShots()); } catch { batch.model.set(c.group, null); }
+    if (!batch.active) return;
+  }
   const why = startNewRun(true);
   renderBatchResults();
   if (why) batchCaseFailed(why);
-}
-
-/** ภาพของ case: มุมมองที่ผู้ใช้ตั้งไว้ + มุมมองด้านบน (แถบสีและหัวเรื่องในภาพ) */
-async function batchShots(c) {
-  const v0 = viewer.view, shots = [];
-  const cap = () => `Case ${c.no}: ${c.label} — ${VIEW_NAME()[viewer.view] || viewer.view} · ${FIELDS[viewer.display.field].label}`;
-  shots.push({ url: await composeCapture(cap()), caption: cap() });
-  if (v0 !== 'top') {
-    viewer.setView('top');
-    shots.push({ url: await composeCapture(cap()), caption: cap() });
-    viewer.setView(v0);
-  }
-  return shots;
 }
 
 async function batchCaseDone() {
   if (!batch.active) return;
   const c = batch.cases[batch.i];
   try {
-    const snap = reportSnapshot(await batchShots(c));
-    batch.results.push({ ...c, snap, ok: !!snap });
+    const named = await captureResultShots();
+    const cap = k => `Case ${c.no}: ${c.label} — ${REPORT_SHOT_NAME()[k]}`;
+    const snap = reportSnapshot(['iso', 'top', 'side'].filter(k => named[k]).map(k => ({ url: named[k].url, caption: cap(k) })));
+    batch.results.push({ ...c, snap, named, ok: !!snap });
   } catch (e) { batch.results.push({ ...c, ok: false, error: e.message || String(e) }); }
   batchNext();
 }
@@ -1964,7 +1963,7 @@ function windTables(results, forReport = false) {
   }
   const out = [];
   for (const [g, rs] of groups) {
-    rs.sort((a, b) => a.windDir - b.windDir);
+    rs.sort((a, b) => (a.windDir === CALM) - (b.windDir === CALM) || a.windDir - b.windDir);
     const names = rs[0].snap.units.map(u => u.name);
     const rows = names.map((n, k) => {
       const tins = rs.map(r => r.snap.units[k]?.Tin ?? NaN);
@@ -1972,9 +1971,9 @@ function windTables(results, forReport = false) {
       const cell = (t, i) => `<td class="n${i === wi ? ' worst' : ''}">${forReport ? `<i class="chip chip-${band(t)}"></i>` : chip(t)}${t.toFixed(2)}</td>`;
       return `<tr><td>${esc(n)}</td>${tins.map(cell).join('')}<td class="n"><b>${tins[wi].toFixed(2)}</b> · ${dirName(rs[wi].windDir, true)}</td></tr>`;
     });
-    const sp = rs[0].snap.site.windSpeed;
+    const colHead = r => (r.windDir === CALM ? dirName(CALM, true) : `${dirName(r.windDir, true)} ${r.snap.site.windSpeed} m/s`);
     out.push(`<div class="wind4">${g ? `<p class="case-vars">${esc(g)}</p>` : ''}
-      <table class="cmp-table"><thead><tr><th>CDU</th>${rs.map(r => `<th class="n">${dirName(r.windDir, true)} ${sp} m/s</th>`).join('')}<th class="n">${L('แย่ที่สุด', 'Worst')}</th></tr></thead>
+      <table class="cmp-table"><thead><tr><th>CDU</th>${rs.map(r => `<th class="n">${colHead(r)}</th>`).join('')}<th class="n">${L('แย่ที่สุด', 'Worst')}</th></tr></thead>
       <tbody>${rows.join('')}</tbody></table></div>`);
   }
   return out.join('');
@@ -1990,7 +1989,7 @@ function renderBatchResults() {
     ? L(`กำลังรัน Case ${batch.i + 1} / ${batch.cases.length} — ${batch.cases[batch.i]?.label || ''}`, `Running case ${batch.i + 1} / ${batch.cases.length} — ${batch.cases[batch.i]?.label || ''}`)
     : L(`${batch.results.filter(r => r.ok).length} case เสร็จ`, `${batch.results.filter(r => r.ok).length} case(s) done`);
   $('#bt-cancel').hidden = !batch.active;
-  for (const id of ['#bt-rep-all', '#bt-rep-each', '#bt-csv', '#bt-clear']) $(id).disabled = batch.active || !batch.results.some(r => r.ok);
+  for (const id of ['#bt-rep-all', '#bt-rep-each', '#bt-csv', '#bt-clear', '#bt-form']) $(id).disabled = batch.active || !batch.results.some(r => r.ok);
   const rows = batch.results.map((r, i) => {
     if (!r.ok) return `<tr><td>${r.no}</td><td>${esc(r.label)}</td><td colspan="4" class="warn-text">${L('คำนวณไม่ได้', 'Failed')}: ${esc(r.error || '')}</td><td></td></tr>`;
     const s = caseSummary(r);
@@ -2290,6 +2289,269 @@ function bindDxf() {
   $('#dxf-remove').addEventListener('click', () => { if (confirm(L('ลบแบบ DXF ฉากหลัง? (วัตถุที่แปลงไปแล้วยังอยู่)', 'Remove the DXF underlay? (Objects already converted stay)'))) { setUnderlay(null); renderDxfPop(); } });
 }
 
+/* ───────── ภาพสำหรับรายงานตามแบบฟอร์ม ─────────
+ * ผลต่อสภาพลม: top (หน้าตัดแนวนอนที่ระดับกลางคอยล์ของเครื่องที่แย่สุด) · side (หน้าตัดแนวตั้งผ่านเครื่องนั้น มองจาก +Z)
+ * · iso (3D + หน้าตัดแนวนอน) · suction (ไล่เฉดอุณหภูมิบนหน้าคอยล์ดูดลม) · pressure (หน้าตัดแนวตั้ง ตัวแปรความดัน)
+ * แบบจำลอง (ไม่มีผล): plan (Top พร้อมแบบ DXF ถ้ามี) · front (มองจาก +Z) · iso · top
+ * ทุกภาพเป็น JPEG (ไฟล์ Excel ไม่ใหญ่เกิน) และคืนมุมมอง/การแสดงผลเดิมให้ผู้ใช้หลังถ่าย */
+const REPORT_SHOT_NAME = () => ({
+  top: L('อุณหภูมิ มุมมองด้านบน', 'Temperature, top view'), side: L('อุณหภูมิ หน้าตัดด้านข้าง', 'Temperature, side section'),
+  iso: L('อุณหภูมิ มุมมอง 3D', 'Temperature, 3D view'), suction: L('อุณหภูมิที่หน้าคอยล์ดูดลม', 'Temperature at the CDU suction'), pressure: L('ความดัน หน้าตัดด้านข้าง', 'Pressure, side section'),
+});
+const nextFrames = () => new Promise(res => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(res, 180))));
+
+/** ภาพจากมุมมองปัจจุบัน: JPEG + แถบสีด้านล่าง (ถ้ามีผล) → { url, w, h } */
+async function reportShot() {
+  const src = new Image();
+  src.src = viewer.snapshot();
+  await src.decode();
+  const W = src.width, s = W / 1200, ticks = colorbarTicks();
+  const foot = ticks ? Math.round(62 * s) : 0;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = src.height + foot;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, cv.width, cv.height);
+  g.drawImage(src, 0, 0);
+  if (ticks) {
+    const x0 = 16 * s, x1 = Math.min(W - 16 * s, x0 + 620 * s), y = src.height + 10 * s, bh = 16 * s;
+    const lv = viewer.display.mode === 'contour' ? CONTOUR_LEVELS : 0;
+    for (let i = 0; i < 240; i++) {
+      let t = i / 239;
+      if (lv) t = (Math.min(lv - 1, Math.floor(t * lv)) + 0.5) / lv;
+      const c = rgb(t);
+      g.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      g.fillRect(x0 + (x1 - x0) * i / 240, y, (x1 - x0) / 240 + 1, bh);
+    }
+    g.strokeStyle = '#8a98a5'; g.lineWidth = Math.max(1, s); g.strokeRect(x0, y, x1 - x0, bh);
+    g.fillStyle = '#1c2a36';
+    g.font = `${Math.round(13 * s)}px "IBM Plex Sans Thai", Tahoma, sans-serif`;
+    g.textBaseline = 'top';
+    ticks.forEach((t, i) => { g.textAlign = i === 0 ? 'left' : i === ticks.length - 1 ? 'right' : 'center'; g.fillText(t.txt, x0 + (x1 - x0) * t.p, y + bh + 4 * s); });
+    g.textAlign = 'left';
+    g.fillText(`${FIELDS[viewer.display.field].label} (${FIELDS[viewer.display.field].unit})`, x1 + 16 * s, y);
+  }
+  return { url: cv.toDataURL('image/jpeg', 0.86), w: cv.width, h: cv.height };
+}
+
+function saveViewState() {
+  const d = viewer.display;
+  return { view: viewer.view, section: { ...viewer.section }, display: { field: d.field, mode: d.mode, particles: d.particles, iso: d.iso, suction: d.suction, cduColor: d.cduColor } };
+}
+function restoreViewState(st) {
+  viewer.setDisplay(st.display);
+  viewer.setSection(st.section.axis, st.section.pos, st.section.show);
+  setViewUI(st.view);
+  syncSectionUI();
+  $('#btn-suction')?.classList.toggle('on', st.display.suction);
+}
+/** ระนาบหน้าตัดที่ตำแหน่ง pos (บีบให้อยู่ในช่วงที่วางได้) */
+function sectionAt(axis, pos) {
+  viewer.section.axis = axis;
+  const [a, b] = viewer.sectionLimits();
+  viewer.setSection(axis, Math.min(b, Math.max(a, pos)), true);
+}
+
+async function captureResultShots() {
+  const units = unitsNow();
+  if (!units?.length) return {};
+  const st = saveViewState();
+  const worst = units.reduce((a, b) => (b.dT > a.dT ? b : a));
+  const o = worst.obj || {};
+  const hS = (o.elev || 0) + (o.model ? unitSize(o).h * 0.5 : 1);
+  const out = {};
+  try {
+    viewer.setDisplay({ field: 'T', mode: 'contour', particles: false, iso: false, suction: false });
+    setViewUI('top'); sectionAt('y', hS); await nextFrames(); out.top = await reportShot();
+    setViewUI('pz'); sectionAt('z', o.z ?? 0); await nextFrames(); out.side = await reportShot();
+    viewer.setDisplay({ field: 'P' }); await nextFrames(); out.pressure = await reportShot();
+    viewer.setDisplay({ field: 'T', iso: st.display.iso });
+    setViewUI('3d'); sectionAt('y', hS); await nextFrames(); out.iso = await reportShot();
+    viewer.setSection(viewer.section.axis, viewer.section.pos, false);
+    viewer.setDisplay({ iso: false, suction: true, cduColor: 'shade' }); await nextFrames(); out.suction = await reportShot();
+  } finally { restoreViewState(st); }
+  return out;
+}
+
+async function captureModelShots() {
+  const st = saveViewState();
+  const hadRes = !!(run.fields && run.mesh && !run.stale);
+  const ulShow = underlay?.show;
+  const out = {};
+  try {
+    viewer.setResults(null);
+    viewer.setSection(st.section.axis, st.section.pos, false);
+    viewer.setDisplay({ suction: false });
+    setViewUI('top'); await nextFrames(); out.plan = await reportShot();
+    if (underlay && ulShow) { underlay.show = false; applyUnderlay(); await nextFrames(); out.top = await reportShot(); underlay.show = true; applyUnderlay(); } else out.top = out.plan;
+    setViewUI('pz'); await nextFrames(); out.front = await reportShot();
+    setViewUI('3d'); await nextFrames(); out.iso = await reportShot();
+  } finally {
+    if (hadRes) pushFieldsToViewer();
+    restoreViewState(st);
+  }
+  return out;
+}
+
+/* ───────── รายงาน Excel ตามแบบฟอร์ม (A3 board / A4 report) ───────── */
+const FORM_KEY = 'cfd-form-meta';
+let formMeta = { style: 'board', simBy: '', soldBy: '', company: 'SIAM DAIKIN SALES CO.,LTD.', division: 'TECHNICAL SUPPORT DIVISION', logo: null, pressure: false };
+try { formMeta = { ...formMeta, ...(JSON.parse(localStorage.getItem(FORM_KEY) || 'null') || {}) }; } catch { /* ถูกบล็อก */ }
+function saveFormMeta() {
+  try { localStorage.setItem(FORM_KEY, JSON.stringify(formMeta)); } catch { toast(L('จำค่าไว้ในเบราว์เซอร์ไม่ได้ (โลโก้อาจใหญ่เกินไป)', 'Could not remember the settings in this browser (the logo may be too large)')); }
+}
+const todayTH = () => { const d = new Date(); return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`; };
+const stripTags = h => h.replace(/<br\s*\/?>/g, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/[ \t]+/g, ' ').trim();
+
+/** ข้อความเงื่อนไขของแบบ (บรรทัด "- …") */
+function conditionLines(sc) {
+  const cdus = sc.objects.filter(o => o.type === 'cdu');
+  const bySeries = new Map();
+  for (const o of cdus) {
+    const m = getModel(o.model), k = seriesOf(m).label;
+    if (!bySeries.has(k)) bySeries.set(k, new Map());
+    const mm = bySeries.get(k); mm.set(o.model, (mm.get(o.model) || 0) + 1);
+  }
+  const model = [...bySeries].map(([k, mm]) => `${k} (${[...mm].map(([id, n]) => `${id} × ${n}`).join(', ')})`).join(' , ');
+  const lines = [`- Daikin model: ${model || '-'}`];
+  const hood = [...new Set(cdus.filter(o => o.duct > 0).map(o => o.duct))];
+  if (hood.length) lines.push(L(`- ติด Hood ที่ CDU ${cdus.filter(o => o.duct > 0).length} เครื่อง (${hood.map(fmt).join(', ')} ม.)`, `- Hood on ${cdus.filter(o => o.duct > 0).length} CDU(s) (${hood.map(fmt).join(', ')} m)`));
+  lines.push(`- Ambient air temperature : ${sc.site.ambient} C`);
+  const walls = sc.objects.filter(o => o.type === 'wall');
+  const lv = [...new Set(walls.filter(o => o.louver > 0).map(o => o.louver))].sort((a, b) => a - b);
+  if (walls.length) lines.push(lv.length ? `- Louver : Free area ${lv.map(v => `${fmt(v)}%`).join(', ')}` : L('- ผนังทึบ (ไม่มี Louver)', '- Solid walls (no louver)'));
+  if (sc.site.windProfile && sc.site.windProfile !== 'uniform' && WIND_PROFILES[sc.site.windProfile]) lines.push(L(`- โปรไฟล์ลม: ${WIND_PROFILES[sc.site.windProfile].th} · ความสูงอ้างอิง ${sc.site.windRefH} ม. · พื้นที่วางเครื่องสูง ${sc.site.groundElev} ม. จากพื้นดิน`, `- Wind profile: ${WIND_PROFILES[sc.site.windProfile].en} · reference height ${sc.site.windRefH} m · site ${sc.site.groundElev} m above ground`));
+  return lines;
+}
+
+/** ข้อความสภาพลมของผลหนึ่งชุด */
+function condTexts(site, windDir) {
+  const calm = !(site.windSpeed > 0) || windDir === CALM;
+  if (calm) return { label: L('ลม 0.0 m/s (ไม่มีลม)', 'Wind 0.0 m/s (no wind)'), head: 'No Wind' };
+  const v = Number(site.windSpeed).toFixed(1), ab = dirName(site.windDir, true);
+  return { label: L(`ลม ${v} m/s พัดมาจากทิศ ${ab}`, `Wind ${v} m/s from ${ab}`), head: `Wind velocity ${v} m/s (${L(`ลมพัดมาจากทิศ${dirName(site.windDir).replace(/^ลมจากทิศ/, '').replace(/^Wind from /, '')}`, `from ${dirName(site.windDir).replace(/^Wind from /, '')}`)})` };
+}
+
+const unitRows = units => units.map(u => ({ name: u.name, Tin: u.Tin, band: unitBand(u) }));
+
+function formStaticTexts() {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = bandCriteriaHTML();
+  const crit = [...tmp.querySelectorAll('li')].map((li, i) => ({ band: ['green', 'yellow', 'red'][i], text: li.textContent.trim() }));
+  tmp.innerHTML = remarkHTML();
+  const rem = [...tmp.querySelectorAll('li')].map((li, i) => `${i + 1}. ${li.textContent.trim()}`);
+  const p = [...tmp.querySelectorAll('p')].map(x => x.textContent.trim()).filter(t => t && !/^REMARK/.test(t));
+  return { criteria: crit, remark: [...rem, ...p] };
+}
+
+function toggleFormPop(show) {
+  if (show) {
+    const hasBatch = batch.results.some(r => r.ok), hasRun = !!(unitsNow() && !run.stale);
+    if (!hasBatch && !hasRun) { toast(L('ยังไม่มีผล — คำนวณ หรือรัน Batch ก่อน', 'No results yet — run a calculation or a batch first')); return; }
+    if (batch.active) { toast(L('รอ Batch ให้เสร็จก่อน', 'Wait for the batch to finish')); return; }
+    renderFormPop(hasBatch, hasRun);
+  }
+  $('#form-pop').hidden = !show;
+}
+
+function renderFormPop(hasBatch, hasRun) {
+  const m = formMeta;
+  $(`#fm-style-${m.style === 'a4' ? 'a4' : 'board'}`).checked = true;
+  $('#fm-src-batch').disabled = !hasBatch; $('#fm-src-run').disabled = !hasRun;
+  (hasBatch ? $('#fm-src-batch') : $('#fm-src-run')).checked = true;
+  $('#fm-project').value = (batch.results.find(r => r.ok)?.snap.name.split(' — ')[0]) || scene.name;
+  $('#fm-rev').value = m.rev || '';
+  $('#fm-date').value = todayTH();
+  $('#fm-zone').value = '';
+  for (const k of ['simBy', 'soldBy', 'company', 'division']) $(`#fm-${k}`).value = m[k] || '';
+  $('#fm-pressure').checked = !!m.pressure;
+  $('#fm-logo-img').hidden = !m.logo;
+  if (m.logo) $('#fm-logo-img').src = m.logo.url;
+  $('#fm-logo-clear').hidden = !m.logo;
+  const adv = [...$$('#advice li')].map(li => li.textContent.trim()).filter(t => t && !/กด คำนวณ|Press Run/.test(t));
+  $('#fm-notes').value = $('#fm-src-run').checked ? adv.join('\n') : '';
+}
+
+async function exportFormReport() {
+  const m = formMeta;
+  m.style = $('#fm-style-a4').checked ? 'a4' : 'board';
+  for (const k of ['simBy', 'soldBy', 'company', 'division']) m[k] = $(`#fm-${k}`).value.trim();
+  m.rev = $('#fm-rev').value.trim();
+  m.pressure = $('#fm-pressure').checked;
+  saveFormMeta();
+  const fromBatch = $('#fm-src-batch').checked;
+  const project = $('#fm-project').value.trim() || scene.name;
+  const zone = $('#fm-zone').value.trim();
+  const go = $('#fm-go');
+  go.disabled = true;
+  const old = go.innerHTML;
+  go.textContent = L('กำลังสร้างรายงาน…', 'Building the report…');
+  try {
+    const { criteria, remark } = formStaticTexts();
+    const options = [];
+    if (fromBatch) {
+      const ok = batch.results.filter(r => r.ok);
+      const groups = [...new Set(ok.map(r => r.group))];
+      groups.forEach((g, gi) => {
+        const rs = ok.filter(r => r.group === g);
+        const sc = normalizeScene(JSON.parse(rs[0].sceneJSON));
+        const title = `OPTION ${gi + 1}${g ? ` — ${g}` : ''}`;
+        options.push({
+          title, zone: zone ? `${zone}${groups.length > 1 ? ` — Option ${gi + 1}` : ''}` : title, sheetName: `Option ${gi + 1}`,
+          lines: conditionLines(sc), model: batch.model.get(g) || {},
+          conds: rs.map(r => ({ ...condTexts(r.snap.site, r.windDir), shots: r.named || {}, units: unitRows(r.snap.units) })),
+        });
+      });
+    } else {
+      const model = await captureModelShots();
+      const shots = await captureResultShots();
+      const title = zone || 'OPTION 1';
+      options.push({ title, zone: title, sheetName: zone || 'Option 1', lines: conditionLines(scene), model, conds: [{ ...condTexts(scene.site, scene.site.windSpeed > 0 ? scene.site.windDir : CALM), shots, units: unitRows(unitsNow()) }] });
+    }
+    const job = {
+      meta: { project, date: $('#fm-date').value.trim() || todayTH(), rev: m.rev, simBy: m.simBy, soldBy: m.soldBy, company: m.company, division: m.division, logo: m.logo, pressure: m.pressure, notes: $('#fm-notes').value.trim(), criteria, remark },
+      options,
+    };
+    const wb = buildFormReport(job, m.style);
+    download(`${safeName(project)}${m.rev ? `-${safeName(m.rev)}` : ''}-CFD-${m.style === 'a4' ? 'Report-A4' : 'Board-A3'}.xlsx`, wb.toBlob(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    toggleFormPop(false);
+    toast(L('ดาวน์โหลดรายงาน Excel แล้ว — สั่งพิมพ์/บันทึกเป็น PDF จาก Excel ได้ (ตั้งหน้ากระดาษไว้แล้ว)', 'Excel report downloaded — print or save as PDF from Excel (page setup is ready)'), 5000);
+  } catch (e) {
+    toast(L('สร้างรายงานไม่ได้: ', 'Could not build the report: ') + (e.message || e), 6000);
+  } finally { go.disabled = false; go.innerHTML = old; }
+}
+
+function bindFormPop() {
+  for (const id of ['#btn-form', '#bt-form']) $(id)?.addEventListener('click', () => toggleFormPop(true));
+  $('#form-pop .keys-x').addEventListener('click', () => toggleFormPop(false));
+  $('#form-pop').addEventListener('pointerdown', (e) => { if (e.target === e.currentTarget) toggleFormPop(false); });
+  $('#fm-go').addEventListener('click', exportFormReport);
+  $('#fm-logo').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        // ย่อโลโก้ให้สูงไม่เกิน 240 px แล้วเก็บเป็น PNG
+        const k = Math.min(1, 240 / im.height), cv = document.createElement('canvas');
+        cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k);
+        cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
+        formMeta.logo = { url: cv.toDataURL('image/png'), w: cv.width, h: cv.height };
+        saveFormMeta();
+        $('#fm-logo-img').src = formMeta.logo.url; $('#fm-logo-img').hidden = false; $('#fm-logo-clear').hidden = false;
+      };
+      im.src = String(rd.result);
+    };
+    rd.readAsDataURL(f);
+  });
+  $('#fm-logo-clear').addEventListener('click', () => { formMeta.logo = null; saveFormMeta(); $('#fm-logo-img').hidden = true; $('#fm-logo-clear').hidden = true; });
+  $$('input[name="fm-src"]').forEach(el => el.addEventListener('change', () => {
+    const adv = [...$$('#advice li')].map(li => li.textContent.trim()).filter(t => t && !/กด คำนวณ|Press Run/.test(t));
+    $('#fm-notes').value = $('#fm-src-run').checked ? adv.join('\n') : '';
+  }));
+}
+
 function download(name, data, type) {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const a = document.createElement('a');
@@ -2529,6 +2791,7 @@ function bindUI() {
   $('#btn-reset').addEventListener('click', () => (batch.active ? cancelBatch() : resetResults()));
   bindBatch();
   bindDxf();
+  bindFormPop();
   $('#btn-edit').addEventListener('click', () => setEditUnlocked(modelLocked()));
   $('#btn-save').addEventListener('click', saveProject);
   $('#btn-open').addEventListener('click', () => $('#file-open').click());
@@ -2624,6 +2887,7 @@ function bindUI() {
     if (!$('#report-pop').hidden) { if (k === 'escape') toggleReportPop(false); return; }
     if (!$('#batch-pop').hidden) { if (k === 'escape') toggleBatchPop(false); return; }
     if (!$('#dxf-pop').hidden) { if (k === 'escape') toggleDxfPop(false); return; }
+    if (!$('#form-pop').hidden) { if (k === 'escape') toggleFormPop(false); return; }
     if (k === 'f8') { e.preventDefault(); setOrtho(!ortho); return; }
     if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if (ctrl && k === 'c') { if (selected()) { e.preventDefault(); copySelected(); } }
