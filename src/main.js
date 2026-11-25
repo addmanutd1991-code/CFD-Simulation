@@ -46,6 +46,7 @@ const viewer = new Viewer($('#viewport'), {
   onCreate: (type, props) => createObject(type, props),
   onSectionMoved: (pos) => syncSectionUI(pos),
   onProbe: (info) => showProbe(info),
+  onAxisView: (v) => setViewUI(v),
   newCduModel: () => lastUsed.model,
   newCduRot: () => lastUsed.rot,
   newWallHeight: () => lastUsed.wallHeight,
