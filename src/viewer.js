@@ -101,6 +101,7 @@ export class Viewer {
     this.#initGlyphs();
     this.#initInput();
     this.#initPopup();
+    this.#initGizmo();
 
     this.ray = new THREE.Raycaster();
     this.ndc = new THREE.Vector2();
@@ -137,7 +138,7 @@ export class Viewer {
   setView(view) {
     if (view === 'py') view = 'top';
     if (view === 'side') view = 's';
-    if (!COMPASS_VIEWS[view] && !AXIS_VIEWS[view] && view !== 'top') view = '3d';
+    if (!COMPASS_VIEWS[view] && !AXIS_VIEWS[view] && view !== 'top' && view !== 'iso') view = '3d';
     this.view = view;
     const axis = view === 'top' ? 'py' : view;
     const d = this.dom;
@@ -146,6 +147,37 @@ export class Viewer {
     const c = this.controls;
     c.maxPolarAngle = Math.PI * 0.495;
     this.gGround.visible = view !== 'ny';   // มองจากใต้พื้น: ซ่อนพื้นไม่ให้บังโมเดล
+    if (view === 'iso') {
+      // Isometric: ภาพฉายตั้งฉาก มองจากมุม (+X, +Y, +Z) ทำมุมเท่ากันทั้งสามแกน — ยังหมุนต่อได้
+      const dir = new THREE.Vector3(1, 1, 1).normalize();
+      const ctr = new THREE.Vector3(cx, d.H / 2, cz);
+      const R = 300;
+      this.camera = this.ortho;
+      c.object = this.ortho;
+      this.ortho.position.copy(ctr).addScaledVector(dir, R);
+      this.ortho.up.set(0, 1, 0);
+      this.ortho.lookAt(ctr);
+      this.ortho.updateMatrixWorld();
+      // พอดีกรอบโดเมน: ฉายมุมทั้ง 8 ของกล่องลงแกนขวา/บนของกล้อง
+      const right = new THREE.Vector3().setFromMatrixColumn(this.ortho.matrixWorld, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(this.ortho.matrixWorld, 1);
+      let hw = 0, hh = 0;
+      for (const x of [d.ox, d.ox + d.W]) for (const y of [0, d.H]) for (const z of [d.oz, d.oz + d.D]) {
+        const v = new THREE.Vector3(x, y, z).sub(ctr);
+        hw = Math.max(hw, Math.abs(v.dot(right))); hh = Math.max(hh, Math.abs(v.dot(up)));
+      }
+      const w = this.host.clientWidth || 1, h = this.host.clientHeight || 1;
+      this.orthoSize = Math.max(2 * hh, 2 * hw * h / w) * 1.12;
+      c.target.copy(ctr);
+      c.maxPolarAngle = Math.PI;
+      this.ortho.zoom = 1;
+      this.#fitOrtho();
+      c.enableRotate = true;
+      c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+      this.camera.updateProjectionMatrix();
+      c.update();
+      return;
+    }
     if (AXIS_VIEWS[axis]) {
       // มองตามแกน (ภาพฉายตั้งฉาก) — ยังหมุนต่อได้ด้วยการลากซ้าย
       const [dx, dy, dz] = AXIS_VIEWS[axis];
@@ -2168,6 +2200,112 @@ export class Viewer {
     this.renderer.render(this.scene3, this.camera);
     this.#placeLabels();
     this.#placePopup();
+    this.#drawGizmo();
+  }
+
+  /* ───────── แกน X-Y-Z มุมขวาล่าง (คลิกปลายแกนเพื่อมองตามแกน) ───────── */
+
+  #initGizmo() {
+    const cv = this.gizmo = document.createElement('canvas');
+    cv.className = 'axis-gizmo';
+    cv.setAttribute('role', 'img');
+    this.host.appendChild(cv);
+    this.gzHover = null;
+    this.gzKey = '';
+    this.gzHits = [];
+    const pick = (e) => {
+      const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      let best = null, bd = 1e9;
+      for (const h of this.gzHits) {
+        const d = Math.hypot(h.x - x, h.y - y);
+        if (d <= h.r + 3 && d < bd) { bd = d; best = h; }
+      }
+      return best;
+    };
+    cv.addEventListener('pointermove', (e) => {
+      const h = pick(e);
+      const id = h?.id ?? null;
+      if (id !== this.gzHover) { this.gzHover = id; this.gzKey = ''; }
+      cv.style.cursor = h ? 'pointer' : 'default';
+      cv.title = h ? (h.id === '3d' ? tr('กลับมุมมอง 3D', 'Back to the 3D view') : tr(`มองจากด้าน ${h.label}`, `View from ${h.label}`)) : tr('คลิกปลายแกนเพื่อมองตามแกน', 'Click an axis end to look along it');
+    });
+    // ไม่ให้คลิกบนแกนทะลุไปเลือก/วางวัตถุ หรือเริ่มหมุนภาพ
+    for (const ev of ['pointerdown', 'pointerup', 'dblclick', 'wheel', 'contextmenu']) cv.addEventListener(ev, (e) => e.stopPropagation(), { passive: ev !== 'contextmenu' });
+    cv.addEventListener('pointerleave', () => { this.gzHover = null; this.gzKey = ''; });
+    cv.addEventListener('click', (e) => {
+      const h = pick(e);
+      if (!h) return;
+      if (this.cb.onAxisView) this.cb.onAxisView(h.id);
+      else this.setView(h.id);
+    });
+  }
+
+  #drawGizmo() {
+    const cv = this.gizmo;
+    if (!cv || !cv.offsetParent) return;
+    const S = cv.clientWidth || 96, dpr = Math.min(2, window.devicePixelRatio || 1);
+    const q = this.camera.quaternion;
+    const key = [q.x, q.y, q.z, q.w].map(v => v.toFixed(4)).join() + this.light + this.view + this.gzHover + S + dpr + tr('t', 'e');
+    if (key === this.gzKey) return;
+    this.gzKey = key;
+    if (cv.width !== Math.round(S * dpr)) { cv.width = cv.height = Math.round(S * dpr); }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, S, S);
+    const c = S / 2, L = S * 0.34, rPos = S * 0.095, rNeg = S * 0.088;
+    const inv = q.clone().invert();
+    const light = this.light;
+    const COL = { x: light ? '#d8343d' : '#ff5a5f', y: light ? '#1f9a3c' : '#4cd964', z: light ? '#2a62d4' : '#4f8dff' };
+    const active = this.view === 'top' ? 'py' : this.view;
+    const items = [];
+    for (const [ax, vec] of [['x', [1, 0, 0]], ['y', [0, 1, 0]], ['z', [0, 0, 1]]]) {
+      for (const sgn of [1, -1]) {
+        const v = new THREE.Vector3(vec[0] * sgn, vec[1] * sgn, vec[2] * sgn).applyQuaternion(inv);
+        const id = (sgn > 0 ? 'p' : 'n') + ax;
+        items.push({ id, ax, sgn, x: c + v.x * L, y: c - v.y * L, z: v.z, r: sgn > 0 ? rPos : rNeg,
+          label: (sgn > 0 ? '+' : '−') + ax.toUpperCase() });
+      }
+    }
+    // วาดจากด้านหลังไปหน้า
+    items.sort((a, b) => a.z - b.z);
+    g.lineCap = 'round';
+    for (const it of items) {
+      if (it.sgn < 0) continue;
+      g.strokeStyle = COL[it.ax]; g.lineWidth = 2.2; g.globalAlpha = it.z < -0.2 ? 0.55 : 1;
+      g.beginPath(); g.moveTo(c, c); g.lineTo(it.x, it.y); g.stroke();
+    }
+    g.globalAlpha = 1;
+    // จุดกลาง = กลับมุมมอง 3D
+    const hubOn = this.gzHover === '3d';
+    g.fillStyle = hubOn ? (light ? '#0b84c4' : '#4fc3f7') : (light ? 'rgba(23,36,46,.55)' : 'rgba(219,230,237,.6)');
+    g.beginPath(); g.arc(c, c, S * 0.045, 0, Math.PI * 2); g.fill();
+    this.gzHits = [{ id: '3d', x: c, y: c, r: S * 0.06 }];
+    const font = Math.round(S * 0.105);
+    for (const it of items) {
+      const hov = this.gzHover === it.id, on = active === it.id, col = COL[it.ax];
+      const r = it.r * (hov ? 1.18 : 1);
+      g.globalAlpha = it.z < -0.2 && !hov ? 0.7 : 1;
+      g.beginPath(); g.arc(it.x, it.y, r, 0, Math.PI * 2);
+      if (it.sgn > 0) {
+        g.fillStyle = col; g.fill();
+        if (on || hov) { g.lineWidth = 2; g.strokeStyle = light ? '#17242e' : '#ffffff'; g.stroke(); }
+        g.fillStyle = '#ffffff';
+        g.font = `700 ${font}px "IBM Plex Sans", system-ui, sans-serif`;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(it.ax.toUpperCase(), it.x, it.y + 0.5);
+      } else {
+        g.fillStyle = hov || on ? col : (light ? 'rgba(255,255,255,.85)' : 'rgba(10,17,23,.85)'); g.fill();
+        g.lineWidth = on ? 2.4 : 1.6; g.strokeStyle = col; g.stroke();
+        g.fillStyle = hov || on ? '#ffffff' : col;
+        g.font = `700 ${Math.round(font * 0.72)}px "IBM Plex Sans", system-ui, sans-serif`;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText('−' + it.ax.toUpperCase(), it.x, it.y + 0.5);
+      }
+      this.gzHits.push({ id: it.id, label: it.label, x: it.x, y: it.y, r: it.r * 1.15, z: it.z });
+    }
+    g.globalAlpha = 1;
+    // ปุ่มที่อยู่ด้านหน้ามาก่อนเมื่อทับกัน
+    this.gzHits.sort((a, b) => (b.z ?? 2) - (a.z ?? 2));
   }
 
   #placeLabels() {
