@@ -138,7 +138,7 @@ export class Viewer {
   setView(view) {
     if (view === 'py') view = 'top';
     if (view === 'side') view = 's';
-    if (!COMPASS_VIEWS[view] && !AXIS_VIEWS[view] && view !== 'top') view = '3d';
+    if (!COMPASS_VIEWS[view] && !AXIS_VIEWS[view] && view !== 'top' && view !== 'iso') view = '3d';
     this.view = view;
     const axis = view === 'top' ? 'py' : view;
     const d = this.dom;
@@ -147,6 +147,37 @@ export class Viewer {
     const c = this.controls;
     c.maxPolarAngle = Math.PI * 0.495;
     this.gGround.visible = view !== 'ny';   // มองจากใต้พื้น: ซ่อนพื้นไม่ให้บังโมเดล
+    if (view === 'iso') {
+      // Isometric: ภาพฉายตั้งฉาก มองจากมุม (+X, +Y, +Z) ทำมุมเท่ากันทั้งสามแกน — ยังหมุนต่อได้
+      const dir = new THREE.Vector3(1, 1, 1).normalize();
+      const ctr = new THREE.Vector3(cx, d.H / 2, cz);
+      const R = 300;
+      this.camera = this.ortho;
+      c.object = this.ortho;
+      this.ortho.position.copy(ctr).addScaledVector(dir, R);
+      this.ortho.up.set(0, 1, 0);
+      this.ortho.lookAt(ctr);
+      this.ortho.updateMatrixWorld();
+      // พอดีกรอบโดเมน: ฉายมุมทั้ง 8 ของกล่องลงแกนขวา/บนของกล้อง
+      const right = new THREE.Vector3().setFromMatrixColumn(this.ortho.matrixWorld, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(this.ortho.matrixWorld, 1);
+      let hw = 0, hh = 0;
+      for (const x of [d.ox, d.ox + d.W]) for (const y of [0, d.H]) for (const z of [d.oz, d.oz + d.D]) {
+        const v = new THREE.Vector3(x, y, z).sub(ctr);
+        hw = Math.max(hw, Math.abs(v.dot(right))); hh = Math.max(hh, Math.abs(v.dot(up)));
+      }
+      const w = this.host.clientWidth || 1, h = this.host.clientHeight || 1;
+      this.orthoSize = Math.max(2 * hh, 2 * hw * h / w) * 1.12;
+      c.target.copy(ctr);
+      c.maxPolarAngle = Math.PI;
+      this.ortho.zoom = 1;
+      this.#fitOrtho();
+      c.enableRotate = true;
+      c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+      this.camera.updateProjectionMatrix();
+      c.update();
+      return;
+    }
     if (AXIS_VIEWS[axis]) {
       // มองตามแกน (ภาพฉายตั้งฉาก) — ยังหมุนต่อได้ด้วยการลากซ้าย
       const [dx, dy, dz] = AXIS_VIEWS[axis];
