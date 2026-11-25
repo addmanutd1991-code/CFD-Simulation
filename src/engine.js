@@ -44,18 +44,19 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
       while (performance.now() - t0 < slice) {
         await s.step();
         if (solver !== s || !running) break;
-        if (s.converged || s.time >= s.tMax) break;
+        if (s.limitReached()) break;
       }
       if (solver !== s) return;          // ถูกเริ่มใหม่/ยกเลิกระหว่างรอ GPU
       const now = performance.now();
-      const done = s.converged || s.time >= s.tMax;
+      s.wallRun += now - t0;
+      const done = s.limitReached();
       if (done) running = false;
       // เมชใหญ่: ส่งสนามค่าไปแสดงผลห่างขึ้น (สำเนา 24 ไบต์ต่อเซลล์ต่อครั้ง) — ราว 0.4 วินาทีต่อล้านเซลล์
       const wantFields = done || now - lastField > Math.max(fieldEvery, s.N * 4e-4);
       if (wantFields) lastField = now;
       await send(wantFields);
       if (solver !== s) return;
-      if (done) post({ type: 'done', reason: s.converged ? 'converged' : 'limit', report: s.report() });
+      if (done) post({ type: 'done', reason: s.converged ? 'converged' : 'limit', mode: s.stop.mode, report: s.report() });
       else if (running) timer = setTimeout(loop, 0);
     } catch (err) {
       if (solver === s) fail(err);
@@ -118,8 +119,8 @@ export function createEngine(post, { slice = 120, fieldEvery = 450 } = {}) {
     } else if (msg.cmd === 'run') {
       if (!solver) return;
       if (msg.tMax) solver.tMax = msg.tMax;
-      // สั่งเดินต่อหลังชนเพดานเวลา → ขยายเพดานออกไปอีกเท่าเดิม
-      if (solver.time >= solver.tMax) solver.tMax = solver.time + (msg.tMax || 600);
+      // สั่งเดินต่อหลังครบเงื่อนไขหยุด → ขยายออกไปอีกเท่าค่าตั้งต้น (รอบ / เวลาจำลอง / เวลาจริง / เพดานเวลา)
+      if (solver.limitReached()) solver.extendStop(msg.tMax || 600);
       running = true;
       if (!timer && !busy) timer = setTimeout(loop, 0);
     } else if (msg.cmd === 'pause') {

@@ -705,6 +705,7 @@ function renderSettings() {
   for (const [sel, g, k] of SETTINGS) $(sel).value = scene[g][k];
   $('#s-grade').value = scene.sim.grade === 'uniform' ? 'uniform' : 'auto';
   renderWindProfile();
+  renderStop();
   $('#p-kcap').value = round2(scene.perf.kCap * 100);
   $('#p-kpow').value = round2(scene.perf.kPow * 100);
   $('#proj-name').value = scene.name;
@@ -760,6 +761,74 @@ function bindBands() {
 }
 
 /** แผงโปรไฟล์ลม: ซ่อนช่องความสูงเมื่อเป็นลมสม่ำเสมอ และแสดงความเร็วที่ระดับต่าง ๆ ในโดเมน */
+/* ───────── เงื่อนไขหยุดการคำนวณ ─────────
+ * ค่าแนะนำ: ลมต้องพัดผ่านโดเมนราว 3 รอบ (ล้างสภาพเริ่มต้น) + 60 s ให้ลมร้อนสะสมและเฉลี่ยผล 20 s สุดท้าย
+ *   T ≈ 60 + 3 · L / U   (L = เส้นทแยงโดเมนแนวนอน, U = ความเร็วลม หรือ 0.6 m/s เมื่อไม่มีลม — ลมพาจากแรงลอยตัว/พัดลม)
+ *   จำนวนรอบ ≈ T / Δt (Δt ≈ 0.25·h จากเงื่อนไข CFL ของลมพัดลม) · เวลาจริงจากความเร็วที่วัดได้ล่าสุดหรือสูตรประมาณ */
+/** Δt โดยประมาณต่อขนาดเซลล์ (s/ม.) — วัดจากตัวอย่างสำเร็จรูป: Δt ≈ 0.12·h (ลมพัดลมของ CDU กำหนด CFL) */
+const DT_PER_H = 0.12;
+
+function recommendStop(sc = scene) {
+  const d = domainOf(sc);
+  const L = Math.hypot(d.W, d.D);
+  const U = sc.site.windSpeed > 0 ? Math.max(0.5, sc.site.windSpeed * windFactorFn(windParams(sc.site))(2)) : 0.6;
+  const T = Math.min(1200, Math.max(90, Math.round((60 + 3 * L / U) / 10) * 10));
+  const dt = (run.report?.dt && run.mesh && Math.abs(run.mesh.h - d.h) < 1e-9) ? run.report.dt : DT_PER_H * d.h;
+  const steps = Math.ceil(T / dt / 100) * 100;
+  const th = run.threads || 1;
+  // ความเร็วที่วัดได้ (วินาทีจำลองต่อวินาทีจริง) ใช้เมื่อเป็นเมชเดียวกัน ไม่เช่นนั้นใช้สูตรประมาณเดียวกับหน้าตั้งค่า
+  const measured = run.rate && run.mesh && Math.abs(run.mesh.h - d.h) < 1e-9 && backend === (run.report?.backend || 'cpu');
+  const wallSec = measured ? T / run.rate : d.cells * 0.33e-6 * (T / dt) / Math.max(1, 0.6 * th);
+  return { T, steps, dt, wallSec, wallMin: Math.max(1, Math.ceil(wallSec / 60)), L, U, measured };
+}
+
+/** เงื่อนไขหยุดที่ส่งให้ solver (ช่องที่เว้นว่าง = ค่าแนะนำ) */
+function stopParams(sc = scene) {
+  const s = sc.sim, rec = recommendStop(sc);
+  return { mode: s.stopMode || 'converge', time: s.stopTime || rec.T, steps: s.stopSteps || rec.steps, wall: s.stopWall || rec.wallMin, early: s.stopEarly !== false };
+}
+
+function renderStop() {
+  const s = scene.sim, mode = s.stopMode || 'converge', rec = recommendStop();
+  $('#s-stop').value = mode;
+  $('#s-conv').value = s.conv || 'standard';
+  $('#s-stime').value = s.stopTime || '';
+  $('#s-steps').value = s.stopSteps || '';
+  $('#s-wall').value = s.stopWall || '';
+  $('#s-stime').placeholder = rec.T; $('#s-steps').placeholder = rec.steps; $('#s-wall').placeholder = rec.wallMin;
+  $('#s-early').checked = s.stopEarly !== false;
+  $$('.stop-only').forEach(el => { el.hidden = el.classList.contains('stop-fixed') ? mode === 'converge' : el.dataset.stop !== mode; });
+  const wall = fmtDur(rec.wallSec);
+  $('#stop-rec').textContent = L(
+    `แนะนำ: เวลาจำลอง ≈ ${rec.T} s ≈ ${rec.steps.toLocaleString()} รอบ (Δt ≈ ${rec.dt.toFixed(3)} s) · ใช้เวลาคำนวณจริง ≈ ${wall}${rec.measured ? ' (จากความเร็วที่วัดได้)' : ' (ประมาณ)'} — ลมผ่านโดเมนยาว ${fmt(rec.L)} ม. ที่ ${fmt(rec.U)} m/s ราว 3 รอบ + 60 s`,
+    `Recommended: simulated time ≈ ${rec.T} s ≈ ${rec.steps.toLocaleString()} iterations (Δt ≈ ${rec.dt.toFixed(3)} s) · real computing time ≈ ${wall}${rec.measured ? ' (from the measured speed)' : ' (estimate)'} — about 3 passes of air across the ${fmt(rec.L)} m domain at ${fmt(rec.U)} m/s + 60 s`);
+  $('#btn-stop-rec').hidden = mode === 'converge';
+}
+
+function bindStop() {
+  $('#s-stop').addEventListener('change', (e) => edit(() => { scene.sim.stopMode = e.target.value; }, false));
+  $('#s-conv').addEventListener('change', (e) => edit(() => { scene.sim.conv = e.target.value; }, false));
+  for (const [id, k] of [['#s-stime', 'stopTime'], ['#s-steps', 'stopSteps'], ['#s-wall', 'stopWall']]) {
+    $(id).addEventListener('change', (e) => {
+      const v = parseFloat(e.target.value);
+      edit(() => { scene.sim[k] = isFinite(v) && v > 0 ? v : 0; }, false);
+    });
+  }
+  $('#s-early').addEventListener('change', (e) => edit(() => { scene.sim.stopEarly = e.target.checked; }, false));
+  $('#btn-stop-rec').addEventListener('click', () => {
+    const rec = recommendStop();
+    edit(() => { scene.sim.stopTime = rec.T; scene.sim.stopSteps = rec.steps; scene.sim.stopWall = rec.wallMin; }, false);
+  });
+}
+
+/** ข้อความเงื่อนไขหยุด (สั้น) */
+function stopText(st) {
+  if (!st || st.mode === 'converge') return L('หยุดเมื่อลู่เข้า', 'stop on convergence');
+  return st.mode === 'steps' ? L(`ครบ ${Math.round(st.steps).toLocaleString()} รอบ`, `${Math.round(st.steps).toLocaleString()} iterations`)
+    : st.mode === 'time' ? L(`ครบเวลาจำลอง ${Math.round(st.time)} s`, `${Math.round(st.time)} s simulated`)
+      : L(`ครบเวลาคำนวณจริง ${fmt(st.wall)} นาที`, `${fmt(st.wall)} min real time`);
+}
+
 function renderWindProfile() {
   const site = scene.site, prof = WIND_PROFILES[site.windProfile] ? site.windProfile : 'uniform';
   $('#s-wprof').value = prof;
@@ -852,11 +921,12 @@ const BIG_MESH = 2.5e6;
 
 function updateEstimate() {
   const d = domainOf(scene);
-  // โดยทั่วไปลู่เข้าในช่วง 60–150 วินาทีจำลอง — ประมาณที่ 120 s
-  const steps = 120 / (0.25 * d.h);
+  // เวลาจำลองตามเงื่อนไขหยุดที่เลือก (โหมดลู่เข้า: ค่าแนะนำ)
+  const sp = stopParams();
+  const steps = sp.mode === 'steps' ? sp.steps : (sp.mode === 'time' ? sp.time : recommendStop().T) / (DT_PER_H * d.h);
   // ≈0.33 µs ต่อเซลล์ต่อสเต็ปต่อเธรด; หลายเธรดเร็วขึ้นราว 0.6 เท่าของจำนวนเธรด (จำกัดด้วยความเร็วหน่วยความจำ)
   const th = run.threads || 1;
-  const sec = d.cells * 0.33e-6 * steps / Math.max(1, 0.6 * th);
+  const sec = sp.mode === 'wall' ? sp.wall * 60 : d.cells * 0.33e-6 * steps / Math.max(1, 0.6 * th);
   const el = $('#mesh-info');
   const saved = d.graded && d.cellsUniform > d.cells * 1.05
     ? L(` (เมชปรับความละเอียดอัตโนมัติ — ลดจาก ${fmtK(d.cellsUniform)} เซลล์ ${(d.cellsUniform / d.cells).toFixed(1)} เท่า · เซลล์ ${fmt(d.h)}–${fmt(d.hMax)} ม.)`, ` (adaptive mesh — down from ${fmtK(d.cellsUniform)} cells, ${(d.cellsUniform / d.cells).toFixed(1)}× fewer · cells ${fmt(d.h)}–${fmt(d.hMax)} m)`) : '';
@@ -877,7 +947,7 @@ function startOrToggle() {
     updateRunUI();
     return;
   }
-  if (run.state === 'done' && run.report?.converged && !run.stale) {
+  if (run.state === 'done' && run.report?.converged && (run.report?.stop?.mode || 'converge') === 'converge' && !run.stale) {
     toast(L('ผลลู่เข้าแล้ว — แก้แบบหรือกด รีเซ็ตผล เพื่อคำนวณใหม่', 'Already converged — edit the model or press Reset results to run again'));
     return;
   }
@@ -928,7 +998,7 @@ function startNewRun(quiet = false) {
 
 /** พารามิเตอร์ที่ส่งให้ solver จากฉาก */
 function simParams(sc) {
-  return { ambient: sc.site.ambient, windSpeed: sc.site.windSpeed, windDir: sc.site.windDir, wind: windParams(sc.site), perf: sc.perf, tMax: sc.sim.tMax };
+  return { ambient: sc.site.ambient, windSpeed: sc.site.windSpeed, windDir: sc.site.windDir, wind: windParams(sc.site), perf: sc.perf, tMax: sc.sim.tMax, stop: stopParams(sc), convLevel: sc.sim.conv || 'standard' };
 }
 
 function resetResults() {
@@ -995,8 +1065,12 @@ function onEngineMessage(msg) {
   }
   if (msg.type === 'done') {
     run.state = 'done';
+    setTimeout(renderStop, 0);
     const conv = msg.reason === 'converged';
-    toast(conv ? L(`ลู่เข้าแล้วที่ t = ${msg.report.time.toFixed(0)} s`, `Converged at t = ${msg.report.time.toFixed(0)} s`) : L(`ถึงเพดานเวลา ${msg.report.time.toFixed(0)} s แต่ยังไม่ลู่เข้า — กดคำนวณต่อได้`, `Reached the ${msg.report.time.toFixed(0)} s time cap without converging — press Run to continue`), 5000);
+    const rp = msg.report, at = L(`t = ${rp.time.toFixed(0)} s · ${rp.steps.toLocaleString()} รอบ · ใช้เวลา ${fmtDur((rp.wall || 0) / 1000)}`, `t = ${rp.time.toFixed(0)} s · ${rp.steps.toLocaleString()} iterations · ${fmtDur((rp.wall || 0) / 1000)}`);
+    toast(msg.mode && msg.mode !== 'converge'
+      ? (conv ? L(`ลู่เข้าแล้ว — ${at}`, `Converged — ${at}`) : L(`ครบเงื่อนไขหยุด (${stopText(rp.stop)}) แต่ยังไม่ลู่เข้า — ${at} · กดคำนวณต่อได้`, `Stop condition reached (${stopText(rp.stop)}), not converged — ${at} · press Run to continue`))
+      : (conv ? L(`ลู่เข้าแล้ว — ${at}`, `Converged — ${at}`) : L(`ถึงเพดานเวลา ${rp.time.toFixed(0)} s แต่ยังไม่ลู่เข้า — กดคำนวณต่อได้`, `Reached the ${rp.time.toFixed(0)} s time cap without converging — press Run to continue`)), 6000);
     addComparison();
   }
   renderResults();
@@ -1115,7 +1189,11 @@ function updateRunUI() {
   const setRun = (icon, label) => { $('#run-ic').setAttribute('href', `#i-${icon}`); $('#run-label').textContent = label; };
   if (run.state === 'running') setRun('pause', L('หยุด', 'Pause'));
   else if (run.state === 'paused' && !run.stale) setRun('play', L('คำนวณต่อ', 'Resume'));
-  else if (run.state === 'done' && !run.stale) r?.converged ? setRun('check', L('ลู่เข้าแล้ว', 'Converged')) : setRun('play', L('คำนวณต่อจนลู่เข้า', 'Continue to convergence'));
+  else if (run.state === 'done' && !run.stale) {
+    const fixed = (r?.stop?.mode || 'converge') !== 'converge';
+    if (r?.converged && !fixed) setRun('check', L('ลู่เข้าแล้ว', 'Converged'));
+    else setRun('play', fixed ? L('คำนวณต่อ', 'Continue') : L('คำนวณต่อจนลู่เข้า', 'Continue to convergence'));
+  }
   else setRun('play', L('คำนวณ', 'Run'));
   $('#btn-reset').hidden = !run.mesh;
   updateLockUI();
@@ -1127,13 +1205,17 @@ function updateRunUI() {
   if (run.stale) text = L('แบบเปลี่ยน — กดคำนวณใหม่', 'Model changed — run again');
   else if (run.state === 'running') text = t < 0.01 ? L('กำลังเตรียมเมช…', 'Building mesh…') : L('กำลังคำนวณ', 'Running');
   else if (run.state === 'paused') text = L('หยุดชั่วคราว', 'Paused');
-  else if (run.state === 'done') text = r?.converged ? L('ลู่เข้าแล้ว ✓', 'Converged ✓') : L('ถึงเพดานเวลา (ยังไม่ลู่เข้า)', 'Time cap reached (not converged)');
+  else if (run.state === 'done') text = r?.converged ? L('ลู่เข้าแล้ว ✓', 'Converged ✓') : (r?.stop?.mode || 'converge') !== 'converge' ? L('ครบเงื่อนไขหยุด (ยังไม่ลู่เข้า)', 'Stop condition reached (not converged)') : L('ถึงเพดานเวลา (ยังไม่ลู่เข้า)', 'Time cap reached (not converged)');
   $('#st-text').textContent = text;
   // ความคืบหน้า = เกณฑ์ลู่เข้าที่ผ่าน + จำนวนครั้งที่ผ่านต่อเนื่อง
   let prog = 0;
-  if (r?.converged) prog = 1;
+  const fixedStop = r?.stop && r.stop.mode !== 'converge';
+  if (fixedStop) prog = Math.min(1, r.progress ?? 0);
+  else if (r?.converged) prog = 1;
   else if (ck) prog = (nPass / nAll) * 0.8 + (r.hold / r.conv.hold) * 0.2;
-  $('#st-time').textContent = r ? `t ${t.toFixed(1)} s · ${L('เกณฑ์', 'checks')} ${r.converged ? nAll : nPass}/${nAll}` : 't 0.0 s';
+  const target = !fixedStop ? '' : r.stop.mode === 'steps' ? ` · ${L('รอบ', 'it.')} ${r.steps.toLocaleString()}/${Math.round(r.stop.steps).toLocaleString()}`
+    : r.stop.mode === 'time' ? ` / ${Math.round(r.stop.time)} s` : ` · ${fmtDur((r.wall || 0) / 1000)} / ${fmtDur(r.stop.wall * 60)}`;
+  $('#st-time').textContent = r ? `t ${t.toFixed(1)} s${target} · ${L('เกณฑ์', 'checks')} ${r.converged ? nAll : nPass}/${nAll}` : 't 0.0 s';
   $('#st-bar').style.width = `${Math.min(100, prog * 100)}%`;
   if (run.state === 'running' && r) $('#estimate').textContent = isFinite(r.drift)
     ? L(`ΔT ลมเข้าเปลี่ยน ±${r.drift.toFixed(3)} °C (เป้า ≤ ${r.conv.drift})`, `Inlet T drift ±${r.drift.toFixed(3)} °C (target ≤ ${r.conv.drift})`) : L('กำลังสะสมข้อมูลเพื่อตรวจการลู่เข้า…', 'Collecting data for the convergence check…');
@@ -1229,6 +1311,7 @@ function renderQuality() {
   const C = r.conv, ck = r.checks || {};
   const mark = (ok) => ok ? '✓ ' : '✗ ';
   const bal = r.balance.ratio;
+  q.push([L('เงื่อนไขหยุด', 'Stop condition'), `${stopText(r.stop)} · ${L('เดินไป', 'ran')} ${r.steps.toLocaleString()} ${L('รอบ', 'iterations')} · ${fmtDur((r.wall || 0) / 1000)}`]);
   q.push([L('<b>เกณฑ์ลู่เข้า</b>', '<b>Convergence criteria</b>'), r.converged ? L('<b>ผ่านครบ ✓</b>', '<b>All passed ✓</b>') : L(`ผ่านต่อเนื่อง ${r.hold}/${C.hold} ครั้ง`, `${r.hold}/${C.hold} consecutive passes`), r.converged ? 'good' : '']);
   q.push([`${mark(ck.time)}${L('เวลาจำลอง', 'Simulated time')} ≥ ${C.tMin} s`, `${r.time.toFixed(1)} s`, cls(ck.time)]);
   q.push([`${mark(ck.drift)}${L('T ลมเข้าเปลี่ยน', 'Inlet T drift')} ≤ ±${C.drift} °C`, isFinite(r.drift) ? `±${r.drift.toFixed(3)} °C` : L('รอข้อมูล 20 s', 'waiting for 20 s of data'), cls(ck.drift)]);
@@ -1274,7 +1357,9 @@ function renderAdvice(units) {
   if (!out.length) out.push(L('<li><b class="st-ok">ทุกเครื่อง ΔT &lt; 1 °C</b> — ลมร้อนวนกลับน้อย ผังนี้ใช้ได้ในเงื่อนไขที่ตั้งไว้</li>', '<li><b class="st-ok">All units ΔT &lt; 1 °C</b> — little recirculation; this layout works under the set conditions</li>'));
   const r = run.report;
   if (run.mesh.h >= 0.45) out.push(L('<li class="muted">ผลจากเมชหยาบ (0.5 ม.) ใช้ร่างผังเท่านั้น — ยืนยันด้วยเซลล์ 0.25–0.35 ม.</li>', '<li class="muted">Results from a coarse mesh (0.5 m) are for sketching only — confirm with 0.25–0.35 m cells</li>'));
-  if (run.state === 'done' && !r.converged) out.push(L('<li class="muted">ถึงเพดานเวลาแต่ยังไม่ลู่เข้า — กด "คำนวณต่อจนลู่เข้า" หรือเพิ่มเพดานเวลาในหัวข้อขั้นสูง</li>', '<li class="muted">Time cap reached without converging — press "Continue to convergence" or raise the time cap under Advanced</li>'));
+  if (run.state === 'done' && !r.converged) out.push((r.stop?.mode || 'converge') !== 'converge'
+    ? L(`<li class="muted">หยุดตามเงื่อนไข (${stopText(r.stop)}) ก่อนผลลู่เข้า — ตัวเลขเป็นค่าเฉลี่ย ${r.avgWindow.toFixed(0)} s สุดท้าย อาจยังเปลี่ยนได้อีก · กด "คำนวณต่อ" เพื่อเดินต่ออีกเท่าเดิม</li>`, `<li class="muted">Stopped by the set condition (${stopText(r.stop)}) before converging — figures are the mean of the last ${r.avgWindow.toFixed(0)} s and may still change · press "Continue" to run the same amount again</li>`)
+    : L('<li class="muted">ถึงเพดานเวลาแต่ยังไม่ลู่เข้า — กด "คำนวณต่อจนลู่เข้า" ลดเกณฑ์ลู่เข้าเป็น "มาตรฐาน" / "เร็ว" หรือเพิ่มเพดานเวลาในหัวข้อขั้นสูง</li>', '<li class="muted">Time cap reached without converging — press "Continue to convergence", use the "Standard" / "Fast" convergence criterion, or raise the time cap under Advanced</li>'));
   if (!(scene.site.windSpeed > 0)) out.push(L('<li class="muted">คำนวณแบบไม่มีลม (มักเป็นกรณีแย่ที่สุด) — ลองใส่ลม 1–3 m/s จากทิศที่พบบ่อยเพื่อเทียบ</li>', '<li class="muted">No-wind case (usually the worst) — try 1–3 m/s from the prevailing direction for comparison</li>'));
   $('#advice').innerHTML = out.join('');
 }
@@ -2863,6 +2948,7 @@ function bindUI() {
   });
 
   bindSettings();
+  bindStop();
   bindBackend();
   bindBands();
 

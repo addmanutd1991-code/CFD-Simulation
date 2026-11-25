@@ -25,7 +25,9 @@ export const DEFAULTS = {
   // groundElev: ระดับพื้นที่วางเครื่อง (พื้นของโดเมน) เหนือพื้นดิน เช่น ดาดฟ้าชั้น 10 ≈ 35 ม.
   site: { ambient: 35, windSpeed: 0, windDir: 0, windProfile: 'uniform', windRefH: 10, groundElev: 0 },
   // grade: 'auto' = เมชปรับความละเอียดอัตโนมัติ (ละเอียดรอบ CDU ขยายออกสู่ขอบโดเมน) · 'uniform' = เซลล์เท่ากันทั้งโดเมน
-  sim: { cell: 0.1, tMax: 1800, grade: 'auto' },
+  // stopMode: 'converge' | 'time' | 'steps' | 'wall' · stopTime (s จำลอง) / stopSteps (รอบ) / stopWall (นาที): 0 = ใช้ค่าแนะนำ
+  // stopEarly: หยุดก่อนถ้าลู่เข้าแล้ว · conv: เกณฑ์ลู่เข้า 'strict' | 'standard' | 'fast'
+  sim: { cell: 0.1, tMax: 1800, grade: 'auto', stopMode: 'converge', stopTime: 0, stopSteps: 0, stopWall: 0, stopEarly: true, conv: 'standard' },
   // เกณฑ์สี CDU ตาม T ลมเข้ารายโมดูล (°C) ที่อากาศภายนอก 35 °C: ≤ green เขียว, ≤ red เหลือง, > red แดง
   bands: { green: 40, red: 46 },
   bc: {

@@ -64,7 +64,8 @@ export class Solver extends SolverBase {
     this.wx = -Math.sin(wr) * this.windSpeed;
     this.wz = Math.cos(wr) * this.windSpeed;
     this.windProf = params.wind || null;   // โปรไฟล์ลมตามความสูง (wind.js)
-    this.tMax = params.tMax || 1800;   // เพดานกันไม่จบ — ปกติหยุดเมื่อผลลู่เข้า
+    this.tMax = params.tMax || 1800;
+    this._initStop(params);   // เพดานกันไม่จบ — ปกติหยุดเมื่อผลลู่เข้า
     this.rho = airRho(this.amb);
     this.cp = AIR_CP;
     this.beta = 1 / (this.amb + 273.15);

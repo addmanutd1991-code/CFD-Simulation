@@ -19,7 +19,66 @@ export const CONV = {
   hold: 6,
 };
 
+/** ระดับเกณฑ์ลู่เข้าที่ผู้ใช้เลือก — 'strict' = เกณฑ์เดิม */
+export const CONV_PRESETS = {
+  strict: { drift: 0.05, hold: 6, tMin: 60 },
+  standard: { drift: 0.1, hold: 6, tMin: 60 },
+  fast: { drift: 0.2, hold: 4, tMin: 40, balLo: 0.92, balHi: 1.08, mass: 0.02 },
+};
+
+/**
+ * เงื่อนไขหยุด (params.stop): { mode, steps, time, wall, early }
+ *   'converge' หยุดเมื่อลู่เข้า (หรือถึงเพดานเวลาจำลอง tMax)
+ *   'steps'    ครบจำนวนรอบ (time step) · 'time' ครบเวลาจำลอง (s) · 'wall' ครบเวลาคำนวณจริง (นาที)
+ *   early      (3 แบบหลัง) หยุดก่อนถ้าลู่เข้าแล้ว
+ */
+export function normStop(st) {
+  const s = { mode: 'converge', steps: 0, time: 0, wall: 0, early: true, ...(st || {}) };
+  if (!['converge', 'steps', 'time', 'wall'].includes(s.mode)) s.mode = 'converge';
+  if (s.mode === 'steps' && !(s.steps > 0)) s.mode = 'converge';
+  if (s.mode === 'time' && !(s.time > 0)) s.mode = 'converge';
+  if (s.mode === 'wall' && !(s.wall > 0)) s.mode = 'converge';
+  return s;
+}
+
 export class SolverBase {
+  /** ตั้งเกณฑ์ลู่เข้าและเงื่อนไขหยุดจากพารามิเตอร์ (เรียกใน constructor ของ solver) */
+  _initStop(params) {
+    this.conv = { ...CONV, ...(CONV_PRESETS[params.convLevel] || {}) };
+    this.stop = normStop(params.stop);
+    this.stopBase = { ...this.stop };
+    this.wallRun = 0;   // ms ที่ใช้คำนวณจริง (ไม่นับช่วงหยุดชั่วคราว)
+  }
+
+  /** ถึงเงื่อนไขหยุดหรือยัง */
+  limitReached() {
+    const st = this.stop || { mode: 'converge' };
+    const early = st.early && this.converged;
+    if (st.mode === 'steps') return early || this.steps >= st.steps;
+    if (st.mode === 'time') return early || this.time >= st.time;
+    if (st.mode === 'wall') return early || this.wallRun >= st.wall * 60000;
+    return this.converged || this.time >= this.tMax;
+  }
+
+  /** สั่งคำนวณต่อหลังครบเงื่อนไข → ขยายออกไปอีกเท่าค่าตั้งต้น */
+  extendStop(tMaxStep = 600) {
+    const st = this.stop, b = this.stopBase;
+    if (st.mode === 'steps') st.steps = this.steps + b.steps;
+    else if (st.mode === 'time') st.time = this.time + b.time;
+    else if (st.mode === 'wall') st.wall = this.wallRun / 60000 + b.wall;
+    else this.tMax = this.time + tMaxStep;
+    st.early = false;   // ผู้ใช้สั่งเดินต่อเอง — ไม่หยุดทันทีเพราะลู่เข้าแล้ว
+  }
+
+  /** ความคืบหน้าไปยังเงื่อนไขหยุด 0–1 (null = หยุดเมื่อลู่เข้า) */
+  stopProgress() {
+    const st = this.stop || { mode: 'converge' };
+    if (st.mode === 'steps') return this.steps / st.steps;
+    if (st.mode === 'time') return this.time / st.time;
+    if (st.mode === 'wall') return this.wallRun / (st.wall * 60000);
+    return null;
+  }
+
   _newAcc() { return { t: 0, qIn: 0, qOut: 0, dE: 0, tin: this.mods.map(() => 0), cin: this.mods.map(() => 0) }; }
 
   /** ล้างประวัติและสถานะการติดตามผล (เรียกตอนเริ่มคำนวณ) */
@@ -91,15 +150,17 @@ export class SolverBase {
     });
     const bal = this.energyBalance(10).ratio;
     this.drift = t >= 20 ? maxDrift : NaN;
+    const C = this.conv || CONV;
     this.checks = {
-      time: t >= CONV.tMin,
-      drift: this.drift <= CONV.drift,
-      balance: bal >= CONV.balLo && bal <= CONV.balHi,
-      mass: this.divErr <= CONV.mass,
+      time: t >= C.tMin,
+      drift: this.drift <= C.drift,
+      balance: bal >= C.balLo && bal <= C.balHi,
+      mass: this.divErr <= C.mass,
     };
     const ok = Object.values(this.checks).every(Boolean);
     this.hold = ok ? this.hold + 1 : 0;
-    this.converged = this.hold >= CONV.hold;
+    // ลู่เข้าแล้วคงสถานะไว้ (โหมดรอบ/เวลาที่เดินต่อหลังลู่เข้า ไม่ให้สถานะกลับไปมา)
+    this.converged = this.converged || this.hold >= C.hold;
   }
 
   /* ───────── ผลลัพธ์ ───────── */
@@ -125,7 +186,8 @@ export class SolverBase {
     const bal = this.energyBalance(10);
     return {
       time: t, steps: this.steps, dt: this.dt, tMax: this.tMax,
-      checks: this.checks, hold: this.hold, conv: CONV,
+      checks: this.checks, hold: this.hold, conv: this.conv || CONV,
+      stop: { ...(this.stop || { mode: 'converge' }) }, wall: this.wallRun || 0, progress: this.stopProgress ? this.stopProgress() : null,
       avgWindow: win,
       divErr: this.divErr, pIters: this.pIters, drift: this.drift ?? NaN,
       balance: bal, converged: this.converged,

@@ -540,6 +540,7 @@ export class GpuSolver extends SolverBase {
     this.wz = Math.cos(wr) * this.windSpeed;
     this.windProf = params.wind || null;   // โปรไฟล์ลมตามความสูง (wind.js)
     this.tMax = params.tMax || 1800;
+    this._initStop(params);
     this.rho = airRho(this.amb);
     this.cp = AIR_CP;
     this.beta = 1 / (this.amb + 273.15);

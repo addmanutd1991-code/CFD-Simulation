@@ -268,10 +268,29 @@
             </label>
             <p class="note" id="backend-note"></p>
             <div class="mesh-info mono" id="mesh-info"></div>
-            <p class="note" data-en="Runs until converged (see the criteria on Results → Solution quality) — no run time to set">คำนวณจนกว่าจะลู่เข้า (ดูเกณฑ์ที่หน้า ผลลัพธ์ → คุณภาพการคำนวณ) — ไม่ต้องกำหนดเวลา</p>
+            <label class="row row-stack"><span data-en="Stop the calculation when">หยุดคำนวณเมื่อ</span>
+              <select id="s-stop">
+                <option value="converge" data-en="Converged (recommended)">ลู่เข้าแล้ว (Converge) — แนะนำ</option>
+                <option value="time" data-en="Simulated time reached (s)">ครบเวลาจำลองที่กำหนด (วินาที)</option>
+                <option value="steps" data-en="Number of iterations reached (time steps)">ครบจำนวนรอบที่กำหนด (time step)</option>
+                <option value="wall" data-en="Real computing time reached (minutes)">ครบเวลาคำนวณจริงที่กำหนด (นาที)</option>
+              </select>
+            </label>
+            <label class="row stop-only" data-stop="converge" title="ค่าเฉลี่ย 10 วินาทีของ T ลมเข้าทุกโมดูลต้องเปลี่ยนไม่เกินค่านี้ ต่อเนื่องหลายครั้ง" data-en-title="The 10-second mean inlet T of every module must change by no more than this, several times in a row"><span data-en="Convergence criterion">เกณฑ์ลู่เข้า</span>
+              <select id="s-conv">
+                <option value="strict" data-en="Strict ±0.05 °C (slowest)">เข้มงวด ±0.05 °C (ช้าสุด)</option>
+                <option value="standard" data-en="Standard ±0.1 °C">มาตรฐาน ±0.1 °C</option>
+                <option value="fast" data-en="Fast ±0.2 °C (drafts)">เร็ว ±0.2 °C (ร่างแบบ)</option>
+              </select>
+            </label>
+            <label class="row stop-only" data-stop="time"><span data-en="Simulated time (s)">เวลาจำลอง (วินาที)</span> <input type="number" id="s-stime" step="10" min="20" max="7200"></label>
+            <label class="row stop-only" data-stop="steps"><span data-en="Iterations (time steps)">จำนวนรอบ (time step)</span> <input type="number" id="s-steps" step="100" min="100" max="2000000"></label>
+            <label class="row stop-only" data-stop="wall"><span data-en="Real computing time (min)">เวลาคำนวณจริง (นาที)</span> <input type="number" id="s-wall" step="1" min="1" max="1440"></label>
+            <label class="row stop-only stop-fixed"><input type="checkbox" id="s-early"> <span data-en="Stop earlier if it converges first">หยุดก่อนถ้าลู่เข้าแล้ว</span></label>
+            <div class="stop-rec"><p class="note" id="stop-rec"></p><button class="ghost mini" id="btn-stop-rec" data-en="Use recommended">ใช้ค่าแนะนำ</button></div>
             <details>
               <summary data-en="Advanced">ขั้นสูง</summary>
-              <label class="row"><span data-en="Simulated-time cap (s)">เพดานเวลาจำลอง กันไม่จบ (s)</span> <input type="number" id="s-tmax" step="60" min="120" max="7200"></label>
+              <label class="row"><span data-en="Simulated-time cap when stopping on convergence (s)">เพดานเวลาจำลอง (โหมดลู่เข้า) กันไม่จบ (s)</span> <input type="number" id="s-tmax" step="60" min="120" max="7200"></label>
               <label class="row"><span data-en="Capacity rating T (°C)">T พิกัดของ capacity (°C)</span> <input type="number" id="p-tref" step="0.5"></label>
               <label class="row"><span data-en="Capacity loss (%/°C)">capacity ลดลง (%/°C)</span> <input type="number" id="p-kcap" step="0.1" min="0" max="5"></label>
               <label class="row"><span data-en="Power increase (%/°C)">กำลังไฟเพิ่มขึ้น (%/°C)</span> <input type="number" id="p-kpow" step="0.1" min="0" max="8"></label>
