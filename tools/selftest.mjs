@@ -5,6 +5,7 @@
  *   node tools/selftest.mjs <preset> <cell> <tEnd> --uniform      เมชสม่ำเสมอ (เซลล์เท่ากันทั้งโดเมน)
  *   node tools/selftest.mjs <preset> <cell> <tEnd> --threads=N    กำหนดจำนวนเธรด (1 = เธรดเดียว)
  *   node tools/selftest.mjs <preset> <cell> <tEnd> --grade=k:v,…  ปรับพารามิเตอร์เมช graded (ดู GRADE ใน src/grid.js)
+ *   node tools/selftest.mjs <preset> <cell> <tEnd> --wind=V:dir:profile:elev  ลม เช่น 3:90:urban:30
  *   node tools/selftest.mjs <preset> <cell> <tEnd> --compare      เดินแบบเธรดเดียวคู่กับหลายเธรด ตรวจว่าผลตรงกันทุกบิต
  */
 import { presetScene } from '../src/scene.js';
@@ -12,6 +13,7 @@ import { buildMesh } from '../src/mesher.js';
 import { Solver } from '../src/solver.js';
 import { createKernelsAsync, maxThreads } from '../src/kernels.js';
 import { GRADE } from '../src/grid.js';
+import { windParams } from '../src/wind.js';
 
 const flags = process.argv.slice(2).filter(a => a.startsWith('--'));
 const [key = 'rooftop', cellArg = 0.5, tArg = 1800] = process.argv.slice(2).filter(a => !a.startsWith('--'));
@@ -30,7 +32,10 @@ const cells = mesh.nx * mesh.ny * mesh.nz;
 console.log(`preset=${key} cell=${cell} ${mesh.graded ? 'graded' : 'uniform'} grid=${mesh.nx}x${mesh.ny}x${mesh.nz} (${cells} cells`
   + `${mesh.graded ? `, uniform would be ${mesh.dom.cellsUniform} = x${(mesh.dom.cellsUniform / cells).toFixed(1)}` : ''}) mesh ${(performance.now() - t0).toFixed(0)} ms`);
 mesh.warnings.forEach(w => console.log('  warn:', w));
-const params = { ambient: s.site.ambient, windSpeed: s.site.windSpeed, windDir: s.site.windDir, perf: s.perf, tMax };
+// --wind=V:dir:profile:elev เช่น --wind=3:90:urban:30
+const wf = flags.find(f => f.startsWith('--wind='));
+if (wf) { const [sp, dir, prof, ge] = wf.slice(7).split(':'); s.site.windSpeed = Number(sp); s.site.windDir = Number(dir || 0); if (prof) s.site.windProfile = prof; if (ge) s.site.groundElev = Number(ge); }
+const params = { ambient: s.site.ambient, windSpeed: s.site.windSpeed, windDir: s.site.windDir, wind: windParams(s.site), perf: s.perf, tMax };
 const make = async (n) => new Solver(mesh, { ...params, kernels: await createKernelsAsync(Solver.memoryBytes(mesh, n), { threads: n }) });
 
 if (flags.includes('--compare')) {

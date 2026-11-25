@@ -12,6 +12,7 @@ import { Viewer, CONTOUR_LEVELS } from './viewer.js';
 import { Runner } from './runner.js';
 import { cssGradient, FIELDS, rgb } from './colormap.js';
 import { L, getLang, setLang } from './i18n.js';
+import { WIND_PROFILES, windParams, windFactorFn } from './wind.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -691,6 +692,7 @@ function setWallGeometry(o, L, a, anchor) {
 
 const SETTINGS = [
   ['#s-amb', 'site', 'ambient'], ['#s-wind', 'site', 'windSpeed'], ['#s-dir', 'site', 'windDir'],
+  ['#s-wref', 'site', 'windRefH'], ['#s-gelev', 'site', 'groundElev'],
   ['#s-cell', 'sim', 'cell'], ['#s-tmax', 'sim', 'tMax'],
   ['#p-tref', 'perf', 'Tref'], ['#p-tlim', 'perf', 'Tlimit'],
 ];
@@ -698,6 +700,7 @@ const SETTINGS = [
 function renderSettings() {
   for (const [sel, g, k] of SETTINGS) $(sel).value = scene[g][k];
   $('#s-grade').value = scene.sim.grade === 'uniform' ? 'uniform' : 'auto';
+  renderWindProfile();
   $('#p-kcap').value = round2(scene.perf.kCap * 100);
   $('#p-kpow').value = round2(scene.perf.kPow * 100);
   $('#proj-name').value = scene.name;
@@ -721,6 +724,7 @@ function bindSettings() {
     });
   }
   $('#s-grade').addEventListener('change', (e) => edit(() => { scene.sim.grade = e.target.value === 'uniform' ? 'uniform' : 'auto'; }));
+  $('#s-wprof').addEventListener('change', (e) => edit(() => { scene.site.windProfile = WIND_PROFILES[e.target.value] ? e.target.value : 'uniform'; }));
   $('#p-kcap').addEventListener('change', (e) => edit(() => { scene.perf.kCap = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#p-kpow').addEventListener('change', (e) => edit(() => { scene.perf.kPow = Math.max(0, parseFloat(e.target.value) || 0) / 100; }));
   $('#proj-name').addEventListener('change', (e) => { scene.name = e.target.value.trim() || L('โปรเจกต์', 'Project'); saveAutosave(); });
@@ -749,6 +753,19 @@ function bindBands() {
       renderResults();
     });
   }
+}
+
+/** แผงโปรไฟล์ลม: ซ่อนช่องความสูงเมื่อเป็นลมสม่ำเสมอ และแสดงความเร็วที่ระดับต่าง ๆ ในโดเมน */
+function renderWindProfile() {
+  const site = scene.site, prof = WIND_PROFILES[site.windProfile] ? site.windProfile : 'uniform';
+  $('#s-wprof').value = prof;
+  $$('.wprof-only').forEach(el => { el.hidden = prof === 'uniform'; });
+  if (prof === 'uniform') return;
+  const f = windFactorFn(windParams(site)), H = domainOf(scene).H, V = site.windSpeed;
+  const at = y => fmt(V * f(y));
+  $('#wprof-note').textContent = V > 0
+    ? L(`ความเร็วลมในโดเมน: ${at(0.5)} m/s ที่ 0.5 ม. · ${at(2)} m/s ที่ 2 ม. · ${at(H)} m/s ที่ยอดโดเมน ${fmt(H)} ม.`, `Wind in the domain: ${at(0.5)} m/s at 0.5 m · ${at(2)} m/s at 2 m · ${at(H)} m/s at the domain top ${fmt(H)} m`)
+    : L('ความเร็วลม = 0 — โปรไฟล์ไม่มีผล', 'Wind speed is 0 — the profile has no effect');
 }
 
 /** ต้องมีขอบเปิดอย่างน้อยหนึ่งด้าน มิฉะนั้นความร้อนออกจากโดเมนไม่ได้และผลไม่มีวันนิ่ง */
@@ -889,12 +906,17 @@ function startOrToggle() {
   viewer.setResults(null);
   runner.send({
     cmd: 'init', mesh, backend, lang: getLang(),
-    params: { ambient: scene.site.ambient, windSpeed: scene.site.windSpeed, windDir: scene.site.windDir, perf: scene.perf, tMax: scene.sim.tMax },
+    params: simParams(scene),
   });
   runner.send({ cmd: 'run' });
   renderWarnings(mesh.warnings);
   if (!selected()) showSide('view', false);   // ผลเริ่มขึ้นในภาพ → เตรียมตัวเลือกการแสดงผลไว้ให้
   updateRunUI();
+}
+
+/** พารามิเตอร์ที่ส่งให้ solver จากฉาก */
+function simParams(sc) {
+  return { ambient: sc.site.ambient, windSpeed: sc.site.windSpeed, windDir: sc.site.windDir, wind: windParams(sc.site), perf: sc.perf, tMax: sc.sim.tMax };
 }
 
 function resetResults() {

@@ -213,7 +213,7 @@
           <h3 class="sec-h" data-en="Environment">สภาพแวดล้อม</h3>
           <div class="form">
             <label class="row"><span data-en="Ambient temperature (°C)">อุณหภูมิอากาศภายนอก (°C)</span> <input type="number" id="s-amb" step="0.5" min="20" max="50"></label>
-            <label class="row" title="ความเร็วลมเข้าเท่ากันทั้งระนาบขอบต้นลม" data-en-title="Uniform inflow speed over the upwind boundary"><span data-en="Wind speed (m/s)">ความเร็วลม (m/s)</span> <input type="number" id="s-wind" step="0.5" min="0" max="10"></label>
+            <label class="row" title="ความเร็วลมที่ความสูงอ้างอิง (โปรไฟล์สม่ำเสมอ = เท่ากันทั้งระนาบขอบต้นลม)" data-en-title="Wind speed at the reference height (uniform profile = same over the whole upwind boundary)"><span data-en="Wind speed (m/s)">ความเร็วลม (m/s)</span> <input type="number" id="s-wind" step="0.5" min="0" max="10"></label>
             <label class="row"><span data-en="Wind from">ลมพัดมาจากทิศ</span>
               <select id="s-dir">
                 <option value="0" data-en="North (N)">เหนือ (N)</option><option value="45" data-en="North-east">ตะวันออกเฉียงเหนือ</option>
@@ -222,6 +222,18 @@
                 <option value="270" data-en="West (W)">ตะวันตก (W)</option><option value="315" data-en="North-west">ตะวันตกเฉียงเหนือ</option>
               </select>
             </label>
+            <label class="row row-stack" title="ความเร็วลมเปลี่ยนตามความสูง V(z) = Vref·(z/zref)^α" data-en-title="Wind speed varies with height V(z) = Vref·(z/zref)^α"><span data-en="Wind profile (terrain)">โปรไฟล์ลมตามความสูง (สภาพพื้นที่)</span>
+              <select id="s-wprof">
+                <option value="uniform" data-en="Uniform at all heights (legacy)">สม่ำเสมอทุกระดับ (แบบเดิม)</option>
+                <option value="open" data-en="Open terrain (α 0.14)">พื้นที่โล่ง (α 0.14)</option>
+                <option value="suburban" data-en="Suburban (α 0.22)">ชานเมือง (α 0.22)</option>
+                <option value="urban" data-en="Urban (α 0.30)">เมือง (α 0.30)</option>
+                <option value="center" data-en="City centre, dense high-rise (α 0.40)">ใจกลางเมือง ตึกสูงหนาแน่น (α 0.40)</option>
+              </select>
+            </label>
+            <label class="row wprof-only" title="ความเร็วลมที่กรอกด้านบนวัดที่ความสูงนี้เหนือพื้นดิน (สถานีอุตุนิยมวิทยาใช้ 10 ม.)" data-en-title="The wind speed above is measured at this height above ground (weather stations use 10 m)"><span data-en="Reference height (m above ground)">ความสูงอ้างอิงของความเร็วลม (ม. เหนือพื้นดิน)</span> <input type="number" id="s-wref" step="1" min="1" max="200"></label>
+            <label class="row wprof-only" title="ระดับพื้นของโดเมน (พื้นที่วางเครื่อง) เหนือพื้นดิน เช่น ดาดฟ้าอาคาร 10 ชั้น ≈ 35 ม. · วางบนพื้นดิน = 0" data-en-title="Height of the domain floor (where units sit) above ground, e.g. roof of a 10-storey building ≈ 35 m · on the ground = 0"><span data-en="Site level above ground (m)">ระดับพื้นที่วางเครื่องเหนือพื้นดิน (ม.)</span> <input type="number" id="s-gelev" step="1" min="0" max="500"></label>
+            <p class="note wprof-only" id="wprof-note"></p>
           </div>
         </section>
 

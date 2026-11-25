@@ -21,7 +21,9 @@ import { DEFAULT_PERF, unitSize, unitExtent } from './models.js';
 import { gradeFeatures, gradedAxis, uniformAxis } from './grid.js';
 
 export const DEFAULTS = {
-  site: { ambient: 35, windSpeed: 0, windDir: 0 },
+  // windProfile: โปรไฟล์ลมตามความสูง (wind.js) · windRefH: ความสูงอ้างอิงของความเร็วลม (ม. เหนือพื้นดิน)
+  // groundElev: ระดับพื้นที่วางเครื่อง (พื้นของโดเมน) เหนือพื้นดิน เช่น ดาดฟ้าชั้น 10 ≈ 35 ม.
+  site: { ambient: 35, windSpeed: 0, windDir: 0, windProfile: 'uniform', windRefH: 10, groundElev: 0 },
   // grade: 'auto' = เมชปรับความละเอียดอัตโนมัติ (ละเอียดรอบ CDU ขยายออกสู่ขอบโดเมน) · 'uniform' = เซลล์เท่ากันทั้งโดเมน
   sim: { cell: 0.1, tMax: 1800, grade: 'auto' },
   // เกณฑ์สี CDU ตาม T ลมเข้ารายโมดูล (°C) ที่อากาศภายนอก 35 °C: ≤ green เขียว, ≤ red เหลือง, > red แดง
