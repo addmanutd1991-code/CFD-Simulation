@@ -77,6 +77,7 @@
           <button class="mi" id="btn-new"><svg class="ic"><use href="#i-new"/></svg><span class="mi-t" data-en="New project">โปรเจกต์ใหม่</span></button>
           <button class="mi" id="btn-open"><svg class="ic"><use href="#i-open"/></svg><span class="mi-t" data-en="Open project file (.json)">เปิดไฟล์โปรเจกต์ (.json)</span></button>
           <button class="mi" id="btn-save"><svg class="ic"><use href="#i-save"/></svg><span class="mi-t" data-en="Save as .json file">บันทึกเป็นไฟล์ .json</span><kbd>Ctrl+S</kbd></button>
+          <button class="mi" id="btn-dxf"><svg class="ic"><use href="#i-open"/></svg><span class="mi-t"><b data-en="Import DXF drawing (underlay)…">นำเข้าแบบ DXF (ฉากหลัง)…</b><small data-en="Trace over it with snapping, or convert layers to walls / buildings / CDUs">วาดทับพร้อมดูดจุดปลายเส้น หรือแปลงเลเยอร์เป็นผนัง / อาคาร / CDU</small></span></button>
           <div class="menu-h" data-en="Examples">ตัวอย่างสำเร็จรูป</div>
           <div id="preset-list"></div>
           <div class="menu-h" data-en="Case studies">กรณีศึกษา</div>
@@ -160,6 +161,7 @@
               </div>
               <div class="vseg glass">
                 <button class="vact" id="btn-mesh" aria-pressed="false" title="Show mesh: แสดงเส้นกริดของเมชที่ใช้คำนวณ บนพื้นและระนาบตัด (G)" data-en-title="Show mesh: draw the calculation grid on the floor and the section plane (G)"><svg class="ic"><use href="#i-mesh"/></svg><span>Mesh</span></button>
+                <button class="vact" id="btn-dxf-view" hidden title="แบบ DXF ฉากหลัง: แสดง/ซ่อน ดูดจุด แปลงเลเยอร์" data-en-title="DXF underlay: show/hide, snapping, convert layers"><svg class="ic"><use href="#i-open"/></svg><span>DXF</span></button>
                 <button class="vact" id="btn-suction" aria-pressed="false" title="แสดงด้านดูดลม (หน้าคอยล์) ของ CDU ทุกเครื่อง (I)" data-en-title="Show the suction (coil) faces of every CDU (I)"><svg class="ic"><use href="#i-suction"/></svg><span data-en="Suction">ลมดูด</span></button>
                 <button class="vact" id="btn-capture" title="Capture: บันทึกภาพมุมมองนี้ (พร้อมแถบสี) ไว้ใส่รายงาน — กดได้หลายมุม (P)" data-en-title="Capture: save this view (with the colour bar) for the report — as many views as you like (P)" aria-label="Capture"><svg class="ic"><use href="#i-camera"/></svg></button>
                 <button class="vact" id="btn-full" title="เต็มจอ (Esc เพื่อออก)" aria-label="Fullscreen"><svg class="ic"><use id="full-ic" href="#i-full"/></svg></button>
@@ -214,7 +216,7 @@
           <h3 class="sec-h" data-en="Environment">สภาพแวดล้อม</h3>
           <div class="form">
             <label class="row"><span data-en="Ambient temperature (°C)">อุณหภูมิอากาศภายนอก (°C)</span> <input type="number" id="s-amb" step="0.5" min="20" max="50"></label>
-            <label class="row" title="ความเร็วลมเข้าเท่ากันทั้งระนาบขอบต้นลม" data-en-title="Uniform inflow speed over the upwind boundary"><span data-en="Wind speed (m/s)">ความเร็วลม (m/s)</span> <input type="number" id="s-wind" step="0.5" min="0" max="10"></label>
+            <label class="row" title="ความเร็วลมที่ความสูงอ้างอิง (โปรไฟล์สม่ำเสมอ = เท่ากันทั้งระนาบขอบต้นลม)" data-en-title="Wind speed at the reference height (uniform profile = same over the whole upwind boundary)"><span data-en="Wind speed (m/s)">ความเร็วลม (m/s)</span> <input type="number" id="s-wind" step="0.5" min="0" max="10"></label>
             <label class="row"><span data-en="Wind from">ลมพัดมาจากทิศ</span>
               <select id="s-dir">
                 <option value="0" data-en="North (N)">เหนือ (N)</option><option value="45" data-en="North-east">ตะวันออกเฉียงเหนือ</option>
@@ -223,6 +225,19 @@
                 <option value="270" data-en="West (W)">ตะวันตก (W)</option><option value="315" data-en="North-west">ตะวันตกเฉียงเหนือ</option>
               </select>
             </label>
+            <label class="row row-stack" title="ความเร็วลมเปลี่ยนตามความสูง V(z) = Vref·(z/zref)^α" data-en-title="Wind speed varies with height V(z) = Vref·(z/zref)^α"><span data-en="Wind profile (terrain)">โปรไฟล์ลมตามความสูง (สภาพพื้นที่)</span>
+              <select id="s-wprof">
+                <option value="uniform" data-en="Uniform at all heights (legacy)">สม่ำเสมอทุกระดับ (แบบเดิม)</option>
+                <option value="open" data-en="Open terrain (α 0.14)">พื้นที่โล่ง (α 0.14)</option>
+                <option value="suburban" data-en="Suburban (α 0.22)">ชานเมือง (α 0.22)</option>
+                <option value="urban" data-en="Urban (α 0.30)">เมือง (α 0.30)</option>
+                <option value="center" data-en="City centre, dense high-rise (α 0.40)">ใจกลางเมือง ตึกสูงหนาแน่น (α 0.40)</option>
+              </select>
+            </label>
+            <label class="row wprof-only" title="ความเร็วลมที่กรอกด้านบนวัดที่ความสูงนี้เหนือพื้นดิน (สถานีอุตุนิยมวิทยาใช้ 10 ม.)" data-en-title="The wind speed above is measured at this height above ground (weather stations use 10 m)"><span data-en="Reference height (m above ground)">ความสูงอ้างอิงของความเร็วลม (ม. เหนือพื้นดิน)</span> <input type="number" id="s-wref" step="1" min="1" max="200"></label>
+            <label class="row wprof-only" title="ระดับพื้นของโดเมน (พื้นที่วางเครื่อง) เหนือพื้นดิน เช่น ดาดฟ้าอาคาร 10 ชั้น ≈ 35 ม. · วางบนพื้นดิน = 0" data-en-title="Height of the domain floor (where units sit) above ground, e.g. roof of a 10-storey building ≈ 35 m · on the ground = 0"><span data-en="Site level above ground (m)">ระดับพื้นที่วางเครื่องเหนือพื้นดิน (ม.)</span> <input type="number" id="s-gelev" step="1" min="0" max="500"></label>
+            <p class="note wprof-only" id="wprof-note"></p>
+            <button class="ghost" id="btn-wind4" title="คำนวณลมจากทิศ N / E / S / W ต่อกันอัตโนมัติ แล้วสรุปในรายงาน" data-en-title="Run winds from N / E / S / W one after another and summarise them in the report"><span data-en="Run 4 wind directions…">คำนวณลม 4 ทิศ…</span></button>
           </div>
         </section>
 
@@ -254,10 +269,29 @@
             </label>
             <p class="note" id="backend-note"></p>
             <div class="mesh-info mono" id="mesh-info"></div>
-            <p class="note" data-en="Runs until converged (see the criteria on Results → Solution quality) — no run time to set">คำนวณจนกว่าจะลู่เข้า (ดูเกณฑ์ที่หน้า ผลลัพธ์ → คุณภาพการคำนวณ) — ไม่ต้องกำหนดเวลา</p>
+            <label class="row row-stack"><span data-en="Stop the calculation when">หยุดคำนวณเมื่อ</span>
+              <select id="s-stop">
+                <option value="converge" data-en="Converged (recommended)">ลู่เข้าแล้ว (Converge) — แนะนำ</option>
+                <option value="time" data-en="Simulated time reached (s)">ครบเวลาจำลองที่กำหนด (วินาที)</option>
+                <option value="steps" data-en="Number of iterations reached (time steps)">ครบจำนวนรอบที่กำหนด (time step)</option>
+                <option value="wall" data-en="Real computing time reached (minutes)">ครบเวลาคำนวณจริงที่กำหนด (นาที)</option>
+              </select>
+            </label>
+            <label class="row stop-only" data-stop="converge" title="ค่าเฉลี่ย 10 วินาทีของ T ลมเข้าทุกโมดูลต้องเปลี่ยนไม่เกินค่านี้ ต่อเนื่องหลายครั้ง" data-en-title="The 10-second mean inlet T of every module must change by no more than this, several times in a row"><span data-en="Convergence criterion">เกณฑ์ลู่เข้า</span>
+              <select id="s-conv">
+                <option value="strict" data-en="Strict ±0.05 °C (slowest)">เข้มงวด ±0.05 °C (ช้าสุด)</option>
+                <option value="standard" data-en="Standard ±0.1 °C">มาตรฐาน ±0.1 °C</option>
+                <option value="fast" data-en="Fast ±0.2 °C (drafts)">เร็ว ±0.2 °C (ร่างแบบ)</option>
+              </select>
+            </label>
+            <label class="row stop-only" data-stop="time"><span data-en="Simulated time (s)">เวลาจำลอง (วินาที)</span> <input type="number" id="s-stime" step="10" min="20" max="7200"></label>
+            <label class="row stop-only" data-stop="steps"><span data-en="Iterations (time steps)">จำนวนรอบ (time step)</span> <input type="number" id="s-steps" step="100" min="100" max="2000000"></label>
+            <label class="row stop-only" data-stop="wall"><span data-en="Real computing time (min)">เวลาคำนวณจริง (นาที)</span> <input type="number" id="s-wall" step="1" min="1" max="1440"></label>
+            <label class="row stop-only stop-fixed"><input type="checkbox" id="s-early"> <span data-en="Stop earlier if it converges first">หยุดก่อนถ้าลู่เข้าแล้ว</span></label>
+            <div class="stop-rec"><p class="note" id="stop-rec"></p><button class="ghost mini" id="btn-stop-rec" data-en="Use recommended">ใช้ค่าแนะนำ</button></div>
             <details>
               <summary data-en="Advanced">ขั้นสูง</summary>
-              <label class="row"><span data-en="Simulated-time cap (s)">เพดานเวลาจำลอง กันไม่จบ (s)</span> <input type="number" id="s-tmax" step="60" min="120" max="7200"></label>
+              <label class="row"><span data-en="Simulated-time cap when stopping on convergence (s)">เพดานเวลาจำลอง (โหมดลู่เข้า) กันไม่จบ (s)</span> <input type="number" id="s-tmax" step="60" min="120" max="7200"></label>
               <label class="row"><span data-en="Capacity rating T (°C)">T พิกัดของ capacity (°C)</span> <input type="number" id="p-tref" step="0.5"></label>
               <label class="row"><span data-en="Capacity loss (%/°C)">capacity ลดลง (%/°C)</span> <input type="number" id="p-kcap" step="0.1" min="0" max="5"></label>
               <label class="row"><span data-en="Power increase (%/°C)">กำลังไฟเพิ่มขึ้น (%/°C)</span> <input type="number" id="p-kpow" step="0.1" min="0" max="8"></label>
@@ -370,7 +404,31 @@
         <div class="spacer"></div>
         <button id="btn-csv" disabled title="ตารางผลรายเครื่องเป็นไฟล์ CSV" data-en-title="Per-unit results table as a CSV file"><svg class="ic"><use href="#i-download"/></svg>CSV</button>
         <button id="btn-report" disabled title="รายงาน HTML พร้อมภาพที่ Capture ไว้" data-en-title="HTML report with the captured images"><svg class="ic"><use href="#i-download"/></svg><span data-en="Report (HTML)">รายงาน (HTML)</span></button>
+        <button id="btn-form" title="รายงาน Excel ตามแบบฟอร์ม CFD Simulation Report (A3 board / A4 report)" data-en-title="Excel report in the CFD Simulation Report form (A3 board / A4 report)"><svg class="ic"><use href="#i-download"/></svg><span data-en="Report form (Excel)">รายงานแบบฟอร์ม (Excel)</span></button>
+        <button id="btn-batch" title="รันหลายทางเลือกต่อกันอัตโนมัติ (louver / Hood / ความสูงผนัง / ยกเครื่อง / ลม 4 ทิศ)" data-en-title="Run several options one after another (louver / Hood / wall height / raise unit / 4 wind directions)"><svg class="ic"><use href="#i-play"/></svg>Batch…</button>
         <button id="btn-png" title="ภาพ 3 มิติของมุมมองปัจจุบัน" data-en-title="3D image of the current view"><svg class="ic"><use href="#i-download"/></svg><span data-en="3D image (PNG)">ภาพ 3D (PNG)</span></button>
+      </div>
+
+      <div class="card batch-card" id="batch-card" hidden>
+        <div class="card-h"><h3><span data-en="Batch results">ผล Batch</span> <span class="muted small" id="bt-status"></span></h3>
+          <span class="cap-actions">
+            <button class="ghost mini danger" id="bt-cancel" hidden data-en="Cancel batch">ยกเลิก Batch</button>
+            <button class="ghost mini" id="bt-rep-all" disabled title="รายงาน HTML ไฟล์เดียว: สรุปทุก case + ตารางลม 4 ทิศ + รายละเอียดแต่ละ case" data-en-title="One HTML report: summary of all cases + 4-direction wind table + each case in detail" data-en="Combined report">รายงานรวม</button>
+            <button class="ghost mini" id="bt-rep-each" disabled title="ดาวน์โหลดรายงาน HTML แยกไฟล์ละ case" data-en-title="Download a separate HTML report for every case" data-en="Separate report per case">รายงานแยกทุก Case</button>
+            <button class="ghost mini" id="bt-form" disabled title="รายงาน Excel ตามแบบฟอร์ม" data-en-title="Excel report in the company form" data-en="Report form (Excel)">รายงานแบบฟอร์ม (Excel)</button>
+            <button class="ghost mini" id="bt-csv" disabled>CSV</button>
+            <button class="ghost mini" id="bt-clear" disabled data-en="Clear">ล้าง</button>
+            <button class="ghost mini" id="btn-batch2" data-en="New batch…">Batch ใหม่…</button>
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="cmp-table" id="bt-table">
+            <thead><tr><th>Case</th><th data-en="Variables">ตัวแปร</th><th class="n" data-en="Max ΔT °C">ΔT สูงสุด °C</th><th data-en="Worst unit">เครื่องที่แย่สุด</th><th class="n" data-en="Mean ΔT °C">ΔT เฉลี่ย °C</th><th class="n" data-en="Max inlet T °C">T ลมเข้าสูงสุด °C</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="bt-wind4"></div>
+        <p class="note" data-en="Batch results live in this browser tab only — download the reports before closing the page. Each case also appears under Compare options.">ผล Batch อยู่ในแท็บเบราว์เซอร์นี้เท่านั้น — ดาวน์โหลดรายงานไว้ก่อนปิดหน้า · ทุก case ขึ้นในตาราง เปรียบเทียบทางเลือก ด้วย</p>
       </div>
 
       <div class="empty-state" id="res-empty">
@@ -847,6 +905,100 @@
     <h3 data-en="Case studies — outdoor unit layout guide">กรณีศึกษา — คู่มือการวางคอยล์ร้อน</h3>
     <p class="note" data-en="From the Siam Daikin “CFD Simulation Standard — Outdoor unit layout guide”. Click a picture to open that model, then press Run and compare the inlet temperatures of the original and the fixed layout.">จากคู่มือ “CFD Simulation Standard — Outdoor unit layout guide” ของ Siam Daikin · คลิกภาพเพื่อเปิดแบบจำลองนั้น แล้วกด คำนวณ เพื่อเทียบอุณหภูมิลมเข้าของแบบเดิมกับแบบแก้ไข</p>
     <div class="case-grid" id="case-grid"></div>
+  </div>
+</div>
+
+<!-- รายงาน Excel ตามแบบฟอร์ม -->
+<div class="modal" id="form-pop" hidden>
+  <div class="keys-pop form-pop" role="dialog" aria-label="รายงานแบบฟอร์ม" data-en-label="Report form">
+    <button class="keys-x" title="ปิด (Esc)" data-en-title="Close (Esc)" aria-label="ปิด" data-en-label="Close">×</button>
+    <h3 data-en="CFD Simulation Report — Excel form">รายงาน CFD Simulation — แบบฟอร์ม Excel</h3>
+    <div class="rep-h" data-en="Form">แบบฟอร์ม</div>
+    <div class="fm-row">
+      <label class="fm-card"><input type="radio" name="fm-style" id="fm-style-board"> <b data-en="A3 board (landscape)">A3 board (แนวนอน)</b><small data-en="One page per option: model views, a column per wind case, suction temperature table (like Form01 / 05 / 06)">หน้าเดียวต่อทางเลือก: ภาพแบบ ผลแยกคอลัมน์ตามสภาพลม ตาราง Suction Temp. (แบบ Form01 / 05 / 06)</small></label>
+      <label class="fm-card"><input type="radio" name="fm-style" id="fm-style-a4"> <b data-en="A4 report (portrait)">A4 report (แนวตั้ง)</b><small data-en="Cover + 1. Simulation condition, 2. Simulation model, 3. Simulation result per wind case with tables (like Form02 / 03 / 04)">หน้าปก + 1. Simulation condition · 2. Simulation model · 3. Simulation result รายสภาพลมพร้อมตาราง (แบบ Form02 / 03 / 04)</small></label>
+    </div>
+    <div class="rep-h" data-en="Results">ผลที่ใช้</div>
+    <div class="fm-row">
+      <label><input type="radio" name="fm-src" id="fm-src-batch"> <span data-en="Batch results (each option = one sheet, each wind case = one column / section)">ผล Batch (ทางเลือกละชีต · สภาพลมละคอลัมน์ / หัวข้อ)</span></label>
+      <label><input type="radio" name="fm-src" id="fm-src-run"> <span data-en="Current result">ผลปัจจุบัน</span></label>
+    </div>
+    <div class="rep-h" data-en="Project">ข้อมูลโครงการ</div>
+    <div class="fm-grid">
+      <label><span data-en="Project name">ชื่อโครงการ</span><input type="text" id="fm-project"></label>
+      <label><span data-en="Zone / location">โซน / ตำแหน่ง</span><input type="text" id="fm-zone" placeholder="ZONE 5 / 1st Fl. Public"></label>
+      <label><span>Rev.</span><input type="text" id="fm-rev" placeholder="Rev.1"></label>
+      <label><span data-en="Date">วันที่</span><input type="text" id="fm-date"></label>
+      <label><span>Simulated by</span><input type="text" id="fm-simBy"></label>
+      <label><span>Sold by</span><input type="text" id="fm-soldBy"></label>
+      <label><span data-en="Company (cover)">บริษัท (หน้าปก)</span><input type="text" id="fm-company"></label>
+      <label><span data-en="Division (cover)">ฝ่าย (หน้าปก)</span><input type="text" id="fm-division"></label>
+    </div>
+    <div class="fm-row fm-logo"><span data-en="Logo (remembered in this browser)">โลโก้ (จำไว้กับเบราว์เซอร์)</span>
+      <img id="fm-logo-img" alt="" hidden><label class="ghost mini btn-like"><input type="file" id="fm-logo" accept="image/png,image/jpeg" hidden><span data-en="Choose image…">เลือกรูป…</span></label>
+      <button class="ghost mini danger" id="fm-logo-clear" hidden data-en="Remove">ลบ</button></div>
+    <label class="fm-row"><input type="checkbox" id="fm-pressure"> <span data-en="Add a pressure section image (like Form04)">เพิ่มภาพหน้าตัดความดัน (แบบ Form04)</span></label>
+    <label class="fm-notes"><span data-en="Remark / conclusion for this job">Remark / ข้อสรุปของงานนี้</span><textarea id="fm-notes" rows="4"></textarea></label>
+    <p class="note" data-en="Images: top view and side section of temperature, 3D, and suction faces are captured automatically for every wind case (batch runs capture them as each case finishes). Suction table: K and °C (°C = K − 273.15 as a formula), coloured by the return-air criteria.">ภาพ: อุณหภูมิมุมบน หน้าตัดด้านข้าง 3D และหน้าคอยล์ดูดลม ถ่ายอัตโนมัติทุกสภาพลม (Batch ถ่ายตอนแต่ละ case เสร็จ) · ตาราง Suction Temp.: K และ °C (°C = K − 273.15 เป็นสูตร) ระบายสีตามเกณฑ์อุณหภูมิลมกลับ</p>
+    <div class="rep-go"><button class="primary" id="fm-go"><svg class="ic"><use href="#i-download"/></svg><span data-en="Download .xlsx">ดาวน์โหลด .xlsx</span></button></div>
+  </div>
+</div>
+
+<!-- แบบ DXF ฉากหลัง -->
+<div class="modal" id="dxf-pop" hidden>
+  <div class="keys-pop dxf-pop" role="dialog" aria-label="แบบ DXF" data-en-label="DXF drawing">
+    <button class="keys-x" title="ปิด (Esc)" data-en-title="Close (Esc)" aria-label="ปิด" data-en-label="Close">×</button>
+    <h3 data-en="DXF drawing (underlay)">แบบ DXF ฉากหลัง</h3>
+    <p class="note" data-en="The drawing is shown on the ground. While drawing walls or placing objects the cursor snaps to line end points (orange ring; hold Alt to stop snapping). Pick a layer's “Convert to” to create walls, louvers, buildings or CDUs from it. ASCII DXF: LINE, POLYLINE, ARC, CIRCLE and blocks.">แบบแสดงบนพื้น ขณะวาดผนังหรือวางวัตถุ เมาส์จะดูดเข้าจุดปลายเส้น (วงสีส้ม · กด Alt ค้างเพื่อไม่ดูด) · เลือก “แปลงเป็น” ของเลเยอร์เพื่อสร้างผนัง louver อาคาร หรือ CDU จากเส้นในเลเยอร์นั้น · รองรับ DXF แบบ ASCII: LINE, POLYLINE, ARC, CIRCLE และบล็อก</p>
+    <div class="dxf-file"><button id="dxf-pick" class="primary"><svg class="ic"><use href="#i-open"/></svg><span data-en="Choose DXF file…">เลือกไฟล์ DXF…</span></button> <span id="dxf-name" class="muted"></span>
+      <input type="file" id="dxf-file" accept=".dxf" hidden></div>
+    <div id="dxf-body" hidden>
+      <div class="rep-h" data-en="Units and position">หน่วยและตำแหน่ง</div>
+      <div class="dxf-grid">
+        <label><span data-en="Drawing units">หน่วยของแบบ</span> <select id="dxf-unit"><option value="mm" data-en="millimetre">มิลลิเมตร</option><option value="cm" data-en="centimetre">เซนติเมตร</option><option value="m" data-en="metre">เมตร</option><option value="in" data-en="inch">นิ้ว</option><option value="ft" data-en="foot">ฟุต</option></select></label>
+        <label><span data-en="Shift x (m)">เลื่อน x (ม.)</span> <input type="number" id="dxf-dx" step="0.1"></label>
+        <label><span data-en="Shift z (m)">เลื่อน z (ม.)</span> <input type="number" id="dxf-dz" step="0.1"></label>
+        <label><span data-en="Rotate (°)">หมุน (°)</span> <input type="number" id="dxf-rot" step="1"></label>
+        <button class="ghost mini" id="dxf-fit" data-en="Top-left corner to (0, 0)">มุมซ้ายบนของแบบไปที่ (0, 0)</button>
+      </div>
+      <div class="dxf-grid">
+        <label><input type="checkbox" id="dxf-show"> <span data-en="Show drawing">แสดงแบบ</span></label>
+        <label><input type="checkbox" id="dxf-snap"> <span data-en="Snap to end points">ดูดจุดปลายเส้น</span></label>
+        <label><span data-en="Opacity">ความเข้ม</span> <input type="range" id="dxf-op" min="0.15" max="1" step="0.05"></label>
+      </div>
+      <div class="rep-h" data-en="Layers">เลเยอร์</div>
+      <div class="table-wrap dxf-layers"><table class="cmp-table" id="dxf-layers"><thead><tr><th></th><th data-en="Layer">เลเยอร์</th><th class="n" data-en="Lines">เส้น</th><th data-en="Convert to">แปลงเป็น</th></tr></thead><tbody></tbody></table></div>
+      <div class="dxf-grid">
+        <label><span data-en="Wall height (m)">ผนังสูง (ม.)</span> <input type="number" id="dxf-wallH" step="0.1" min="0.1"></label>
+        <label><span data-en="Wall thickness (m)">ผนังหนา (ม.)</span> <input type="number" id="dxf-thick" step="0.05" min="0.05"></label>
+        <label><span data-en="Louver open %">Louver เปิด %</span> <input type="number" id="dxf-louver" step="5" min="0" max="100"></label>
+        <label><span data-en="Building height (m)">อาคารสูง (ม.)</span> <input type="number" id="dxf-bldgH" step="0.5" min="0.5"></label>
+      </div>
+      <p class="note" id="dxf-count"></p>
+      <div class="rep-go dxf-act"><button class="ghost danger" id="dxf-remove" data-en="Remove drawing">ลบแบบ</button><button class="primary" id="dxf-convert" data-en="Convert to objects">แปลงเป็นวัตถุ</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Batch: รันหลายทางเลือกต่อกัน -->
+<div class="modal" id="batch-pop" hidden>
+  <div class="keys-pop batch-pop" role="dialog" aria-label="Batch" data-en-label="Batch">
+    <button class="keys-x" title="ปิด (Esc)" data-en-title="Close (Esc)" aria-label="ปิด" data-en-label="Close">×</button>
+    <h3 data-en="Batch — run several options automatically">Batch — รันหลายทางเลือกต่อกันอัตโนมัติ</h3>
+    <p class="note" data-en="Every combination of the values below becomes one case (e.g. 3 louver values × 4 wind directions = 12 cases). Each case runs until it converges, then its results and two images (your current view + Top) are kept and the next case starts. The original model is restored at the end. Set the view, display mode and section before starting.">ทุกชุดค่าผสมของตัวแปรด้านล่างเป็น 1 case (เช่น louver 3 ค่า × ลม 4 ทิศ = 12 case) คำนวณทีละ case จนลู่เข้า แล้วเก็บผลและภาพ 2 มุม (มุมมองปัจจุบัน + Top) ก่อนเริ่ม case ถัดไป จบแล้วคืนแบบตั้งต้น · ตั้งมุมมอง รูปแบบกราฟิก และระนาบหน้าตัดให้เรียบร้อยก่อนเริ่ม</p>
+    <div class="rep-h" data-en="Variables">ตัวแปรที่ปรับ</div>
+    <div id="bt-vars"></div>
+    <div class="bt-add" id="bt-add"></div>
+    <div class="rep-h" data-en="Wind">ลม</div>
+    <div class="bt-wind">
+      <label><input type="checkbox" id="bt-wind"> <span data-en="4 wind directions: N, E, S, W">ลม 4 ทิศ: เหนือ ตะวันออก ใต้ ตะวันตก</span></label>
+      <label><input type="checkbox" id="bt-calm"> <span data-en="+ no-wind case">+ กรณีไม่มีลม</span></label>
+      <label><span data-en="Speed (m/s)">ความเร็ว (m/s)</span> <input type="number" id="bt-wspeed" step="0.5" min="0.5" max="10"></label>
+    </div>
+    <p class="note" data-en="The wind profile (terrain) and other settings come from the Settings tab.">โปรไฟล์ลมตามความสูงและค่าอื่นใช้ตามแท็บ ตั้งค่า</p>
+    <div class="rep-h" data-en="Cases">รายการ case</div>
+    <div id="bt-preview"></div>
+    <div class="rep-go"><button class="primary" id="bt-go"><svg class="ic"><use href="#i-play"/></svg><span data-en="Start batch">เริ่ม Batch</span></button></div>
   </div>
 </div>
 

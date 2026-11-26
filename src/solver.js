@@ -63,7 +63,9 @@ export class Solver extends SolverBase {
     // ทิศลมแบบอุตุนิยมวิทยา: "พัดมาจาก" — 0° = จากทิศเหนือ (−z) พัดไปทาง +z
     this.wx = -Math.sin(wr) * this.windSpeed;
     this.wz = Math.cos(wr) * this.windSpeed;
-    this.tMax = params.tMax || 1800;   // เพดานกันไม่จบ — ปกติหยุดเมื่อผลลู่เข้า
+    this.windProf = params.wind || null;   // โปรไฟล์ลมตามความสูง (wind.js)
+    this.tMax = params.tMax || 1800;
+    this._initStop(params);   // เพดานกันไม่จบ — ปกติหยุดเมื่อผลลู่เข้า
     this.rho = airRho(this.amb);
     this.cp = AIR_CP;
     this.beta = 1 / (this.amb + 273.15);
@@ -83,8 +85,9 @@ export class Solver extends SolverBase {
     this.scratch = A(Float64Array, this.threads * (2 * this.NX * this.NY + 2 * this.NX));
     this.par = A(Float64Array, 32);
     // การเตรียมกริด (หน้าที่กำหนดความเร็ว louver ขอบสมมาตร สัมประสิทธิ์ Poisson) ใช้ร่วมกับ solver แบบ GPU
-    const prep = new GridPrep(mesh, { speed: this.windSpeed, wx: this.wx, wz: this.wz });
+    const prep = new GridPrep(mesh, { speed: this.windSpeed, wx: this.wx, wz: this.wz, ...(this.windProf || {}) });
     this.fx.set(prep.fx); this.pm.set(prep.pm); this.idg.set(prep.idg);
+    this.windRow = Float64Array.from({ length: this.NY }, (_, j) => prep.windAtRow(j));
     Object.assign(this, {
       fixList: prep.fixList, porous: prep.porous, mirror: prep.mirror, nFluid: prep.nFluid, omega: prep.omega,
       fanRate: prep.fanRate, fanVmax: prep.fanVmax,
@@ -119,8 +122,6 @@ export class Solver extends SolverBase {
 
   dispose() { this.k?.dispose?.(); }
 
-  windAt(y) { return 1; }   // ลมเข้าแบบสม่ำเสมอ (ดู GridPrep.windAt)
-
   #applyMirror() {
     for (const a of ['u', 'v', 'w']) {
       const m = this.mirror[a], f = this[a];
@@ -144,9 +145,9 @@ export class Solver extends SolverBase {
     this.#applyFixed();
     // เริ่มจากสนามลมธรรมชาติ ช่วยให้เข้าสู่สภาวะคงตัวเร็วขึ้น
     if (this.windSpeed > 0.01) {
-      const fx = this.fx, p = this.windAt(0);
+      const fx = this.fx, row = this.windRow, { sy, NY } = this;
       for (let c = 0; c < N; c++) {
-        const f = fx[c];
+        const f = fx[c], p = row[((c / sy) | 0) % NY];
         if (!(f & 1)) u[c] = this.wx * p;
         if (!(f & 4)) w[c] = this.wz * p;
       }

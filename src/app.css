@@ -740,3 +740,42 @@ body.model-locked .tool:not([data-tool="select"]) { opacity: .4; }
 .rep-act { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
 .rep-act .spacer { flex: 1; }
 .inlet-bar { display: inline-block; width: 110px; height: 10px; border-radius: 3px; vertical-align: -1px; }
+
+/* ───────── Batch ───────── */
+.batch-pop { max-width: 760px; }
+.bt-var { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(120px, 1fr) minmax(150px, 1.2fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); }
+.bt-var label { display: flex; gap: 6px; align-items: center; font-size: 12.5px; }
+.bt-var input[type=text] { flex: 1; min-width: 0; }
+.bt-add { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.bt-wind { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; font-size: 13px; }
+.bt-wind input[type=number] { width: 70px; }
+.bt-list { max-height: 180px; overflow: auto; margin: 4px 0; padding-left: 22px; font-size: 12.5px; }
+.warn-text { color: var(--bad, #e5433b); }
+.batch-card .bt-act { white-space: nowrap; display: flex; gap: 4px; }
+.wind4 { margin-top: 10px; }
+.wind4 td.worst { font-weight: 700; outline: 2px solid var(--warn, #f5c518); outline-offset: -2px; }
+.case-vars { font-weight: 600; margin: 8px 0 2px; }
+@media (max-width: 640px) { .bt-var { grid-template-columns: 1fr; } }
+
+/* ───────── แบบ DXF ฉากหลัง ───────── */
+.dxf-pop { max-width: 720px; }
+.dxf-file { display: flex; gap: 10px; align-items: center; margin: 6px 0 4px; flex-wrap: wrap; }
+.dxf-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 6px 0; font-size: 13px; }
+.dxf-grid label { display: flex; gap: 6px; align-items: center; }
+.dxf-grid input[type=number] { width: 80px; }
+.dxf-layers { max-height: 240px; overflow: auto; }
+.swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.dxf-act { display: flex; justify-content: space-between; }
+
+/* ───────── รายงานแบบฟอร์ม Excel ───────── */
+.form-pop { max-width: 760px; }
+.fm-row { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin: 6px 0; font-size: 13px; }
+.fm-card { flex: 1 1 260px; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 8px; cursor: pointer; }
+.fm-card small { grid-column: 2; color: var(--muted); font-size: 12px; }
+.fm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; font-size: 13px; }
+.fm-grid label { display: flex; flex-direction: column; gap: 2px; }
+.fm-logo img { height: 36px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 4px; background: #fff; }
+.btn-like { cursor: pointer; display: inline-flex; align-items: center; }
+.fm-notes { display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin-top: 6px; }
+.fm-notes textarea { width: 100%; font: inherit; }
+@media (max-width: 640px) { .fm-grid { grid-template-columns: 1fr; } }

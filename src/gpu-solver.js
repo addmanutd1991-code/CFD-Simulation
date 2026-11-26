@@ -538,7 +538,9 @@ export class GpuSolver extends SolverBase {
     const wr = (params.windDir || 0) * Math.PI / 180;
     this.wx = -Math.sin(wr) * this.windSpeed;
     this.wz = Math.cos(wr) * this.windSpeed;
+    this.windProf = params.wind || null;   // โปรไฟล์ลมตามความสูง (wind.js)
     this.tMax = params.tMax || 1800;
+    this._initStop(params);
     this.rho = airRho(this.amb);
     this.cp = AIR_CP;
     this.beta = 1 / (this.amb + 273.15);
@@ -569,7 +571,7 @@ export class GpuSolver extends SolverBase {
     const { device, N, NX, NY, NZ, mesh } = this;
     const U = GPUBufferUsage;
     const ST = U.STORAGE | U.COPY_SRC | U.COPY_DST;
-    const prep = new GridPrep(mesh, { speed: this.windSpeed, wx: this.wx, wz: this.wz });
+    const prep = new GridPrep(mesh, { speed: this.windSpeed, wx: this.wx, wz: this.wz, ...(this.windProf || {}) });
     Object.assign(this, { nFluid: prep.nFluid, omega: prep.omega, fanRate: prep.fanRate, fanVmax: prep.fanVmax });
     this.pIters = 40;
 
@@ -591,10 +593,11 @@ export class GpuSolver extends SolverBase {
     for (let q = 0; q < fl.v.idx.length; q++) vel[4 * fl.v.idx[q] + 1] = fl.v.val[q];
     for (let q = 0; q < fl.w.idx.length; q++) vel[4 * fl.w.idx[q] + 2] = fl.w.val[q];
     if (this.windSpeed > 0.01) {
+      const row = Float64Array.from({ length: NY }, (_, j) => prep.windAtRow(j)), sy = this.sy;
       for (let c = 0; c < N; c++) {
-        const f = prep.fx[c];
-        if (!(f & 1)) vel[4 * c] = this.wx;
-        if (!(f & 4)) vel[4 * c + 2] = this.wz;
+        const f = prep.fx[c], p = row[((c / sy) | 0) % NY];
+        if (!(f & 1)) vel[4 * c] = this.wx * p;
+        if (!(f & 4)) vel[4 * c + 2] = this.wz * p;
       }
     }
 

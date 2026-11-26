@@ -8,6 +8,8 @@
  * ผลลัพธ์เป็น typed array ธรรมดา — solver แต่ละแบบคัดลอกไปไว้ในหน่วยความจำของตัวเอง
  */
 
+import { windFactorFn } from './wind.js';
+
 export const FLUID = 0, SOLID = 1, OPEN = 2;
 
 /* ลำดับตารางต้องตรงกับ enum AX_* ใน kernels.c และค่าคงที่ใน gpu-solver.js */
@@ -42,13 +44,15 @@ export function axisTables(f) {
 }
 
 export class GridPrep {
-  /** wind = { speed, wx, wz } (m/s) — ความเร็วลมธรรมชาติที่ขอบต้นลม */
+  /** wind = { speed, wx, wz } (m/s) — ความเร็วลมธรรมชาติที่ขอบต้นลม (ที่ความสูงอ้างอิง)
+   *        + { profile, refHeight, groundElev } — โปรไฟล์ตามความสูง (ดู wind.js) */
   constructor(mesh, wind) {
     Object.assign(this, {
       nx: mesh.nx, ny: mesh.ny, nz: mesh.nz, NX: mesh.NX, NY: mesh.NY, NZ: mesh.NZ, N: mesh.N, sy: mesh.sy, sz: mesh.sz,
     });
     this.type = mesh.type; this.kp = mesh.kp; this.mods = mesh.modules;
     this.windSpeed = wind.speed; this.wx = wind.wx; this.wz = wind.wz;
+    this.windFn = windFactorFn(wind.profile ? wind : {});
     this.axes = [mesh.xf, mesh.yf, mesh.zf].map(axisTables);
     this.fx = new Uint8Array(this.N);      // บิต 1/2/4 = หน้า u/v/w ด้านลบของเซลล์ถูกกำหนดความเร็ว
     this.pm = new Uint8Array(this.N);      // บิตของหน้าอิสระหกด้านของเซลล์อากาศ
@@ -59,10 +63,11 @@ export class GridPrep {
     this.buildProjection();
   }
 
-  windAt(y) {
-    // ลมเข้าแบบสม่ำเสมอ: ความเร็วเท่ากันทุกระดับความสูงทั่วทั้งระนาบขอบต้นลม
-    return 1;
-  }
+  /** ตัวคูณความเร็วลมที่ความสูง y (ม. ในโดเมน) — 1 เมื่อเป็นลมสม่ำเสมอ */
+  windAt(y) { return this.windFn(y); }
+
+  /** ตัวคูณความเร็วลมของชั้น j (ใช้กับสนามลมเริ่มต้นของ solver) */
+  windAtRow(j) { return this.windFn(this.ax(1, AXT.C, j)); }
 
   /** ตารางของแกน a (0 = x, 1 = y, 2 = z) ชนิด q ที่ดัชนี i */
   ax(a, q, i) { const A = this.axes[a]; return A.t[q * A.L + i]; }
