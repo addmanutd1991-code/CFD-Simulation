@@ -50,6 +50,7 @@ const viewer = new Viewer($('#viewport'), {
   onCreate: (type, props) => createObject(type, props),
   onSectionMoved: (pos) => syncSectionUI(pos),
   onProbe: (info) => showProbe(info),
+  onAxisView: (v) => setViewUI(v),
   newCduModel: () => lastUsed.model,
   newCduRot: () => lastUsed.rot,
   newWallHeight: () => lastUsed.wallHeight,
@@ -1563,8 +1564,8 @@ function updateColorbar() {
 /* ───────── Capture ภาพหลายมุมสำหรับรายงาน ───────── */
 
 const captures = [];   // { url, caption }
-const VIEW_NAME = () => L({ '3d': 'มุมมอง 3D', n: '3D จากทิศเหนือ', s: '3D จากทิศใต้', e: '3D จากทิศตะวันออก', w: '3D จากทิศตะวันตก', top: 'มุมมองด้านบน (Top)', px: 'มุมมอง +X', nx: 'มุมมอง −X', py: 'มุมมองด้านบน (Top)', ny: 'มุมมอง −Y (ล่าง)', pz: 'มุมมอง +Z', nz: 'มุมมอง −Z' },
-  { '3d': '3D view', n: '3D from north', s: '3D from south', e: '3D from east', w: '3D from west', top: 'Top view', px: 'View +X', nx: 'View −X', py: 'Top view', ny: 'View −Y (below)', pz: 'View +Z', nz: 'View −Z' });
+const VIEW_NAME = () => L({ '3d': 'มุมมอง 3D', n: '3D จากทิศเหนือ', s: '3D จากทิศใต้', e: '3D จากทิศตะวันออก', w: '3D จากทิศตะวันตก', top: 'มุมมองด้านบน (Top)', iso: 'มุมมอง Isometric', px: 'มุมมอง +X', nx: 'มุมมอง −X', py: 'มุมมองด้านบน (Top)', ny: 'มุมมอง −Y (ล่าง)', pz: 'มุมมอง +Z', nz: 'มุมมอง −Z' },
+  { '3d': '3D view', n: '3D from north', s: '3D from south', e: '3D from east', w: '3D from west', top: 'Top view', iso: 'Isometric view', px: 'View +X', nx: 'View −X', py: 'Top view', ny: 'View −Y (below)', pz: 'View +Z', nz: 'View −Z' });
 const MODE_NAME = { contour: 'Contour', stream: 'Streamline', vector: 'Vector' };
 
 /** ภาพจากมุมมองปัจจุบัน + หัวเรื่องและแถบสี วาดรวมเป็น PNG เดียว */
@@ -3006,7 +3007,7 @@ function bindUI() {
     else if (k === 'p') captureView();
     else if (k === 'g') toggleMesh();
     else if (k === 'i') toggleSuction();
-    else if (k >= '1' && k <= '6') setViewUI(['3d', 'n', 's', 'e', 'w', 'top'][+k - 1]);
+    else if (k >= '1' && k <= '7') setViewUI(['3d', 'n', 's', 'e', 'w', 'top', 'iso'][+k - 1]);
     else if (k === ' ') { e.preventDefault(); startOrToggle(); }
     else if (k.startsWith('arrow') && selected()) {
       e.preventDefault();

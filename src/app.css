@@ -337,6 +337,12 @@ a { color: var(--accent); }
 .play:hover:not(:disabled) { background: var(--glass-strong); border-color: var(--accent-2); color: var(--text); }
 .play.on, .play.on:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .play:disabled { opacity: .5; }
+/* แกน X-Y-Z มุมขวาล่าง — คลิกปลายแกนเพื่อมองตามแกน (+X −X +Y −Y +Z −Z) จุดกลาง = กลับ 3D */
+.axis-gizmo {
+  position: absolute; right: 10px; bottom: 50px; z-index: 3; width: 96px; height: 96px;
+  border-radius: 50%; background: var(--glass); border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); touch-action: none;
+}
 .capture-flash { position: absolute; inset: 0; background: #fff; opacity: .55; pointer-events: none; z-index: 5; transition: opacity .35s; }
 
 /* ── แผงด้านขวา ── */
@@ -649,6 +655,7 @@ table.doc td.n, table.doc th.n { text-align: right; font-family: var(--mono); }
   .status { flex-basis: 100%; }
   .vp-bl { width: calc(100% - 20px); }
   .play { bottom: 86px; }
+  .axis-gizmo { bottom: 126px; width: 84px; height: 84px; }
   .side { overflow: visible; }
   .side-pane { overflow: visible; }
   #btn-side { display: none; }
